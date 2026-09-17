@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from workers.current_state import run_current_state_worker
+from workers.history import run_history_worker
 from workers.inventory import run_inventory_worker
 from workers.metrics import run_metrics_worker
 from workers.outbox_dispatcher import run_outbox_dispatcher
@@ -29,6 +30,7 @@ def main() -> None:
         ("inventory", run_inventory_worker),
         ("metrics", run_metrics_worker),
         ("current_state", run_current_state_worker),
+        ("history", run_history_worker),
     ):
         try:
             runner(poll_interval=2, once=True)

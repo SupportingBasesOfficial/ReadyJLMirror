@@ -151,6 +151,19 @@ Real persistence + real Zabbix adapter, implementing the accepted
   `metric_current_state` projection (advances only on newer provider
   clock) + immutable transitions; unreturned targets go `stale` —
   values are never fabricated
+- `POST /sources/{id}/history/poll` (optional `time_from`/`time_till`,
+  ≤24h window) + `GET /sources/{id}/history` + `GET
+  /sources/{id}/history/streams` — `metric_history_sync` ops read
+  bounded `history.get` windows grouped by Zabbix history value type
+- `workers/history.py` — canonical `read_metric_history_window`:
+  history.get (≤512 items, ≤20k rows, ≤24h window) → raw rows captured
+  through a recording reader → repository-bound acceptance (dedup on
+  provider clock) → immutable `metric_observation` reusing the
+  acceptance identity → per-(item, value-type) stream checkpoints
+  (`open`/`gap`/`reconciliation_required`/`finalized`, immutable gap
+  evidence on truncated windows). The same pass projects
+  `history_projection_state='pending'` acceptance envelopes — the
+  History obligation carried by current-state acceptances
 - `POST /sources/{id}/inventory` + `GET /sources/{id}/resources` —
   enqueue `host_inventory_sync` and read canonical resources
 - `workers/inventory.py` — canonical `HostInventoryWorker`:
@@ -167,7 +180,7 @@ Real persistence + real Zabbix adapter, implementing the accepted
 ## What this is NOT yet
 
 - Not production-ready: dev HMAC trust (not SPIFFE), dev auth bypass flag, no real Zabbix/Kafka, no CSRF key ring rotation, dev realm passwords
-- No host inventory/metric/problem/health ingestion yet (next Wave 4 slices), no Alerting/ITSM/Automation/AIOps — those remain governed by the canonical authorization chain
+- No problem/health/event ingestion yet (next Wave 4 slices), no Alerting/ITSM/Automation/AIOps — those remain governed by the canonical authorization chain
 
 ## Submodule
 

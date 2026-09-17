@@ -24,10 +24,13 @@ from shared.db import db_connection
 from shared.monitoring_repo import (
     create_zabbix_source,
     enqueue_current_state_poll,
+    enqueue_history_sync,
     enqueue_metric_definition_poll,
     enqueue_sync_operation,
     get_source,
     list_current_states,
+    list_history_observations,
+    list_history_streams,
     list_metric_definitions,
     list_resources,
     list_sources,
@@ -450,6 +453,87 @@ async def run_current_once() -> dict:
     def _run() -> int:
         with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
             return _process_pending(conn)
+
+    processed = await asyncio.to_thread(_run)
+    return {"processed": processed}
+
+
+# ---------------------------------------------------------------------------
+# Metric history
+# ---------------------------------------------------------------------------
+
+
+@router.post("/sources/{source_id}/history/poll", status_code=202)
+async def enqueue_history_poll(source_id: str, request: Request,
+                               tenant_id: str | None = None,
+                               time_from: int | None = None,
+                               time_till: int | None = None) -> dict:
+    """Enqueue a bounded metric_history_sync window for the source."""
+    import time as _time
+
+    tenant = _authoritative_tenant(request, tenant_id)
+    till = time_till if time_till is not None else int(_time.time())
+    frm = time_from if time_from is not None else till - 3600
+    if frm <= 0 or till < frm or till - frm > 86_400:
+        raise HTTPException(status_code=422, detail="invalid history window")
+    async with db_connection() as conn:
+        op_id = await enqueue_history_sync(
+            conn, tenant, source_id, time_from=frm, time_till=till
+        )
+    if op_id is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    return {
+        "monitoring_sync_operation_id": op_id,
+        "state": "pending",
+        "time_from": frm,
+        "time_till": till,
+    }
+
+
+@router.get("/sources/{source_id}/history")
+async def list_history_endpoint(source_id: str, request: Request,
+                                tenant_id: str | None = None,
+                                limit: int = 500) -> list[dict]:
+    """List immutable historical metric observations for a source."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_connection() as conn:
+        rows = await list_history_observations(
+            conn, tenant, source_id, limit=limit
+        )
+    for r in rows:
+        if r.get("observed_at") is not None:
+            r["observed_at"] = r["observed_at"].isoformat()
+    return rows
+
+
+@router.get("/sources/{source_id}/history/streams")
+async def list_history_streams_endpoint(source_id: str, request: Request,
+                                        tenant_id: str | None = None
+                                        ) -> list[dict]:
+    """List per-stream history checkpoints for a source."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_connection() as conn:
+        rows = await list_history_streams(conn, tenant, source_id)
+    for r in rows:
+        if r.get("updated_at") is not None:
+            r["updated_at"] = r["updated_at"].isoformat()
+    return rows
+
+
+@router.post("/history/run", status_code=200)
+async def run_history_once() -> dict:
+    """Dev trigger: one history pass — drains sync ops and projects
+    pending acceptance envelopes into metric_observation."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available")
+    import asyncio
+
+    import psycopg
+    from workers.history import _process_pending as _run_history
+
+    def _run() -> int:
+        with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
+            return _run_history(conn)
 
     processed = await asyncio.to_thread(_run)
     return {"processed": processed}

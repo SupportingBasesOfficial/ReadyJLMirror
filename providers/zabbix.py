@@ -26,6 +26,7 @@ from jlmirror_monitoring.host_inventory import (
 from jlmirror_monitoring.metric_current_state import (
     ZabbixCurrentValueEvidence,
 )
+from jlmirror_monitoring.metric_history import ZabbixHistoryEvidence
 from jlmirror_monitoring.metric_definitions import (
     ZabbixItemEvidence,
     ZabbixItemOperationalState,
@@ -350,5 +351,54 @@ class ZabbixClient:
             except (TypeError, ValueError) as exc:
                 raise ProviderProtocolError(
                     f"item.get current value failed normalization: {exc}"
+                ) from exc
+        return rows
+
+    def read_history(
+        self,
+        endpoint: AdmittedProviderEndpoint,
+        credential: ResolvedZabbixCredential,
+        *,
+        history_value_type: int,
+        itemids: Sequence[str],
+        time_from: int,
+        time_till: int,
+        max_rows: int,
+    ) -> Sequence[ZabbixHistoryEvidence]:
+        """Bounded history.get window read for one history value type."""
+        result = _rpc(
+            endpoint.api_url,
+            "history.get",
+            {
+                "history": history_value_type,
+                "itemids": list(itemids),
+                "time_from": time_from,
+                "time_till": time_till,
+                "sortfield": ["clock", "ns"],
+                "sortorder": "ASC",
+                "limit": max_rows,
+                "output": ["itemid", "clock", "ns", "value"],
+            },
+            credential.api_token,
+        )
+        if not isinstance(result, list):
+            raise ProviderProtocolError("history.get result is not a list")
+
+        rows: list[ZabbixHistoryEvidence] = []
+        for item in result:
+            if not isinstance(item, dict) or "itemid" not in item:
+                raise ProviderProtocolError("history.get malformed entry")
+            try:
+                rows.append(
+                    ZabbixHistoryEvidence(
+                        itemid=str(item["itemid"]),
+                        clock=int(item["clock"]),
+                        ns=int(item.get("ns", 0)),
+                        raw_value=str(item.get("value", "")),
+                    )
+                )
+            except (TypeError, ValueError) as exc:
+                raise ProviderProtocolError(
+                    f"history.get entry failed normalization: {exc}"
                 ) from exc
         return rows

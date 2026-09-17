@@ -36,14 +36,24 @@ from jlmirror_monitoring.metric_current_state import (
     CurrentStateFailureClass,
     MetricCurrentStateClaim,
     MetricCurrentStateResult,
+    parse_canonical_value as _parse_canonical_value,
 )
 from jlmirror_monitoring.metric_definitions import (
     MetricDefinitionClaim,
     MetricDefinitionFailureClass,
     MetricDefinitionResult,
+    MetricValueKind,
     canonical_value_kind,
 )
-from jlmirror_monitoring.metric_definitions import MetricValueKind
+from jlmirror_monitoring.metric_history import (
+    HistoryCoverageState,
+    HistoryMetricTarget,
+    MetricHistoryClaim,
+    MetricHistoryFailureClass,
+    MetricHistoryResult,
+    MetricHistoryWindow,
+    ZabbixHistoryEvidence,
+)
 from jlmirror_monitoring.source import (
     ConfiguredProviderScope,
     ZabbixProviderConfiguration,
@@ -1833,6 +1843,545 @@ def list_all_pending_current_polls(conn: Connection) -> list[tuple[str, str]]:
          WHERE state = 'pending'
            AND responsibility_kind = 'current_state_poll'
          ORDER BY created_at
+        """
+    )
+    return [tuple(r) for r in cur.fetchall()]
+
+
+_ZABBIX_HISTORY_VALUE_TYPE = {
+    "float": 0,
+    "character": 1,
+    "log": 2,
+    "unsigned": 3,
+    "text": 4,
+}
+
+
+class PgMetricHistoryRepository:
+    """Claim/complete adapter for bounded metric-history window reads.
+
+    Acceptance identity and canonical value parsing are repository-bound
+    (canonical design): the collect validates rows, then completion inserts
+    deduplicated acceptance envelopes and projects them into immutable
+    metric_observation rows that reuse the acceptance identity. Stream
+    checkpoints advance independently per logical stream.
+    """
+
+    def __init__(self, conn: Connection, tenant_id: str) -> None:
+        self._conn = conn
+        self._tenant_id = tenant_id
+
+    def claim_metric_history(
+        self, monitoring_sync_operation_id: str, *, claim_token: str
+    ) -> MetricHistoryClaim:
+        cur = self._conn.execute(
+            """
+            SELECT o.monitoring_source_id, o.source_instance_generation,
+                   o.configuration_revision, o.scope_revision,
+                   o.history_time_from, o.history_time_till,
+                   s.provider_scope_tenant_binding_id,
+                   g.provider_instance_ref, g.provider_base_url,
+                   s.credential_binding_ref
+              FROM monitoring.monitoring_sync_operation o
+              JOIN monitoring.monitoring_source s
+                ON s.tenant_id = o.tenant_id
+               AND s.monitoring_source_id = o.monitoring_source_id
+              JOIN monitoring.monitoring_source_generation g
+                ON g.tenant_id = o.tenant_id
+               AND g.monitoring_source_id = o.monitoring_source_id
+               AND g.source_instance_generation = o.source_instance_generation
+             WHERE o.tenant_id = %s
+               AND o.monitoring_sync_operation_id = %s
+               AND o.state = 'pending'
+               AND o.claim_token IS NULL
+               AND o.responsibility_kind = 'metric_history_sync'
+               AND s.active_source_instance_generation = o.source_instance_generation
+               AND s.configuration_revision = o.configuration_revision
+               AND s.scope_revision = o.scope_revision
+             FOR UPDATE OF o
+            """,
+            (self._tenant_id, monitoring_sync_operation_id),
+        )
+        row = cur.fetchone()
+        if row is None:
+            self._conn.rollback()
+            raise ValueError("monitoring.metric_history_not_claimable")
+
+        (source_id, generation, config_rev, scope_rev, time_from, time_till,
+         _binding, provider_instance_ref, base_url, cred_ref) = row
+
+        cur = self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_sync_operation
+               SET state = 'running', claim_token = %s,
+                   started_at = transaction_timestamp()
+             WHERE tenant_id = %s
+               AND monitoring_sync_operation_id = %s
+               AND state = 'pending' AND claim_token IS NULL
+            """,
+            (claim_token, self._tenant_id, monitoring_sync_operation_id),
+        )
+        if cur.rowcount != 1:
+            self._conn.rollback()
+            raise ValueError("monitoring.metric_history_not_claimable")
+
+        cur = self._conn.execute(
+            """
+            SELECT d.metric_definition_id, d.monitoring_resource_id,
+                   b.provider_external_ref, d.value_kind, b.native_value_type
+              FROM monitoring.metric_definition d
+              JOIN monitoring.metric_definition_provider_binding b
+                ON b.tenant_id = d.tenant_id
+               AND b.metric_definition_id = d.metric_definition_id
+             WHERE d.tenant_id = %s AND d.monitoring_source_id = %s
+               AND d.source_instance_generation = %s
+               AND d.definition_state = 'active'
+               AND d.definition_evidence_state = 'current'
+               AND d.scope_state = 'in_scope'
+               AND b.evidence_state = 'current'
+             ORDER BY b.provider_external_ref
+            """,
+            (self._tenant_id, source_id, generation),
+        )
+        targets: list[HistoryMetricTarget] = []
+        for r in cur.fetchall():
+            history_value_type = _ZABBIX_HISTORY_VALUE_TYPE.get(r[4])
+            if history_value_type is None:
+                continue  # unmapped native type — not a history target
+            targets.append(
+                HistoryMetricTarget(
+                    metric_definition_id=r[0],
+                    monitoring_resource_id=r[1],
+                    provider_external_ref=r[2],
+                    value_kind=MetricValueKind(r[3]),
+                    history_value_type=history_value_type,
+                )
+            )
+
+        self._conn.commit()
+        return MetricHistoryClaim(
+            claim_token=claim_token,
+            tenant_id=self._tenant_id,
+            monitoring_sync_operation_id=monitoring_sync_operation_id,
+            monitoring_source_id=source_id,
+            source_instance_generation=generation,
+            configuration_revision=config_rev,
+            scope_revision=scope_rev,
+            provider_instance_ref=provider_instance_ref,
+            provider_configuration=ZabbixProviderConfiguration(base_url=base_url),
+            credential_binding_ref=cred_ref,
+            targets=tuple(targets),
+            window=MetricHistoryWindow(int(time_from), int(time_till)),
+        )
+
+    def complete_metric_history(
+        self,
+        claim: MetricHistoryClaim,
+        result: MetricHistoryResult,
+        *,
+        raw_rows: Sequence[ZabbixHistoryEvidence] = (),
+    ) -> MetricHistoryResult:
+        cur = self._conn.execute(
+            """
+            SELECT 1
+              FROM monitoring.monitoring_sync_operation o
+              JOIN monitoring.monitoring_source s
+                ON s.tenant_id = o.tenant_id
+               AND s.monitoring_source_id = o.monitoring_source_id
+             WHERE o.tenant_id = %s
+               AND o.monitoring_sync_operation_id = %s
+               AND o.state = 'running'
+               AND o.claim_token = %s
+               AND s.active_source_instance_generation = %s
+               AND s.configuration_revision = %s
+               AND s.scope_revision = %s
+             FOR UPDATE OF o, s
+            """,
+            (
+                claim.tenant_id,
+                claim.monitoring_sync_operation_id,
+                claim.claim_token,
+                claim.source_instance_generation,
+                claim.configuration_revision,
+                claim.scope_revision,
+            ),
+        )
+        if cur.fetchone() is None:
+            self._conn.rollback()
+            raise ValueError("monitoring.metric_history_claim_lost")
+
+        if result.succeeded:
+            self._persist_history_rows(claim, raw_rows)
+
+        # Stream coverage outcome
+        if result.succeeded:
+            coverage = result.coverage_state.value
+        else:
+            coverage = (
+                HistoryCoverageState.GAP.value
+                if result.failure_class is MetricHistoryFailureClass.PAGE_TRUNCATED
+                else HistoryCoverageState.RECONCILIATION_REQUIRED.value
+            )
+        for target in claim.targets:
+            self._conn.execute(
+                """
+                INSERT INTO monitoring.metric_history_stream_state
+                    (tenant_id, monitoring_source_id,
+                     source_instance_generation, provider_external_ref,
+                     history_value_type, metric_definition_id,
+                     coverage_state, checkpoint_revision)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 1)
+                ON CONFLICT (tenant_id, monitoring_source_id,
+                             source_instance_generation, provider_external_ref,
+                             history_value_type)
+                DO UPDATE SET coverage_state = EXCLUDED.coverage_state,
+                              checkpoint_revision =
+                                  metric_history_stream_state.checkpoint_revision + 1,
+                              updated_at = transaction_timestamp()
+                """,
+                (
+                    claim.tenant_id, claim.monitoring_source_id,
+                    claim.source_instance_generation,
+                    target.provider_external_ref, target.history_value_type,
+                    target.metric_definition_id, coverage,
+                ),
+            )
+
+        if result.failure_class is MetricHistoryFailureClass.PAGE_TRUNCATED:
+            for target in claim.targets:
+                self._conn.execute(
+                    """
+                    INSERT INTO monitoring.metric_history_gap_evidence
+                        (tenant_id, history_gap_id, monitoring_source_id,
+                         source_instance_generation, provider_external_ref,
+                         history_value_type, metric_definition_id,
+                         gap_from_clock, gap_through_clock, reason)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            'truncated_window')
+                    """,
+                    (
+                        claim.tenant_id, _opaque("mon-gap"),
+                        claim.monitoring_source_id,
+                        claim.source_instance_generation,
+                        target.provider_external_ref,
+                        target.history_value_type, target.metric_definition_id,
+                        claim.window.time_from, claim.window.time_till,
+                    ),
+                )
+
+        self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_source
+               SET operational_evidence_state = %s,
+                   last_attempt_at = transaction_timestamp(),
+                   last_successful_sync_at = CASE WHEN %s = 'succeeded'
+                       THEN transaction_timestamp()
+                       ELSE last_successful_sync_at END,
+                   updated_at = transaction_timestamp()
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+            """,
+            (
+                result.operational_evidence_state.value,
+                result.operation_state.value,
+                claim.tenant_id, claim.monitoring_source_id,
+            ),
+        )
+        self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_sync_operation
+               SET state = %s, completed_at = transaction_timestamp(),
+                   last_error_class = %s
+             WHERE tenant_id = %s AND monitoring_sync_operation_id = %s
+            """,
+            (
+                result.operation_state.value,
+                result.failure_class.value if result.failure_class else None,
+                claim.tenant_id, claim.monitoring_sync_operation_id,
+            ),
+        )
+        self._conn.commit()
+        return result
+
+    def _persist_history_rows(
+        self,
+        claim: MetricHistoryClaim,
+        raw_rows: Sequence[ZabbixHistoryEvidence],
+    ) -> None:
+        """Accept raw provider rows -> acceptance envelope -> immutable
+        metric_observation, reusing the durable acceptance identity."""
+        from datetime import datetime, timezone
+
+        by_itemid = {t.provider_external_ref: t for t in claim.targets}
+        stream_high: dict[tuple[str, int], tuple[int, int]] = {}
+
+        for row in raw_rows:
+            target = by_itemid.get(row.itemid)
+            if target is None:
+                continue  # unexpected item already rejected by domain collect
+            try:
+                canonical = _parse_canonical_value(target.value_kind, row.raw_value)
+            except ValueError:
+                continue  # unparseable sample — stream coverage marks it
+            observed_at = datetime.fromtimestamp(
+                row.clock + row.ns / 1_000_000_000, tz=timezone.utc
+            )
+            cur = self._conn.execute(
+                """
+                INSERT INTO monitoring.monitoring_metric_observation_acceptance
+                    (tenant_id, observation_id, monitoring_sync_operation_id,
+                     monitoring_source_id, source_instance_generation,
+                     monitoring_resource_id, metric_definition_id,
+                     provider_profile, provider_external_ref, provider_clock,
+                     provider_ns, observed_at, value_kind, canonical_value,
+                     configuration_revision, scope_revision)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'zabbix', %s, %s, %s,
+                        %s, %s, %s::jsonb, %s, %s)
+                ON CONFLICT (tenant_id, monitoring_source_id,
+                             source_instance_generation, provider_external_ref,
+                             provider_clock, provider_ns)
+                DO NOTHING
+                RETURNING observation_id
+                """,
+                (
+                    claim.tenant_id, _opaque("mon-obs"),
+                    claim.monitoring_sync_operation_id,
+                    claim.monitoring_source_id,
+                    claim.source_instance_generation,
+                    target.monitoring_resource_id, target.metric_definition_id,
+                    row.itemid, row.clock, row.ns, observed_at,
+                    target.value_kind.value, _canonical_value_json(canonical),
+                    claim.configuration_revision, claim.scope_revision,
+                ),
+            )
+            accepted = cur.fetchone()
+            if accepted is None:
+                continue  # replayed row — durable dedup
+            observation_id = accepted[0]
+            self._conn.execute(
+                """
+                INSERT INTO monitoring.metric_observation
+                    (tenant_id, observation_id, monitoring_source_id,
+                     source_instance_generation, monitoring_resource_id,
+                     metric_definition_id, provider_profile,
+                     provider_external_ref, provider_clock, provider_ns,
+                     observed_at, accepted_at, value_kind, canonical_value)
+                VALUES (%s, %s, %s, %s, %s, %s, 'zabbix', %s, %s, %s,
+                        %s, transaction_timestamp(), %s, %s::jsonb)
+                ON CONFLICT (tenant_id, observation_id) DO NOTHING
+                """,
+                (
+                    claim.tenant_id, observation_id, claim.monitoring_source_id,
+                    claim.source_instance_generation,
+                    target.monitoring_resource_id, target.metric_definition_id,
+                    row.itemid, row.clock, row.ns, observed_at,
+                    target.value_kind.value, _canonical_value_json(canonical),
+                ),
+            )
+            self._conn.execute(
+                """
+                UPDATE monitoring.monitoring_metric_observation_acceptance
+                   SET history_projection_state = 'projected'
+                 WHERE tenant_id = %s AND observation_id = %s
+                """,
+                (claim.tenant_id, observation_id),
+            )
+            key = (row.itemid, target.history_value_type)
+            prior = stream_high.get(key)
+            if prior is None or (row.clock, row.ns) > prior:
+                stream_high[key] = (row.clock, row.ns)
+
+        for (itemid, value_type), (clock, ns) in stream_high.items():
+            self._conn.execute(
+                """
+                UPDATE monitoring.metric_history_stream_state
+                   SET provisional_clock = GREATEST(provisional_clock, %s),
+                       provisional_ns = CASE
+                           WHEN provisional_clock IS NULL
+                                OR %s > provisional_clock
+                           THEN %s
+                           ELSE provisional_ns END,
+                       safe_clock = GREATEST(safe_clock, %s),
+                       safe_ns = CASE
+                           WHEN safe_clock IS NULL OR %s > safe_clock
+                           THEN %s
+                           ELSE safe_ns END,
+                       updated_at = transaction_timestamp()
+                 WHERE tenant_id = %s AND monitoring_source_id = %s
+                   AND source_instance_generation = %s
+                   AND provider_external_ref = %s
+                   AND history_value_type = %s
+                """,
+                (
+                    clock, clock, ns, clock, clock, ns,
+                    claim.tenant_id, claim.monitoring_source_id,
+                    claim.source_instance_generation, itemid, value_type,
+                ),
+            )
+
+    def project_pending_observations(self, monitoring_source_id: str) -> int:
+        """Project 'pending' acceptance envelopes into metric_observation.
+
+        Consumes the History projection obligation carried by current-state
+        acceptances (history_projection_state='pending'). Returns the number
+        of envelopes projected in this pass.
+        """
+        cur = self._conn.execute(
+            """
+            SELECT a.observation_id, a.source_instance_generation,
+                   a.monitoring_resource_id, a.metric_definition_id,
+                   a.provider_external_ref, a.provider_clock, a.provider_ns,
+                   a.observed_at, a.value_kind, a.canonical_value
+              FROM monitoring.monitoring_metric_observation_acceptance a
+             WHERE a.tenant_id = %s
+               AND a.monitoring_source_id = %s
+               AND a.history_projection_state = 'pending'
+             ORDER BY a.provider_clock, a.provider_ns
+             LIMIT 10000
+             FOR UPDATE OF a SKIP LOCKED
+            """,
+            (self._tenant_id, monitoring_source_id),
+        )
+        rows = cur.fetchall()
+        for r in rows:
+            self._conn.execute(
+                """
+                INSERT INTO monitoring.metric_observation
+                    (tenant_id, observation_id, monitoring_source_id,
+                     source_instance_generation, monitoring_resource_id,
+                     metric_definition_id, provider_profile,
+                     provider_external_ref, provider_clock, provider_ns,
+                     observed_at, accepted_at, value_kind, canonical_value)
+                VALUES (%s, %s, %s, %s, %s, %s, 'zabbix', %s, %s, %s,
+                        %s, transaction_timestamp(), %s, %s)
+                ON CONFLICT (tenant_id, observation_id) DO NOTHING
+                """,
+                (
+                    self._tenant_id, r[0], monitoring_source_id, r[1],
+                    r[2], r[3], r[4], r[5], r[6], r[7], r[8],
+                    r[9] if isinstance(r[9], str) else json.dumps(r[9]),
+                ),
+            )
+            self._conn.execute(
+                """
+                UPDATE monitoring.monitoring_metric_observation_acceptance
+                   SET history_projection_state = 'projected'
+                 WHERE tenant_id = %s AND observation_id = %s
+                """,
+                (self._tenant_id, r[0]),
+            )
+        self._conn.commit()
+        return len(rows)
+
+
+async def enqueue_history_sync(
+    conn: AsyncConnection,
+    tenant_id: str,
+    monitoring_source_id: str,
+    *,
+    time_from: int,
+    time_till: int,
+) -> str | None:
+    """Enqueue a bounded metric_history_sync window operation."""
+    cur = await conn.execute(
+        """
+        SELECT s.active_source_instance_generation, s.configuration_revision,
+               s.scope_revision
+          FROM monitoring.monitoring_source s
+         WHERE s.tenant_id = %s AND s.monitoring_source_id = %s
+           AND s.monitoring_source_state = 'active'
+        """,
+        (tenant_id, monitoring_source_id),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return None
+    op_id = _opaque("mon-op")
+    await conn.execute(
+        """
+        INSERT INTO monitoring.monitoring_sync_operation
+            (tenant_id, monitoring_sync_operation_id, monitoring_source_id,
+             source_instance_generation, responsibility_kind,
+             configuration_revision, scope_revision,
+             history_time_from, history_time_till)
+        VALUES (%s, %s, %s, %s, 'metric_history_sync', %s, %s, %s, %s)
+        """,
+        (tenant_id, op_id, monitoring_source_id, row[0], row[1], row[2],
+         time_from, time_till),
+    )
+    await conn.commit()
+    return op_id
+
+
+async def list_history_observations(
+    conn: AsyncConnection, tenant_id: str, source_id: str,
+    *, limit: int = 500,
+) -> list[dict]:
+    cur = await conn.execute(
+        """
+        SELECT o.metric_definition_id, d.name, o.value_kind,
+               o.canonical_value, o.provider_external_ref, o.provider_clock,
+               o.provider_ns, o.observed_at
+          FROM monitoring.metric_observation o
+          JOIN monitoring.metric_definition d
+            ON d.tenant_id = o.tenant_id
+           AND d.metric_definition_id = o.metric_definition_id
+         WHERE o.tenant_id = %s AND o.monitoring_source_id = %s
+         ORDER BY o.provider_clock DESC, o.provider_ns DESC
+         LIMIT %s
+        """,
+        (tenant_id, source_id, min(limit, 5000)),
+    )
+    keys = ("metric_definition_id", "name", "value_kind", "canonical_value",
+            "provider_external_ref", "provider_clock", "provider_ns",
+            "observed_at")
+    return [dict(zip(keys, r)) for r in await cur.fetchall()]
+
+
+async def list_history_streams(
+    conn: AsyncConnection, tenant_id: str, source_id: str
+) -> list[dict]:
+    cur = await conn.execute(
+        """
+        SELECT provider_external_ref, history_value_type,
+               metric_definition_id, provisional_clock, provisional_ns,
+               safe_clock, safe_ns, coverage_state, checkpoint_revision,
+               updated_at
+          FROM monitoring.metric_history_stream_state
+         WHERE tenant_id = %s AND monitoring_source_id = %s
+         ORDER BY provider_external_ref
+        """,
+        (tenant_id, source_id),
+    )
+    keys = ("provider_external_ref", "history_value_type",
+            "metric_definition_id", "provisional_clock", "provisional_ns",
+            "safe_clock", "safe_ns", "coverage_state", "checkpoint_revision",
+            "updated_at")
+    return [dict(zip(keys, r)) for r in await cur.fetchall()]
+
+
+def list_all_pending_history_syncs(conn: Connection) -> list[tuple[str, str]]:
+    """All tenants' pending metric_history_sync ops — (tenant_id, op_id)."""
+    cur = conn.execute(
+        """
+        SELECT tenant_id, monitoring_sync_operation_id
+          FROM monitoring.monitoring_sync_operation
+         WHERE state = 'pending'
+           AND responsibility_kind = 'metric_history_sync'
+         ORDER BY created_at
+        """
+    )
+    return [tuple(r) for r in cur.fetchall()]
+
+
+def list_source_ids_with_pending_projection(
+    conn: Connection,
+) -> list[tuple[str, str]]:
+    """(tenant_id, monitoring_source_id) with 'pending' acceptance envelopes."""
+    cur = conn.execute(
+        """
+        SELECT DISTINCT tenant_id, monitoring_source_id
+          FROM monitoring.monitoring_metric_observation_acceptance
+         WHERE history_projection_state = 'pending'
         """
     )
     return [tuple(r) for r in cur.fetchall()]
