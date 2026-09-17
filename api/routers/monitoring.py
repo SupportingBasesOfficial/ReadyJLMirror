@@ -23,8 +23,10 @@ from shared.config import settings
 from shared.db import db_connection
 from shared.monitoring_repo import (
     create_zabbix_source,
+    enqueue_metric_definition_poll,
     enqueue_sync_operation,
     get_source,
+    list_metric_definitions,
     list_resources,
     list_sources,
 )
@@ -339,6 +341,57 @@ async def run_inventory_once() -> dict:
 
     import psycopg
     from workers.inventory import _process_pending
+
+    def _run() -> int:
+        with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
+            return _process_pending(conn)
+
+    processed = await asyncio.to_thread(_run)
+    return {"processed": processed}
+
+
+# ---------------------------------------------------------------------------
+# Metric definitions
+# ---------------------------------------------------------------------------
+
+
+@router.post("/sources/{source_id}/metrics/poll", status_code=202)
+async def enqueue_metric_poll(source_id: str, request: Request,
+                              tenant_id: str | None = None) -> dict:
+    """Enqueue the next `metric_definition_poll` for the source.
+
+    Assigns the next poll generation within the source's current epoch;
+    the metrics worker claims it and collects item.get.
+    """
+    tenant = _authoritative_tenant(request, tenant_id)
+    try:
+        async with db_connection() as conn:
+            op_id = await enqueue_metric_definition_poll(
+                conn, tenant_id=tenant, source_id=source_id
+            )
+    except ValueError:
+        raise HTTPException(status_code=404, detail="source not found")
+    return {"monitoring_sync_operation_id": op_id, "state": "pending"}
+
+
+@router.get("/sources/{source_id}/metrics")
+async def list_metrics_endpoint(source_id: str, request: Request,
+                                tenant_id: str | None = None) -> list[dict]:
+    """List canonical metric definitions for a source."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_connection() as conn:
+        return await list_metric_definitions(conn, tenant, source_id)
+
+
+@router.post("/metrics/run", status_code=200)
+async def run_metrics_once() -> dict:
+    """Dev trigger: one metric-definition poll pass over pending ops."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available")
+    import asyncio
+
+    import psycopg
+    from workers.metrics import _process_pending
 
     def _run() -> int:
         with psycopg.connect(settings.db_dsn, autocommit=False) as conn:

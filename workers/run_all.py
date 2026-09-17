@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from workers.inventory import run_inventory_worker
+from workers.metrics import run_metrics_worker
 from workers.outbox_dispatcher import run_outbox_dispatcher
 from workers.reconciliation import run_reconciliation_worker
 from workers.validation import run_validation_worker
@@ -25,6 +26,7 @@ def main() -> None:
     for name, runner in (
         ("validation", run_validation_worker),
         ("inventory", run_inventory_worker),
+        ("metrics", run_metrics_worker),
     ):
         try:
             runner(poll_interval=2, once=True)

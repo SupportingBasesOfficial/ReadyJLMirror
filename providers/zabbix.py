@@ -23,6 +23,12 @@ from jlmirror_monitoring.host_inventory import (
     ZabbixNamedRefEvidence,
     ZabbixTagEvidence,
 )
+from jlmirror_monitoring.metric_definitions import (
+    ZabbixItemEvidence,
+    ZabbixItemOperationalState,
+    ZabbixItemSnapshot,
+    ZabbixNativeValueType,
+)
 from jlmirror_monitoring.validation_worker import (
     AdmittedProviderEndpoint,
     ProviderAuthenticationError,
@@ -33,6 +39,24 @@ from jlmirror_monitoring.validation_worker import (
 )
 
 _INTERFACE_TYPES = {1: "agent", 2: "snmp", 3: "ipmi", 4: "jmx"}
+
+# Zabbix item value_type -> normalized native value type
+_ITEM_VALUE_TYPES = {
+    0: ZabbixNativeValueType.FLOAT,
+    1: ZabbixNativeValueType.CHARACTER,
+    2: ZabbixNativeValueType.LOG,
+    3: ZabbixNativeValueType.UNSIGNED,
+    4: ZabbixNativeValueType.TEXT,
+}
+
+
+def _item_operational_state(item: dict) -> ZabbixItemOperationalState:
+    # Zabbix: status 0=enabled 1=disabled; state 0=normal 1=unsupported
+    if str(item.get("status", "0")) == "1":
+        return ZabbixItemOperationalState.DISABLED
+    if str(item.get("state", "0")) == "1":
+        return ZabbixItemOperationalState.UNSUPPORTED
+    return ZabbixItemOperationalState.ENABLED
 
 logger = logging.getLogger(__name__)
 
@@ -221,4 +245,61 @@ class ZabbixClient:
         except (KeyError, AttributeError, TypeError, ValueError) as exc:
             raise ProviderProtocolError(
                 f"host.get entry failed normalization: {exc}"
+            ) from exc
+
+    def item_get(
+        self,
+        endpoint: AdmittedProviderEndpoint,
+        credential: ResolvedZabbixCredential,
+        host_group_refs: Sequence[str],
+        *,
+        max_items: int,
+    ) -> ZabbixItemSnapshot:
+        """Fetch items for the configured groups as normalized evidence.
+
+        Same truncation contract as host_get: `limit: max_items + 1`
+        detects an incomplete snapshot without constructing one.
+        """
+        result = _rpc(
+            endpoint.api_url,
+            "item.get",
+            {
+                "output": [
+                    "itemid", "hostid", "name", "key_",
+                    "units", "value_type", "state", "status",
+                ],
+                "groupids": list(host_group_refs),
+                "limit": max_items + 1,
+            },
+            credential.api_token,
+        )
+        if not isinstance(result, list):
+            raise ProviderProtocolError("item.get result is not a list")
+
+        complete = len(result) <= max_items
+        items = [self._map_item(item) for item in result[:max_items]]
+        return ZabbixItemSnapshot(items=tuple(items), complete=complete)
+
+    @staticmethod
+    def _map_item(item: Any) -> ZabbixItemEvidence:
+        if not isinstance(item, dict) or "itemid" not in item:
+            raise ProviderProtocolError("item.get malformed entry")
+        try:
+            native = _ITEM_VALUE_TYPES.get(int(item.get("value_type", -1)))
+            if native is None:
+                raise ProviderProtocolError(
+                    f"item.get unknown value_type {item.get('value_type')}"
+                )
+            return ZabbixItemEvidence(
+                itemid=str(item["itemid"]),
+                hostid=str(item["hostid"]),
+                name=str(item.get("name", "")),
+                key=str(item.get("key_", "")),
+                unit=str(item.get("units", "")),
+                native_value_type=native,
+                operational_state=_item_operational_state(item),
+            )
+        except (KeyError, AttributeError, TypeError, ValueError) as exc:
+            raise ProviderProtocolError(
+                f"item.get entry failed normalization: {exc}"
             ) from exc

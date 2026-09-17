@@ -132,6 +132,15 @@ Real persistence + real Zabbix adapter, implementing the accepted
   → fenced complete → `monitoring_resource` upsert + immutable
   snapshot/provider evidence; absent hosts become `removed` only on
   complete snapshots — degraded evidence never removes resources
+- `POST /sources/{id}/metrics/poll` + `GET /sources/{id}/metrics` —
+  `metric_definition_poll` ops carry (epoch, generation); completion
+  requires the source to still sit at the predecessor generation, then
+  the slot is consumed — strictly monotonic poll ordering
+- `workers/metrics.py` — canonical `MetricDefinitionWorker`:
+  item.get → `metric_definition` + `provider_binding` upsert; unseen
+  definitions retire; items bound to non-canonical hosts reject the
+  whole snapshot (`host_association_invalid`, fail closed); native
+  value-type drift marks evidence `reconciliation_required`
 - `POST /sources/{id}/inventory` + `GET /sources/{id}/resources` —
   enqueue `host_inventory_sync` and read canonical resources
 - `workers/inventory.py` — canonical `HostInventoryWorker`:
