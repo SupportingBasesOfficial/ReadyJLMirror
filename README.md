@@ -13,6 +13,12 @@ The first authorized product slice (`g1.identity-tenant-protected-shell@1`):
 - **Durable session authority** — PostgreSQL (`g1.browser_sessions`); revocation survives restarts
 - **CSRF double-submit** — token bound to the session row, required on all mutations
 - **Tenant binding via membership** — `tenant_id` from the client is never authority; only active membership in an active tenant binds a session
+- **Tenant isolation at the DB** — `monitoring.*` is ENABLE+FORCE RLS;
+  `jlmirror_app` (api/bff) only sees rows where
+  `jlmirror.tenant_id` session GUC matches; `jlmirror_worker`
+  (BYPASSRLS) carries system authority for fenced ops;
+  `jlmirror_owner` retains migration authority. `db_tenant_connection`
+  sets/resets the GUC around every tenant-scoped request
 - **Fail-closed** — unknown principals, revoked sessions, suspended tenants, stale/expired state all deny without existence leakage
 - **Protected shell** — minimal UI with explicit states: `loading / unauthenticated / needs_tenant / ready / forbidden / unavailable`
 - **Signed internal context** — BFF→API requests carry an HMAC-signed principal/session/tenant context (dev trust model; production = SPIFFE/SPIRE per D3 candidates)

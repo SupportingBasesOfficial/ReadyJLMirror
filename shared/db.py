@@ -80,13 +80,40 @@ async def check_db_ready() -> bool:
 async def set_tenant_context(cursor: AsyncCursor, tenant_id: str) -> None:
     """Set the tenant context for RLS on the current transaction.
 
-    This must be called inside a transaction before any tenant-scoped query.
-    The exact mechanism (set_config, SET ROLE, etc.) depends on the SQL
-    bootstrap in vendor/ProjectJLMirror/sql/wave1.
+    Must be called inside a transaction before any tenant-scoped query —
+    monitoring.* tables are FORCE RLS for the app role.
     """
     await cursor.execute(
-        "SELECT set_config('app.tenant_id', %s, true)", (tenant_id,)
+        "SELECT set_config('jlmirror.tenant_id', %s, true)", (tenant_id,)
     )
+
+
+@asynccontextmanager
+async def db_tenant_connection(tenant_id: str) -> AsyncIterator[AsyncConnection]:
+    """Yield a pooled connection with the tenant GUC set session-wide.
+
+    The app role is FORCE RLS on monitoring.* tables, so every
+    tenant-scoped statement must run under `jlmirror.tenant_id`. The GUC
+    is set at session level (survives the internal commits that repo
+    helpers perform) and reset before the connection returns to the
+    pool so no tenant leaks across requests.
+    """
+    pool = get_pool()
+    if pool is None:
+        raise RuntimeError("Database pool is not initialized")
+    async with pool.connection() as conn:
+        await conn.execute(
+            "SELECT set_config('jlmirror.tenant_id', %s, false)",
+            (tenant_id,),
+        )
+        try:
+            yield conn
+        finally:
+            try:
+                await conn.execute(
+                    "SELECT set_config('jlmirror.tenant_id', '', false)")
+            except Exception:
+                pass
 
 
 @asynccontextmanager

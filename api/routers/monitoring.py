@@ -20,7 +20,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
 
 from shared.config import settings
-from shared.db import db_connection
+from shared.db import db_connection, db_tenant_connection
 from shared.monitoring_repo import (
     create_zabbix_source,
     enqueue_current_state_poll,
@@ -214,7 +214,7 @@ async def create_source(body: SourceCreateRequest, request: Request) -> SourceRe
 
     key = body.idempotency_key or f"idem-{secrets.token_urlsafe(16)}"
     try:
-        async with db_connection() as conn:
+        async with db_tenant_connection(tenant_id) as conn:
             result = await create_zabbix_source(
                 conn,
                 tenant_id=tenant_id,
@@ -245,7 +245,7 @@ class SourceDetailResponse(BaseModel):
 @router.get("/sources", response_model=list[SourceDetailResponse])
 async def list_sources_endpoint(request: Request, tenant_id: str | None = None) -> list[SourceDetailResponse]:
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant) as conn:
         rows = await list_sources(conn, tenant)
     return [
         SourceDetailResponse(
@@ -264,7 +264,7 @@ async def list_sources_endpoint(request: Request, tenant_id: str | None = None) 
 @router.get("/sources/{source_id}")
 async def get_source_endpoint(source_id: str, request: Request, tenant_id: str | None = None) -> dict:
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant) as conn:
         row = await get_source(conn, tenant, source_id)
     if row is None:
         raise HTTPException(status_code=404, detail="source not found")
@@ -316,7 +316,7 @@ async def enqueue_inventory(source_id: str, request: Request,
     """
     tenant = _authoritative_tenant(request, tenant_id)
     try:
-        async with db_connection() as conn:
+        async with db_tenant_connection(tenant) as conn:
             op_id = await enqueue_sync_operation(
                 conn, tenant_id=tenant, source_id=source_id,
                 responsibility_kind="host_inventory_sync",
@@ -331,7 +331,7 @@ async def list_resources_endpoint(source_id: str, request: Request,
                                   tenant_id: str | None = None) -> list[dict]:
     """List canonical monitored resources for a source."""
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant) as conn:
         rows = await list_resources(conn, tenant, source_id)
     for r in rows:
         for k in ("last_observed_at", "removed_at"):
@@ -373,7 +373,7 @@ async def enqueue_metric_poll(source_id: str, request: Request,
     """
     tenant = _authoritative_tenant(request, tenant_id)
     try:
-        async with db_connection() as conn:
+        async with db_tenant_connection(tenant) as conn:
             op_id = await enqueue_metric_definition_poll(
                 conn, tenant_id=tenant, source_id=source_id
             )
@@ -387,7 +387,7 @@ async def list_metrics_endpoint(source_id: str, request: Request,
                                 tenant_id: str | None = None) -> list[dict]:
     """List canonical metric definitions for a source."""
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant) as conn:
         return await list_metric_definitions(conn, tenant, source_id)
 
 
@@ -420,7 +420,7 @@ async def enqueue_current_poll(source_id: str, request: Request,
     """Enqueue the next `current_state_poll` for the source."""
     tenant = _authoritative_tenant(request, tenant_id)
     try:
-        async with db_connection() as conn:
+        async with db_tenant_connection(tenant) as conn:
             op_id = await enqueue_current_state_poll(
                 conn, tenant_id=tenant, source_id=source_id
             )
@@ -434,7 +434,7 @@ async def list_current_endpoint(source_id: str, request: Request,
                                 tenant_id: str | None = None) -> list[dict]:
     """List current metric values for a source."""
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant) as conn:
         rows = await list_current_states(conn, tenant, source_id)
     for r in rows:
         for k in ("observed_at", "accepted_at"):
@@ -479,7 +479,7 @@ async def enqueue_history_poll(source_id: str, request: Request,
     frm = time_from if time_from is not None else till - 3600
     if frm <= 0 or till < frm or till - frm > 86_400:
         raise HTTPException(status_code=422, detail="invalid history window")
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant) as conn:
         op_id = await enqueue_history_sync(
             conn, tenant, source_id, time_from=frm, time_till=till
         )
@@ -499,7 +499,7 @@ async def list_history_endpoint(source_id: str, request: Request,
                                 limit: int = 500) -> list[dict]:
     """List immutable historical metric observations for a source."""
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant) as conn:
         rows = await list_history_observations(
             conn, tenant, source_id, limit=limit
         )
@@ -515,7 +515,7 @@ async def list_history_streams_endpoint(source_id: str, request: Request,
                                         ) -> list[dict]:
     """List per-stream history checkpoints for a source."""
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant) as conn:
         rows = await list_history_streams(conn, tenant, source_id)
     for r in rows:
         if r.get("updated_at") is not None:
@@ -552,7 +552,7 @@ async def enqueue_problem_poll(source_id: str, request: Request,
                                tenant_id: str | None = None) -> dict:
     """Enqueue a problem_state_sync op — requires source evidence 'current'."""
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant) as conn:
         op_id = await enqueue_problem_state_sync(conn, tenant, source_id)
     if op_id is None:
         raise HTTPException(status_code=404, detail="source not found")
@@ -565,7 +565,7 @@ async def list_problems_endpoint(source_id: str, request: Request,
                                  active_only: bool = False) -> list[dict]:
     """List canonical problem projections for a source."""
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant) as conn:
         rows = await list_problems(
             conn, tenant, source_id, active_only=active_only)
     for r in rows:
@@ -603,7 +603,7 @@ async def list_health_endpoint(source_id: str, request: Request,
                                tenant_id: str | None = None) -> list[dict]:
     """List canonical health projections per resource for a source."""
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant) as conn:
         rows = await list_health_projections(conn, tenant, source_id)
     for r in rows:
         for k in ("last_changed_at", "last_evidence_at"):
@@ -642,7 +642,7 @@ async def list_outbox_endpoint(request: Request,
                                limit: int = 100) -> list[dict]:
     """List durable outbox messages (publication audit trail)."""
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant) as conn:
         cur = await conn.execute(
             """
             SELECT record_id, message_id, contract_name, contract_version,

@@ -101,7 +101,7 @@ services:
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: jlmirror
-      DB_USER: jlmirror_app
+      DB_USER: jlmirror_worker
       DB_PASSWORD: jlmirror_dev
     depends_on:
       migrate:
