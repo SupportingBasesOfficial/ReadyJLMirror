@@ -184,6 +184,13 @@ Real persistence + real Zabbix adapter, implementing the accepted
   problem severities) → `health_projection` + immutable transitions;
   `healthy` requires 'current' evidence and no health-affecting active
   problem (also enforced by the DB projection guard)
+- `GET /outbox/messages` + `POST /outbox/run` (dev) — durable
+  transactional outbox: problem state changes and health changes append
+  `domain_event` rows inside the same transaction as the projection
+  mutation; `workers/outbox_dispatcher.py` claims pending rows (lease +
+  SKIP LOCKED), publishes to `ALERTING_WEBHOOK_URL` (or dev-log receipt
+  when unset), and quarantines after 5 attempts — publication can never
+  diverge from platform truth
 - `providers/credentials.py` — env-based dev resolver
   (`ZABBIX_CRED_<REF>`); production = OpenBao/secret manager
 - `providers/egress.py` — dev egress admission (https +

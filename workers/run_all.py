@@ -25,7 +25,7 @@ logging.basicConfig(level=logging.INFO)
 def main() -> None:
     """Run all workers sequentially (dev mode)."""
     logger.info("=== ReadyJLMirror workers starting (dev mode) ===")
-    run_outbox_dispatcher(poll_interval=2, batch_size=3)
+    run_outbox_dispatcher(poll_interval=2, batch_size=3, once=True)
     # Validation + inventory workers need a live DB; run one pass each.
     for name, runner in (
         ("validation", run_validation_worker),

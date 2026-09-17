@@ -1843,6 +1843,52 @@ def _canonical_value_json(value) -> str:
     return json.dumps(value)
 
 
+def _emit_domain_event(
+    conn: Connection,
+    *,
+    tenant_id: str,
+    contract_name: str,
+    subject_type: str,
+    subject_id: str,
+    payload: dict,
+    correlation_id: str,
+    producer_message_scope: str = "monitoring",
+) -> None:
+    """Append a domain_event to the durable outbox — same transaction as
+    the projection mutation, so publication can never diverge from truth."""
+    from datetime import datetime, timezone
+
+    encoded = json.dumps(payload, sort_keys=True,
+                         separators=(",", ":")).encode("utf-8")
+    conn.execute(
+        """
+        INSERT INTO monitoring.monitoring_outbox
+            (tenant_id, message_id, producer_message_scope, message_class,
+             contract_name, contract_version, producer, scope,
+             correlation_id, data_classification,
+             serialization_profile_id, encoded_payload,
+             comparison_evidence, comparison_profile_id,
+             comparison_profile_version, subject_type, subject_id,
+             occurred_at)
+        VALUES (%s, %s, %s, 'domain_event', %s, '1',
+                'monitoring-projection', 'tenant', %s, 'internal',
+                'canonical-json-utf8', %s, %s, 'sha256-canonical-json', '1',
+                %s, %s, %s)
+        """,
+        (
+            tenant_id,
+            _opaque("mon-evt"),
+            producer_message_scope,
+            contract_name,
+            correlation_id,
+            encoded,
+            hashlib.sha256(encoded).digest(),
+            subject_type, subject_id,
+            datetime.now(timezone.utc),
+        ),
+    )
+
+
 def list_all_pending_current_polls(conn: Connection) -> list[tuple[str, str]]:
     """All tenants' pending current_state_poll ops — (tenant_id, op_id)."""
     cur = conn.execute(
@@ -3107,6 +3153,7 @@ class PgProblemStateRepository:
         resource_id: str, from_state, to_state, from_sev, to_sev,
         reason: str, evidence_ref: str, revision: int,
     ) -> None:
+        transition_id = _opaque("mon-ptrans")
         self._conn.execute(
             """
             INSERT INTO monitoring.monitoring_problem_transition
@@ -3119,11 +3166,35 @@ class PgProblemStateRepository:
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
-                claim.tenant_id, _opaque("mon-ptrans"), problem_id,
+                claim.tenant_id, transition_id, problem_id,
                 claim.monitoring_source_id, claim.source_instance_generation,
                 resource_id, from_state, to_state, from_sev, to_sev,
                 reason, evidence_ref, revision,
             ),
+        )
+        # Domain event — same transaction as the projection mutation
+        _emit_domain_event(
+            self._conn,
+            tenant_id=claim.tenant_id,
+            contract_name="monitoring.problem.state-change",
+            subject_type="monitoring_problem",
+            subject_id=problem_id,
+            payload={
+                "problem_id": problem_id,
+                "monitoring_source_id": claim.monitoring_source_id,
+                "source_instance_generation": claim.source_instance_generation,
+                "monitoring_resource_id": resource_id,
+                "from_problem_state": from_state,
+                "to_problem_state": to_state,
+                "from_severity_class": from_sev,
+                "to_severity_class": to_sev,
+                "transition_reason": reason,
+                "provider_evidence_ref": evidence_ref,
+                "projection_revision": revision,
+                "problem_poll_epoch": claim.problem_poll_epoch,
+                "problem_poll_generation": claim.problem_poll_generation,
+            },
+            correlation_id=claim.monitoring_sync_operation_id,
         )
 
 
@@ -3416,6 +3487,25 @@ class PgHealthProjectionRepository:
             (self._tenant_id, _opaque("mon-htrans"), resource_id,
              source_id, generation, from_class, to_class, from_ev, to_ev,
              revision, snapshot_evidence_id, refs_json),
+        )
+        _emit_domain_event(
+            self._conn,
+            tenant_id=self._tenant_id,
+            contract_name="monitoring.health.changed",
+            subject_type="monitoring_resource",
+            subject_id=resource_id,
+            payload={
+                "monitoring_resource_id": resource_id,
+                "monitoring_source_id": source_id,
+                "source_instance_generation": generation,
+                "from_health_class": from_class,
+                "to_health_class": to_class,
+                "from_evidence_state": from_ev,
+                "to_evidence_state": to_ev,
+                "projection_revision": revision,
+                "problem_snapshot_evidence_id": snapshot_evidence_id,
+            },
+            correlation_id=f"health-projection:{source_id}:{revision}",
         )
 
 

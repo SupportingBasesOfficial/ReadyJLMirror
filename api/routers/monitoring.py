@@ -628,3 +628,59 @@ async def run_health_once() -> dict:
 
     processed = await asyncio.to_thread(_run)
     return {"projected": processed}
+
+
+# ---------------------------------------------------------------------------
+# Publication outbox (durable monitoring domain events)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/outbox/messages")
+async def list_outbox_endpoint(request: Request,
+                               tenant_id: str | None = None,
+                               state: str | None = None,
+                               limit: int = 100) -> list[dict]:
+    """List durable outbox messages (publication audit trail)."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            """
+            SELECT record_id, message_id, contract_name, contract_version,
+                   subject_type, subject_id, dispatch_state, attempt_count,
+                   last_error_class, published_receipt_id, published_at,
+                   appended_at
+              FROM monitoring.monitoring_outbox
+             WHERE tenant_id = %s
+               AND (%s IS NULL OR dispatch_state = %s)
+             ORDER BY record_id DESC LIMIT %s
+            """,
+            (tenant, state, state, min(limit, 1000)),
+        )
+        keys = ("record_id", "message_id", "contract_name",
+                "contract_version", "subject_type", "subject_id",
+                "dispatch_state", "attempt_count", "last_error_class",
+                "published_receipt_id", "published_at", "appended_at")
+        rows = [dict(zip(keys, r)) for r in await cur.fetchall()]
+    for r in rows:
+        for k in ("published_at", "appended_at"):
+            if r.get(k) is not None:
+                r[k] = r[k].isoformat()
+    return rows
+
+
+@router.post("/outbox/run", status_code=200)
+async def run_outbox_once() -> dict:
+    """Dev trigger: one durable outbox dispatch pass."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available")
+    import asyncio
+
+    import psycopg
+    from workers.outbox_dispatcher import _publish_durable
+
+    def _run() -> int:
+        with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
+            return _publish_durable(conn)
+
+    published = await asyncio.to_thread(_run)
+    return {"published": published}
