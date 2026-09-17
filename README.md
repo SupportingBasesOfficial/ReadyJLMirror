@@ -141,6 +141,16 @@ Real persistence + real Zabbix adapter, implementing the accepted
   definitions retire; items bound to non-canonical hosts reject the
   whole snapshot (`host_association_invalid`, fail closed); native
   value-type drift marks evidence `reconciliation_required`
+- `POST /sources/{id}/current/poll` + `GET /sources/{id}/current` —
+  `current_state_poll` ops with the same epoch/generation ordering;
+  claim builds targets from pollable definitions (active + current
+  binding + in_scope)
+- `workers/current_state.py` — canonical `MetricCurrentStateWorker`:
+  item.get `lastvalue/lastclock/lastns` → strict canonical parsing per
+  value_kind → deduplicated observation acceptance →
+  `metric_current_state` projection (advances only on newer provider
+  clock) + immutable transitions; unreturned targets go `stale` —
+  values are never fabricated
 - `POST /sources/{id}/inventory` + `GET /sources/{id}/resources` —
   enqueue `host_inventory_sync` and read canonical resources
 - `workers/inventory.py` — canonical `HostInventoryWorker`:

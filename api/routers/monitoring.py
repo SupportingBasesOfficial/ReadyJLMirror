@@ -23,9 +23,11 @@ from shared.config import settings
 from shared.db import db_connection
 from shared.monitoring_repo import (
     create_zabbix_source,
+    enqueue_current_state_poll,
     enqueue_metric_definition_poll,
     enqueue_sync_operation,
     get_source,
+    list_current_states,
     list_metric_definitions,
     list_resources,
     list_sources,
@@ -392,6 +394,58 @@ async def run_metrics_once() -> dict:
 
     import psycopg
     from workers.metrics import _process_pending
+
+    def _run() -> int:
+        with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
+            return _process_pending(conn)
+
+    processed = await asyncio.to_thread(_run)
+    return {"processed": processed}
+
+
+# ---------------------------------------------------------------------------
+# Metric current state
+# ---------------------------------------------------------------------------
+
+
+@router.post("/sources/{source_id}/current/poll", status_code=202)
+async def enqueue_current_poll(source_id: str, request: Request,
+                               tenant_id: str | None = None) -> dict:
+    """Enqueue the next `current_state_poll` for the source."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    try:
+        async with db_connection() as conn:
+            op_id = await enqueue_current_state_poll(
+                conn, tenant_id=tenant, source_id=source_id
+            )
+    except ValueError:
+        raise HTTPException(status_code=404, detail="source not found")
+    return {"monitoring_sync_operation_id": op_id, "state": "pending"}
+
+
+@router.get("/sources/{source_id}/current")
+async def list_current_endpoint(source_id: str, request: Request,
+                                tenant_id: str | None = None) -> list[dict]:
+    """List current metric values for a source."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_connection() as conn:
+        rows = await list_current_states(conn, tenant, source_id)
+    for r in rows:
+        for k in ("observed_at", "accepted_at"):
+            if r.get(k) is not None:
+                r[k] = r[k].isoformat()
+    return rows
+
+
+@router.post("/current/run", status_code=200)
+async def run_current_once() -> dict:
+    """Dev trigger: one current-state poll pass over pending ops."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available")
+    import asyncio
+
+    import psycopg
+    from workers.current_state import _process_pending
 
     def _run() -> int:
         with psycopg.connect(settings.db_dsn, autocommit=False) as conn:

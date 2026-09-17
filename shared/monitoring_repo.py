@@ -31,12 +31,19 @@ from jlmirror_monitoring.host_inventory import (
     HostInventoryClaim,
     HostInventoryResult,
 )
+from jlmirror_monitoring.metric_current_state import (
+    CurrentMetricTarget,
+    CurrentStateFailureClass,
+    MetricCurrentStateClaim,
+    MetricCurrentStateResult,
+)
 from jlmirror_monitoring.metric_definitions import (
     MetricDefinitionClaim,
     MetricDefinitionFailureClass,
     MetricDefinitionResult,
     canonical_value_kind,
 )
+from jlmirror_monitoring.metric_definitions import MetricValueKind
 from jlmirror_monitoring.source import (
     ConfiguredProviderScope,
     ZabbixProviderConfiguration,
@@ -1363,6 +1370,468 @@ def list_all_pending_metric_polls(conn: Connection) -> list[tuple[str, str]]:
           FROM monitoring.monitoring_sync_operation
          WHERE state = 'pending'
            AND responsibility_kind = 'metric_definition_poll'
+         ORDER BY created_at
+        """
+    )
+    return [tuple(r) for r in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Metric current state — enqueue + repository
+# ---------------------------------------------------------------------------
+
+
+async def enqueue_current_state_poll(
+    conn: AsyncConnection, *, tenant_id: str, source_id: str
+) -> str:
+    """Enqueue the next current_state_poll op with the next poll
+    generation within the source's current epoch."""
+    cur = await conn.execute(
+        """
+        SELECT active_source_instance_generation, configuration_revision,
+               scope_revision, current_state_poll_epoch,
+               current_state_poll_generation
+          FROM monitoring.monitoring_source
+         WHERE tenant_id = %s AND monitoring_source_id = %s
+        """,
+        (tenant_id, source_id),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        raise ValueError("monitoring.source_not_found")
+    generation_id, config_rev, scope_rev, epoch, poll_gen = row
+    op_id = _opaque("mon-sync")
+    await conn.execute(
+        """
+        INSERT INTO monitoring.monitoring_sync_operation
+            (tenant_id, monitoring_sync_operation_id, monitoring_source_id,
+             source_instance_generation, configuration_revision,
+             scope_revision, responsibility_kind, state,
+             current_state_poll_epoch, current_state_poll_generation)
+        VALUES (%s, %s, %s, %s, %s, %s, 'current_state_poll', 'pending',
+                %s, %s)
+        """,
+        (tenant_id, op_id, source_id, generation_id, config_rev, scope_rev,
+         epoch, poll_gen + 1),
+    )
+    await conn.commit()
+    return op_id
+
+
+async def list_current_states(
+    conn: AsyncConnection, tenant_id: str, source_id: str
+) -> list[dict]:
+    cur = await conn.execute(
+        """
+        SELECT c.metric_definition_id, d.name, c.value_kind,
+               c.canonical_value, c.evidence_state, c.observed_at,
+               c.accepted_at, c.projection_revision,
+               c.current_state_poll_epoch, c.current_state_poll_generation
+          FROM monitoring.metric_current_state c
+          JOIN monitoring.metric_definition d
+            ON d.tenant_id = c.tenant_id
+           AND d.metric_definition_id = c.metric_definition_id
+         WHERE c.tenant_id = %s AND c.monitoring_source_id = %s
+         ORDER BY d.name
+        """,
+        (tenant_id, source_id),
+    )
+    rows = await cur.fetchall()
+    keys = ("metric_definition_id", "name", "value_kind", "canonical_value",
+            "evidence_state", "observed_at", "accepted_at",
+            "projection_revision", "current_state_poll_epoch",
+            "current_state_poll_generation")
+    return [dict(zip(keys, r)) for r in rows]
+
+
+class PgMetricCurrentStateRepository:
+    """Claim/complete adapter for the metric current-state worker.
+
+    Targets are built from definitions that are pollable under current
+    authority (active + current binding + in_scope). Completion:
+      - inserts deduplicated observation acceptance envelopes
+      - advances metric_current_state only on newer provider clock
+      - records immutable transitions
+      - marks unreturned targets stale (no fabricated values)
+      - consumes the poll slot on any completion
+    """
+
+    def __init__(self, conn: Connection, tenant_id: str) -> None:
+        self._conn = conn
+        self._tenant_id = tenant_id
+
+    def claim_metric_current_state(
+        self, monitoring_sync_operation_id: str, *, claim_token: str
+    ) -> MetricCurrentStateClaim:
+        cur = self._conn.execute(
+            """
+            SELECT o.monitoring_source_id, o.source_instance_generation,
+                   o.configuration_revision, o.scope_revision,
+                   o.current_state_poll_epoch, o.current_state_poll_generation,
+                   s.provider_scope_tenant_binding_id,
+                   g.provider_instance_ref, g.provider_base_url,
+                   s.credential_binding_ref
+              FROM monitoring.monitoring_sync_operation o
+              JOIN monitoring.monitoring_source s
+                ON s.tenant_id = o.tenant_id
+               AND s.monitoring_source_id = o.monitoring_source_id
+              JOIN monitoring.monitoring_source_generation g
+                ON g.tenant_id = o.tenant_id
+               AND g.monitoring_source_id = o.monitoring_source_id
+               AND g.source_instance_generation = o.source_instance_generation
+             WHERE o.tenant_id = %s
+               AND o.monitoring_sync_operation_id = %s
+               AND o.state = 'pending'
+               AND o.claim_token IS NULL
+               AND o.responsibility_kind = 'current_state_poll'
+               AND s.active_source_instance_generation = o.source_instance_generation
+               AND s.configuration_revision = o.configuration_revision
+               AND s.scope_revision = o.scope_revision
+               AND s.current_state_poll_epoch = o.current_state_poll_epoch
+               AND s.current_state_poll_generation
+                   = o.current_state_poll_generation - 1
+             FOR UPDATE OF o
+            """,
+            (self._tenant_id, monitoring_sync_operation_id),
+        )
+        row = cur.fetchone()
+        if row is None:
+            self._conn.rollback()
+            raise ValueError("monitoring.current_state_not_claimable")
+
+        (source_id, generation, config_rev, scope_rev, epoch, poll_gen,
+         binding_id, provider_instance_ref, base_url, cred_ref) = row
+
+        cur = self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_sync_operation
+               SET state = 'running', claim_token = %s,
+                   started_at = transaction_timestamp()
+             WHERE tenant_id = %s
+               AND monitoring_sync_operation_id = %s
+               AND state = 'pending' AND claim_token IS NULL
+            """,
+            (claim_token, self._tenant_id, monitoring_sync_operation_id),
+        )
+        if cur.rowcount != 1:
+            self._conn.rollback()
+            raise ValueError("monitoring.current_state_not_claimable")
+
+        # Targets: pollable definitions under current authority
+        cur = self._conn.execute(
+            """
+            SELECT d.metric_definition_id, d.monitoring_resource_id,
+                   b.provider_external_ref, d.value_kind
+              FROM monitoring.metric_definition d
+              JOIN monitoring.metric_definition_provider_binding b
+                ON b.tenant_id = d.tenant_id
+               AND b.metric_definition_id = d.metric_definition_id
+             WHERE d.tenant_id = %s AND d.monitoring_source_id = %s
+               AND d.source_instance_generation = %s
+               AND d.definition_state = 'active'
+               AND d.definition_evidence_state = 'current'
+               AND d.scope_state = 'in_scope'
+               AND b.evidence_state = 'current'
+             ORDER BY b.provider_external_ref
+            """,
+            (self._tenant_id, source_id, generation),
+        )
+        targets = tuple(
+            CurrentMetricTarget(
+                metric_definition_id=r[0],
+                monitoring_resource_id=r[1],
+                provider_external_ref=r[2],
+                value_kind=MetricValueKind(r[3]),
+            )
+            for r in cur.fetchall()
+        )
+
+        self._conn.commit()
+        return MetricCurrentStateClaim(
+            claim_token=claim_token,
+            tenant_id=self._tenant_id,
+            monitoring_sync_operation_id=monitoring_sync_operation_id,
+            monitoring_source_id=source_id,
+            source_instance_generation=generation,
+            configuration_revision=config_rev,
+            scope_revision=scope_rev,
+            current_state_poll_epoch=epoch,
+            current_state_poll_generation=poll_gen,
+            provider_instance_ref=provider_instance_ref,
+            provider_configuration=ZabbixProviderConfiguration(base_url=base_url),
+            credential_binding_ref=cred_ref,
+            targets=targets,
+        )
+
+    def complete_metric_current_state(
+        self,
+        claim: MetricCurrentStateClaim,
+        result: MetricCurrentStateResult,
+    ) -> MetricCurrentStateResult:
+        cur = self._conn.execute(
+            """
+            SELECT 1
+              FROM monitoring.monitoring_sync_operation o
+              JOIN monitoring.monitoring_source s
+                ON s.tenant_id = o.tenant_id
+               AND s.monitoring_source_id = o.monitoring_source_id
+             WHERE o.tenant_id = %s
+               AND o.monitoring_sync_operation_id = %s
+               AND o.state = 'running'
+               AND o.claim_token = %s
+               AND s.active_source_instance_generation = %s
+               AND s.configuration_revision = %s
+               AND s.scope_revision = %s
+               AND s.current_state_poll_epoch = %s
+               AND s.current_state_poll_generation = %s - 1
+             FOR UPDATE OF o, s
+            """,
+            (
+                claim.tenant_id,
+                claim.monitoring_sync_operation_id,
+                claim.claim_token,
+                claim.source_instance_generation,
+                claim.configuration_revision,
+                claim.scope_revision,
+                claim.current_state_poll_epoch,
+                claim.current_state_poll_generation,
+            ),
+        )
+        if cur.fetchone() is None:
+            self._conn.rollback()
+            raise ValueError("monitoring.current_state_claim_lost")
+
+        if result.succeeded:
+            self._persist_observations(claim, result)
+
+        # Consume the poll slot + update source evidence on any completion
+        self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_source
+               SET current_state_poll_generation = %s,
+                   operational_evidence_state = %s,
+                   last_attempt_at = transaction_timestamp(),
+                   last_successful_sync_at = CASE WHEN %s = 'succeeded'
+                       THEN transaction_timestamp()
+                       ELSE last_successful_sync_at END,
+                   updated_at = transaction_timestamp()
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+            """,
+            (
+                claim.current_state_poll_generation,
+                result.operational_evidence_state.value,
+                result.operation_state.value,
+                claim.tenant_id, claim.monitoring_source_id,
+            ),
+        )
+        self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_sync_operation
+               SET state = %s, completed_at = transaction_timestamp(),
+                   last_error_class = %s
+             WHERE tenant_id = %s AND monitoring_sync_operation_id = %s
+            """,
+            (
+                result.operation_state.value,
+                result.failure_class.value if result.failure_class else None,
+                claim.tenant_id, claim.monitoring_sync_operation_id,
+            ),
+        )
+        self._conn.commit()
+        return result
+
+    def _persist_observations(
+        self,
+        claim: MetricCurrentStateClaim,
+        result: MetricCurrentStateResult,
+    ) -> None:
+        from datetime import datetime, timezone
+
+        returned_defs = set()
+        for obs in result.accepted_observations:
+            returned_defs.add(obs.metric_definition_id)
+            observed_at = datetime.fromtimestamp(
+                obs.observed_at_epoch_seconds
+                + obs.observed_at_nanoseconds / 1_000_000_000,
+                tz=timezone.utc,
+            )
+            # Acceptance envelope — dedup on provider clock replay
+            cur = self._conn.execute(
+                """
+                INSERT INTO monitoring.monitoring_metric_observation_acceptance
+                    (tenant_id, observation_id, monitoring_sync_operation_id,
+                     monitoring_source_id, source_instance_generation,
+                     monitoring_resource_id, metric_definition_id,
+                     provider_profile, provider_external_ref, provider_clock,
+                     provider_ns, observed_at, value_kind, canonical_value,
+                     configuration_revision, scope_revision,
+                     current_state_poll_epoch, current_state_poll_generation)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'zabbix', %s, %s, %s,
+                        %s, %s, %s::jsonb, %s, %s, %s, %s)
+                ON CONFLICT (tenant_id, monitoring_source_id,
+                             source_instance_generation, provider_external_ref,
+                             provider_clock, provider_ns)
+                DO NOTHING
+                RETURNING observation_id
+                """,
+                (
+                    claim.tenant_id, obs.observation_id,
+                    claim.monitoring_sync_operation_id,
+                    claim.monitoring_source_id,
+                    claim.source_instance_generation,
+                    obs.monitoring_resource_id, obs.metric_definition_id,
+                    obs.provider_external_ref,
+                    obs.observed_at_epoch_seconds,
+                    obs.observed_at_nanoseconds,
+                    observed_at, obs.value_kind.value,
+                    _canonical_value_json(obs.canonical_value),
+                    claim.configuration_revision, claim.scope_revision,
+                    claim.current_state_poll_epoch,
+                    claim.current_state_poll_generation,
+                ),
+            )
+            row = cur.fetchone()
+            if row is None:
+                # Duplicate observation (same provider clock replayed) —
+                # already accepted; no projection advance.
+                continue
+            observation_id = row[0]
+
+            # Advance the projection only on newer provider clock
+            cur = self._conn.execute(
+                """
+                SELECT c.current_observation_id, c.projection_revision,
+                       a.provider_clock, a.provider_ns
+                  FROM monitoring.metric_current_state c
+                  JOIN monitoring.monitoring_metric_observation_acceptance a
+                    ON a.tenant_id = c.tenant_id
+                   AND a.observation_id = c.current_observation_id
+                 WHERE c.tenant_id = %s AND c.metric_definition_id = %s
+                 FOR UPDATE OF c
+                """,
+                (claim.tenant_id, obs.metric_definition_id),
+            )
+            existing = cur.fetchone()
+
+            if existing is None:
+                self._conn.execute(
+                    """
+                    INSERT INTO monitoring.metric_current_state
+                        (tenant_id, metric_definition_id,
+                         monitoring_resource_id, monitoring_source_id,
+                         source_instance_generation, current_observation_id,
+                         observed_at, accepted_at, value_kind,
+                         canonical_value, evidence_state,
+                         projection_revision, current_state_poll_epoch,
+                         current_state_poll_generation, last_changed_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s,
+                            transaction_timestamp(), %s, %s::jsonb, 'current',
+                            1, %s, %s, transaction_timestamp())
+                    """,
+                    (claim.tenant_id, obs.metric_definition_id,
+                     obs.monitoring_resource_id, claim.monitoring_source_id,
+                     claim.source_instance_generation, observation_id,
+                     observed_at, obs.value_kind.value,
+                     _canonical_value_json(obs.canonical_value),
+                     claim.current_state_poll_epoch,
+                     claim.current_state_poll_generation),
+                )
+                self._conn.execute(
+                    """
+                    INSERT INTO monitoring.monitoring_metric_current_state_transition
+                        (tenant_id, current_state_transition_id,
+                         metric_definition_id, monitoring_resource_id,
+                         monitoring_source_id, source_instance_generation,
+                         from_observation_id, to_observation_id,
+                         projection_revision, evidence_state)
+                    VALUES (%s, %s, %s, %s, %s, %s, NULL, %s, 1, 'current')
+                    """,
+                    (claim.tenant_id, _opaque("mon-trans"),
+                     obs.metric_definition_id, obs.monitoring_resource_id,
+                     claim.monitoring_source_id,
+                     claim.source_instance_generation, observation_id),
+                )
+            else:
+                (prior_obs_id, prior_rev, prior_clock, prior_ns) = existing
+                newer = (
+                    obs.observed_at_epoch_seconds > prior_clock
+                    or (obs.observed_at_epoch_seconds == prior_clock
+                        and obs.observed_at_nanoseconds > prior_ns)
+                )
+                if not newer:
+                    continue  # older/equal sample — no projection advance
+                new_rev = prior_rev + 1
+                self._conn.execute(
+                    """
+                    UPDATE monitoring.metric_current_state
+                       SET current_observation_id = %s, observed_at = %s,
+                           accepted_at = transaction_timestamp(),
+                           value_kind = %s, canonical_value = %s::jsonb,
+                           evidence_state = 'current',
+                           projection_revision = %s,
+                           current_state_poll_epoch = %s,
+                           current_state_poll_generation = %s,
+                           last_changed_at = transaction_timestamp(),
+                           updated_at = transaction_timestamp()
+                     WHERE tenant_id = %s AND metric_definition_id = %s
+                    """,
+                    (observation_id, observed_at, obs.value_kind.value,
+                     _canonical_value_json(obs.canonical_value), new_rev,
+                     claim.current_state_poll_epoch,
+                     claim.current_state_poll_generation,
+                     claim.tenant_id, obs.metric_definition_id),
+                )
+                self._conn.execute(
+                    """
+                    INSERT INTO monitoring.monitoring_metric_current_state_transition
+                        (tenant_id, current_state_transition_id,
+                         metric_definition_id, monitoring_resource_id,
+                         monitoring_source_id, source_instance_generation,
+                         from_observation_id, to_observation_id,
+                         projection_revision, evidence_state)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'current')
+                    """,
+                    (claim.tenant_id, _opaque("mon-trans"),
+                     obs.metric_definition_id, obs.monitoring_resource_id,
+                     claim.monitoring_source_id,
+                     claim.source_instance_generation, prior_obs_id,
+                     observation_id, new_rev),
+                )
+
+        # Coverage degradation: claimed targets with no returned sample
+        # become stale — no fabricated values.
+        unreturned = [
+            t.metric_definition_id for t in claim.targets
+            if t.metric_definition_id not in returned_defs
+        ]
+        if unreturned:
+            self._conn.execute(
+                """
+                UPDATE monitoring.metric_current_state
+                   SET evidence_state = 'stale',
+                       updated_at = transaction_timestamp()
+                 WHERE tenant_id = %s AND metric_definition_id = ANY(%s)
+                """,
+                (claim.tenant_id, unreturned),
+            )
+
+
+def _canonical_value_json(value) -> str:
+    """Serialize a canonical metric value to JSONB-safe text."""
+    from decimal import Decimal
+    if isinstance(value, Decimal):
+        return json.dumps(str(value))
+    return json.dumps(value)
+
+
+def list_all_pending_current_polls(conn: Connection) -> list[tuple[str, str]]:
+    """All tenants' pending current_state_poll ops — (tenant_id, op_id)."""
+    cur = conn.execute(
+        """
+        SELECT tenant_id, monitoring_sync_operation_id
+          FROM monitoring.monitoring_sync_operation
+         WHERE state = 'pending'
+           AND responsibility_kind = 'current_state_poll'
          ORDER BY created_at
         """
     )

@@ -23,6 +23,9 @@ from jlmirror_monitoring.host_inventory import (
     ZabbixNamedRefEvidence,
     ZabbixTagEvidence,
 )
+from jlmirror_monitoring.metric_current_state import (
+    ZabbixCurrentValueEvidence,
+)
 from jlmirror_monitoring.metric_definitions import (
     ZabbixItemEvidence,
     ZabbixItemOperationalState,
@@ -303,3 +306,49 @@ class ZabbixClient:
             raise ProviderProtocolError(
                 f"item.get entry failed normalization: {exc}"
             ) from exc
+
+    def read_current_values(
+        self,
+        endpoint: AdmittedProviderEndpoint,
+        credential: ResolvedZabbixCredential,
+        itemids: Sequence[str],
+        *,
+        max_items: int,
+    ) -> Sequence[ZabbixCurrentValueEvidence]:
+        """Read the latest value per item via item.get.
+
+        Zabbix `lastvalue`/`lastclock`/`lastns` is the provider's newest
+        sample per item. Items whose value has never been collected
+        (lastclock = 0) are rejected by domain validation.
+        """
+        result = _rpc(
+            endpoint.api_url,
+            "item.get",
+            {
+                "output": ["itemid", "lastvalue", "lastclock", "lastns"],
+                "itemids": list(itemids),
+                "limit": max_items,
+            },
+            credential.api_token,
+        )
+        if not isinstance(result, list):
+            raise ProviderProtocolError("item.get result is not a list")
+
+        rows: list[ZabbixCurrentValueEvidence] = []
+        for item in result:
+            if not isinstance(item, dict) or "itemid" not in item:
+                raise ProviderProtocolError("item.get malformed entry")
+            try:
+                rows.append(
+                    ZabbixCurrentValueEvidence(
+                        itemid=str(item["itemid"]),
+                        raw_value=str(item.get("lastvalue", "")),
+                        lastclock=int(item.get("lastclock", 0)),
+                        lastns=int(item.get("lastns", 0)),
+                    )
+                )
+            except (TypeError, ValueError) as exc:
+                raise ProviderProtocolError(
+                    f"item.get current value failed normalization: {exc}"
+                ) from exc
+        return rows
