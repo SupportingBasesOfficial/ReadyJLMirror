@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from workers.current_state import run_current_state_worker
+from workers.health import run_health_worker
 from workers.history import run_history_worker
 from workers.problem_state import run_problem_state_worker
 from workers.inventory import run_inventory_worker
@@ -33,6 +34,7 @@ def main() -> None:
         ("current_state", run_current_state_worker),
         ("history", run_history_worker),
         ("problem_state", run_problem_state_worker),
+        ("health", run_health_worker),
     ):
         try:
             runner(poll_interval=2, once=True)

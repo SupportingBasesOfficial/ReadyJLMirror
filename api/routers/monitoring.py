@@ -30,6 +30,7 @@ from shared.monitoring_repo import (
     enqueue_sync_operation,
     get_source,
     list_current_states,
+    list_health_projections,
     list_history_observations,
     list_history_streams,
     list_metric_definitions,
@@ -590,3 +591,40 @@ async def run_problems_once() -> dict:
 
     processed = await asyncio.to_thread(_run)
     return {"processed": processed}
+
+
+# ---------------------------------------------------------------------------
+# Health projection (canonical derived authority — no provider polling)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/sources/{source_id}/health")
+async def list_health_endpoint(source_id: str, request: Request,
+                               tenant_id: str | None = None) -> list[dict]:
+    """List canonical health projections per resource for a source."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_connection() as conn:
+        rows = await list_health_projections(conn, tenant, source_id)
+    for r in rows:
+        for k in ("last_changed_at", "last_evidence_at"):
+            if r.get(k) is not None:
+                r[k] = r[k].isoformat()
+    return rows
+
+
+@router.post("/health/run", status_code=200)
+async def run_health_once() -> dict:
+    """Dev trigger: one health projection sweep over all sources."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available")
+    import asyncio
+
+    import psycopg
+    from workers.health import _process_pending as _run_health
+
+    def _run() -> int:
+        with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
+            return _run_health(conn)
+
+    processed = await asyncio.to_thread(_run)
+    return {"projected": processed}

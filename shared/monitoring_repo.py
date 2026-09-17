@@ -2725,9 +2725,12 @@ class PgProblemStateRepository:
                     (tenant_id, snapshot_evidence_id,
                      monitoring_sync_operation_id, monitoring_source_id,
                      source_instance_generation, problem_poll_epoch,
-                     problem_poll_generation, complete_snapshot,
-                     active_problem_count, recovery_count)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     problem_poll_generation, snapshot_complete,
+                     active_problem_count, recovery_count,
+                     operation_state, operational_evidence_state,
+                     configuration_revision, scope_revision)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s)
                 ON CONFLICT (tenant_id, monitoring_sync_operation_id)
                 DO NOTHING
                 """,
@@ -2739,6 +2742,9 @@ class PgProblemStateRepository:
                     claim.problem_poll_epoch, claim.problem_poll_generation,
                     result.complete_snapshot, len(result.problems),
                     len(recoveries),
+                    result.operation_state.value,
+                    result.operational_evidence_state.value,
+                    claim.configuration_revision, claim.scope_revision,
                 ),
             )
 
@@ -3192,3 +3198,254 @@ def list_all_pending_problem_syncs(conn: Connection) -> list[tuple[str, str]]:
         """
     )
     return [tuple(r) for r in cur.fetchall()]
+
+
+class PgHealthProjectionRepository:
+    """Canonical Monitoring-owned health derivation.
+
+    Health is derived from canonical state only — no provider polling
+    authority. For each in-scope present resource of a source the input
+    bundle is: source currentness, resource presence/scope currentness,
+    problem snapshot completeness evidence, worst active-problem evidence,
+    and active problem severities. `derive_health` (canonical domain)
+    produces the decision; 'healthy'/'current' are DB-guarded too.
+    """
+
+    def __init__(self, conn: Connection, tenant_id: str) -> None:
+        self._conn = conn
+        self._tenant_id = tenant_id
+
+    def project_source_health(
+        self, monitoring_source_id: str
+    ) -> int:
+        """Derive + persist health for every resource of the source.
+        Returns the number of projections written."""
+        from jlmirror_monitoring.health_projection import (
+            EvidenceState,
+            HealthInput,
+            SeverityClass,
+            derive_health,
+        )
+
+        cur = self._conn.execute(
+            """
+            SELECT s.active_source_instance_generation,
+                   s.configuration_revision, s.scope_revision,
+                   s.operational_evidence_state
+              FROM monitoring.monitoring_source s
+             WHERE s.tenant_id = %s AND s.monitoring_source_id = %s
+            """,
+            (self._tenant_id, monitoring_source_id),
+        )
+        src = cur.fetchone()
+        if src is None:
+            return 0
+        generation, config_rev, scope_rev, source_evidence = src
+        source_is_current = source_evidence == "current"
+
+        # Latest complete problem snapshot evidence for this authority
+        cur = self._conn.execute(
+            """
+            SELECT snapshot_evidence_id
+              FROM monitoring.monitoring_problem_snapshot_evidence
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+               AND source_instance_generation = %s
+               AND snapshot_complete
+               AND operation_state = 'succeeded'
+               AND operational_evidence_state = 'current'
+               AND configuration_revision = %s AND scope_revision = %s
+             ORDER BY recorded_at DESC LIMIT 1
+            """,
+            (self._tenant_id, monitoring_source_id, generation,
+             config_rev, scope_rev),
+        )
+        snap = cur.fetchone()
+        snapshot_evidence_id = snap[0] if snap else None
+
+        cur = self._conn.execute(
+            """
+            SELECT r.monitoring_resource_id, r.presence_state,
+                   r.presence_evidence_state, r.scope_state,
+                   r.scope_evidence_state, r.scope_projection_revision
+              FROM monitoring.monitoring_resource r
+             WHERE r.tenant_id = %s AND r.monitoring_source_id = %s
+               AND r.source_instance_generation = %s
+             ORDER BY r.monitoring_resource_id
+            """,
+            (self._tenant_id, monitoring_source_id, generation),
+        )
+        resources = cur.fetchall()
+
+        written = 0
+        for (res_id, presence, presence_ev, scope_state, scope_ev,
+             scope_rev_res) in resources:
+            cur = self._conn.execute(
+                """
+                SELECT severity_class, evidence_state, problem_id
+                  FROM monitoring.monitoring_problem
+                 WHERE tenant_id = %s AND monitoring_source_id = %s
+                   AND source_instance_generation = %s
+                   AND monitoring_resource_id = %s
+                   AND problem_state = 'active'
+                """,
+                (self._tenant_id, monitoring_source_id, generation, res_id),
+            )
+            problems = cur.fetchall()
+            severities = [SeverityClass(p[0]) for p in problems]
+            reason_refs = tuple(
+                f"problem:{p[2]}" for p in problems[:64])
+            worst_evidence = "current"
+            for _sev, ev, _pid in problems:
+                if ev != "current":
+                    worst_evidence = ev
+                    break
+
+            decision = derive_health(
+                HealthInput(
+                    tenant_id=self._tenant_id,
+                    monitoring_source_id=monitoring_source_id,
+                    source_instance_generation=generation,
+                    monitoring_resource_id=res_id,
+                    source_is_current=source_is_current,
+                    resource_present=(presence == "present"),
+                    scope_is_current_and_in_scope=(
+                        scope_state == "in_scope"
+                        and scope_ev == "current"
+                        and scope_rev_res == scope_rev
+                    ),
+                    problem_completeness_is_current=(
+                        snapshot_evidence_id is not None),
+                    evidence_state=EvidenceState(worst_evidence),
+                    active_problem_severities=severities,
+                    reason_refs=reason_refs,
+                )
+            )
+
+            cur = self._conn.execute(
+                """
+                SELECT health_class, evidence_state, projection_revision
+                  FROM monitoring.health_projection
+                 WHERE tenant_id = %s AND monitoring_resource_id = %s
+                   AND source_instance_generation = %s
+                 FOR UPDATE
+                """,
+                (self._tenant_id, res_id, generation),
+            )
+            existing = cur.fetchone()
+            refs_json = json.dumps(list(decision.reason_refs))
+
+            if existing is None:
+                self._conn.execute(
+                    """
+                    INSERT INTO monitoring.health_projection
+                        (tenant_id, monitoring_resource_id,
+                         monitoring_source_id, source_instance_generation,
+                         health_class, evidence_state, projection_revision,
+                         last_changed_at, last_evidence_at,
+                         problem_snapshot_evidence_id, reason_refs)
+                    VALUES (%s, %s, %s, %s, %s, %s, 1,
+                            transaction_timestamp(), transaction_timestamp(),
+                            %s, %s::jsonb)
+                    """,
+                    (self._tenant_id, res_id, monitoring_source_id,
+                     generation, decision.health_class.value,
+                     decision.evidence_state.value, snapshot_evidence_id,
+                     refs_json),
+                )
+                self._insert_health_transition(
+                    res_id, monitoring_source_id, generation,
+                    None, decision.health_class.value,
+                    None, decision.evidence_state.value, 1,
+                    snapshot_evidence_id, refs_json)
+                written += 1
+            else:
+                (old_class, old_ev, old_rev) = existing
+                changed = (old_class != decision.health_class.value
+                           or old_ev != decision.evidence_state.value)
+                if not changed:
+                    continue
+                new_rev = old_rev + 1
+                self._conn.execute(
+                    """
+                    UPDATE monitoring.health_projection
+                       SET health_class = %s, evidence_state = %s,
+                           projection_revision = %s,
+                           last_changed_at = CASE WHEN %s THEN
+                               transaction_timestamp()
+                               ELSE last_changed_at END,
+                           last_evidence_at = transaction_timestamp(),
+                           problem_snapshot_evidence_id = %s,
+                           reason_refs = %s::jsonb,
+                           updated_at = transaction_timestamp()
+                     WHERE tenant_id = %s AND monitoring_resource_id = %s
+                       AND source_instance_generation = %s
+                    """,
+                    (
+                        decision.health_class.value,
+                        decision.evidence_state.value, new_rev,
+                        old_class != decision.health_class.value,
+                        snapshot_evidence_id, refs_json,
+                        self._tenant_id, res_id, generation,
+                    ),
+                )
+                self._insert_health_transition(
+                    res_id, monitoring_source_id, generation,
+                    old_class, decision.health_class.value,
+                    old_ev, decision.evidence_state.value, new_rev,
+                    snapshot_evidence_id, refs_json)
+                written += 1
+
+        self._conn.commit()
+        return written
+
+    def _insert_health_transition(
+        self, resource_id, source_id, generation,
+        from_class, to_class, from_ev, to_ev, revision,
+        snapshot_evidence_id, refs_json,
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO monitoring.health_projection_transition
+                (tenant_id, health_transition_id, monitoring_resource_id,
+                 monitoring_source_id, source_instance_generation,
+                 from_health_class, to_health_class, from_evidence_state,
+                 to_evidence_state, projection_revision,
+                 problem_snapshot_evidence_id, reason_refs)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            """,
+            (self._tenant_id, _opaque("mon-htrans"), resource_id,
+             source_id, generation, from_class, to_class, from_ev, to_ev,
+             revision, snapshot_evidence_id, refs_json),
+        )
+
+
+def list_all_monitoring_sources(conn: Connection) -> list[tuple[str, str]]:
+    """(tenant_id, monitoring_source_id) for every source — health sweep."""
+    cur = conn.execute(
+        """
+        SELECT tenant_id, monitoring_source_id
+          FROM monitoring.monitoring_source
+         ORDER BY tenant_id, monitoring_source_id
+        """
+    )
+    return [tuple(r) for r in cur.fetchall()]
+
+
+async def list_health_projections(
+    conn: AsyncConnection, tenant_id: str, source_id: str
+) -> list[dict]:
+    cur = await conn.execute(
+        """
+        SELECT h.monitoring_resource_id, h.health_class, h.evidence_state,
+               h.projection_revision, h.last_changed_at, h.last_evidence_at,
+               h.reason_refs
+          FROM monitoring.health_projection h
+         WHERE h.tenant_id = %s AND h.monitoring_source_id = %s
+         ORDER BY h.monitoring_resource_id
+        """,
+        (tenant_id, source_id),
+    )
+    keys = ("monitoring_resource_id", "health_class", "evidence_state",
+            "projection_revision", "last_changed_at", "last_evidence_at",
+            "reason_refs")
+    return [dict(zip(keys, r)) for r in await cur.fetchall()]

@@ -177,6 +177,13 @@ Real persistence + real Zabbix adapter, implementing the accepted
   `authoritative_negative`); resolved problems never reopen under the
   same event identity; omission resolves only on a proven-complete
   snapshot — incomplete snapshots mark actives `reconciliation_required`
+- `GET /sources/{id}/health` + `POST /health/run` (dev sweep) —
+  `workers/health.py` derives per-resource health with the canonical
+  `derive_health` from Monitoring state only (source currentness,
+  resource presence/scope, complete problem snapshot evidence, active
+  problem severities) → `health_projection` + immutable transitions;
+  `healthy` requires 'current' evidence and no health-affecting active
+  problem (also enforced by the DB projection guard)
 - `providers/credentials.py` — env-based dev resolver
   (`ZABBIX_CRED_<REF>`); production = OpenBao/secret manager
 - `providers/egress.py` — dev egress admission (https +
