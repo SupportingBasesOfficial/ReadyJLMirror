@@ -1,14 +1,31 @@
-"""Monitoring domain router — source planning and health projection."""
+"""Monitoring domain router — real sources + health projection.
+
+Real persistence: sources are created durably in `monitoring.*` and
+validated by the validation worker (claim -> hostgroup.get -> fenced
+complete). `/plan` and `/health/derive` expose the domain planner and
+projector for exploration.
+
+Tenant binding: when a signed BFF context is present
+(request.state.jlmirror_context), the bound tenant is authority —
+client-supplied tenant identifiers are never trusted. In development
+sandbox mode (no BFF context), explicit tenant_id is accepted.
+"""
 
 from __future__ import annotations
 
-from typing import Annotated, Sequence
+import secrets
+from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
 
-from shared.auth import utcnow
-from shared.tenant import make_dev_tenant_context
+from shared.config import settings
+from shared.db import db_connection
+from shared.monitoring_repo import (
+    create_zabbix_source,
+    get_source,
+    list_sources,
+)
 from jlmirror_monitoring.source import (
     ConfiguredProviderScope,
     CreateMonitoringSourceCommand,
@@ -17,15 +34,25 @@ from jlmirror_monitoring.source import (
 )
 from jlmirror_monitoring.health_projection import (
     EvidenceState,
-    HealthClass,
-    HealthDecision,
     HealthInput,
     SeverityClass,
     derive_health,
-    semantic_health_change,
 )
 
 router = APIRouter(prefix="/api/v1/monitoring", tags=["monitoring"])
+
+
+def _authoritative_tenant(request: Request, body_tenant: str | None) -> str:
+    """Resolve the effective tenant — BFF context wins, dev fallback."""
+    ctx = getattr(request.state, "jlmirror_context", None)
+    if ctx is not None and ctx.get("tenant_id"):
+        return ctx["tenant_id"]
+    if settings.is_development and body_tenant:
+        return body_tenant
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="no tenant authority",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -134,3 +161,129 @@ async def derive_health_endpoint(body: HealthDeriveRequest) -> HealthDeriveRespo
         evidence_state=decision.evidence_state.value,
         reason_refs=list(decision.reason_refs),
     )
+
+
+# ---------------------------------------------------------------------------
+# Real sources (durable persistence + validation worker)
+# ---------------------------------------------------------------------------
+
+
+class SourceCreateRequest(BaseModel):
+    tenant_id: str | None = None  # dev-sandbox only; BFF ctx wins when present
+    display_name: str
+    provider_instance_ref: str
+    provider_base_url: str
+    credential_binding_ref: str
+    host_group_refs: list[str]
+    idempotency_key: str | None = None
+
+
+class SourceResponse(BaseModel):
+    monitoring_source_id: str
+    monitoring_sync_operation_id: str
+    idempotency_state: str
+    reused: bool
+
+
+@router.post("/sources", response_model=SourceResponse, status_code=201)
+async def create_source(body: SourceCreateRequest, request: Request) -> SourceResponse:
+    """Create a monitoring source durably (Zabbix profile).
+
+    Atomic create-or-observe under the idempotency key; enqueues the
+    `validation_and_initial_sync` operation for the worker.
+    """
+    tenant_id = _authoritative_tenant(request, body.tenant_id)
+    try:
+        # Domain validation before persistence (canonical input shape)
+        ZabbixProviderConfiguration(base_url=body.provider_base_url)
+        ConfiguredProviderScope.from_refs(body.host_group_refs)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    key = body.idempotency_key or f"idem-{secrets.token_urlsafe(16)}"
+    try:
+        async with db_connection() as conn:
+            result = await create_zabbix_source(
+                conn,
+                tenant_id=tenant_id,
+                idempotency_key=key,
+                display_name=body.display_name,
+                provider_instance_ref=body.provider_instance_ref,
+                provider_base_url=body.provider_base_url,
+                credential_binding_ref=body.credential_binding_ref,
+                host_group_refs=body.host_group_refs,
+            )
+    except ValueError as exc:
+        if "idempotency.key_reused" in str(exc):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return SourceResponse(**result)
+
+
+class SourceDetailResponse(BaseModel):
+    monitoring_source_id: str
+    display_name: str
+    operational_evidence_state: str
+    configuration_revision: int
+    scope_revision: int
+    provider_instance_ref: str
+    provider_base_url: str
+
+
+@router.get("/sources", response_model=list[SourceDetailResponse])
+async def list_sources_endpoint(request: Request, tenant_id: str | None = None) -> list[SourceDetailResponse]:
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_connection() as conn:
+        rows = await list_sources(conn, tenant)
+    return [
+        SourceDetailResponse(
+            monitoring_source_id=r["monitoring_source_id"],
+            display_name=r["display_name"],
+            operational_evidence_state=r["operational_evidence_state"],
+            configuration_revision=r["configuration_revision"],
+            scope_revision=r["scope_revision"],
+            provider_instance_ref=r["provider_instance_ref"],
+            provider_base_url=r["provider_base_url"],
+        )
+        for r in rows
+    ]
+
+
+@router.get("/sources/{source_id}")
+async def get_source_endpoint(source_id: str, request: Request, tenant_id: str | None = None) -> dict:
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_connection() as conn:
+        row = await get_source(conn, tenant, source_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    row["configured_provider_scope"] = (
+        row["configured_provider_scope"]
+        if isinstance(row["configured_provider_scope"], dict)
+        else {}
+    )
+    for k in ("last_successful_sync_at", "last_attempt_at"):
+        if row.get(k) is not None:
+            row[k] = row[k].isoformat()
+    return row
+
+
+@router.post("/sync/run", status_code=200)
+async def run_sync_once() -> dict:
+    """Dev trigger: run one validation pass over pending operations.
+
+    In production the validation worker runs as its own process; this
+    endpoint exists for local development and integration tests.
+    """
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available")
+    import asyncio
+
+    import psycopg
+    from workers.validation import _process_pending
+
+    def _run() -> int:
+        with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
+            return _process_pending(conn)
+
+    processed = await asyncio.to_thread(_run)
+    return {"processed": processed}

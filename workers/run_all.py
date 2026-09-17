@@ -20,7 +20,11 @@ def main() -> None:
     """Run all workers sequentially (dev mode)."""
     logger.info("=== ReadyJLMirror workers starting (dev mode) ===")
     run_outbox_dispatcher(poll_interval=2, batch_size=3)
-    run_validation_worker(poll_interval=2, batch_size=2)
+    # Validation worker needs a live DB; run one pass when available.
+    try:
+        run_validation_worker(poll_interval=2, once=True)
+    except Exception as exc:
+        logger.warning("validation worker skipped (DB unavailable): %s", exc)
     run_reconciliation_worker(poll_interval=2, batch_size=2)
     logger.info("=== All workers finished ===")
 

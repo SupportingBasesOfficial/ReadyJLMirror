@@ -109,10 +109,30 @@ python -m pytest tests/ -v
 - `test_g1_unit.py` — digests, PKCE RFC 7636 vector, HMAC context signatures (7 tests)
 - `test_g1_integration.py` — full G1 flow (7 tests; require running DB, skip otherwise)
 
+## Monitoring vertical (Wave 4)
+
+Real persistence + real Zabbix adapter, implementing the accepted
+`validation_and_initial_sync` semantics:
+
+- `POST /api/v1/monitoring/sources` — durable source creation (atomic
+  idempotency row + generation + pending sync op, mirroring
+  `monitoring.create_zabbix_source`)
+- `GET /api/v1/monitoring/sources` / `/{id}` — tenant-scoped reads
+- `workers/validation.py` — claims pending operations and runs the
+  canonical `InitialValidationWorker`: CredentialResolver →
+  OutboundAdmission → `hostgroup.get` → fenced complete (generation +
+  revisions must still be current or completion fails closed)
+- `providers/zabbix.py` — real JSON-RPC client (`hostgroup.get` by
+  groupid), mapping Zabbix errors to the domain failure classes
+- `providers/credentials.py` — env-based dev resolver
+  (`ZABBIX_CRED_<REF>`); production = OpenBao/secret manager
+- `providers/egress.py` — dev egress admission (https +
+  `EGRESS_ALLOW_HOSTS` allowlist); production = governed egress policy
+
 ## What this is NOT yet
 
 - Not production-ready: dev HMAC trust (not SPIFFE), dev auth bypass flag, no real Zabbix/Kafka, no CSRF key ring rotation, dev realm passwords
-- No Monitoring UI, Alerting, ITSM, Automation, AIOps — those slices remain governed by the canonical spec's authorization chain
+- No host inventory/metric/problem/health ingestion yet (next Wave 4 slices), no Alerting/ITSM/Automation/AIOps — those remain governed by the canonical authorization chain
 
 ## Submodule
 

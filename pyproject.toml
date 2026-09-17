@@ -32,7 +32,7 @@ ready-jlmirror-worker = "workers.run_all:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["shared*", "api*", "bff*", "workers*", "scripts*"]
+include = ["shared*", "api*", "bff*", "workers*", "providers*", "scripts*"]
 
 [tool.setuptools.package-dir]
 "" = "."
