@@ -51,8 +51,10 @@ def _process_pending(conn: psycopg.Connection) -> int:
                 len(result.accepted_observations),
             )
         except ValueError as exc:
+            conn.rollback()
             logger.warning("current-state poll %s skipped: %s", op_id, exc)
         except Exception:
+            conn.rollback()
             logger.exception("current-state poll %s failed unexpectedly", op_id)
     return processed
 

@@ -152,8 +152,10 @@ def _process_pending(conn: psycopg.Connection) -> int:
                 len(result.problems), len(recoveries),
             )
         except ValueError as exc:
+            conn.rollback()
             logger.warning("problem state %s skipped: %s", op_id, exc)
         except Exception:
+            conn.rollback()
             logger.exception("problem state %s failed unexpectedly", op_id)
 
     return processed

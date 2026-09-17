@@ -37,6 +37,7 @@ def _process_pending(conn: psycopg.Connection) -> int:
                     tenant_id, source_id, n,
                 )
         except Exception:
+            conn.rollback()
             logger.exception(
                 "health projection %s/%s failed", tenant_id, source_id)
     return projected

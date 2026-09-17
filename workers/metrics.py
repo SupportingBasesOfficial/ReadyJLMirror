@@ -54,8 +54,10 @@ def _process_pending(conn: psycopg.Connection) -> int:
                 result.snapshot_complete,
             )
         except ValueError as exc:
+            conn.rollback()
             logger.warning("metric poll %s skipped: %s", op_id, exc)
         except Exception:
+            conn.rollback()
             logger.exception("metric poll %s failed unexpectedly", op_id)
     return processed
 

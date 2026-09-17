@@ -2672,7 +2672,6 @@ class PgProblemStateRepository:
             UPDATE monitoring.monitoring_sync_operation
                SET state = 'running', claim_token = %s,
                    started_at = transaction_timestamp(),
-                   attempt_count = attempt_count + 1,
                    problem_poll_epoch = %s, problem_poll_generation = %s
              WHERE tenant_id = %s
                AND monitoring_sync_operation_id = %s
@@ -3220,9 +3219,9 @@ async def enqueue_problem_state_sync(
         """
         INSERT INTO monitoring.monitoring_sync_operation
             (tenant_id, monitoring_sync_operation_id, monitoring_source_id,
-             source_instance_generation, responsibility_kind,
+             source_instance_generation, responsibility_kind, state,
              configuration_revision, scope_revision)
-        VALUES (%s, %s, %s, %s, 'problem_state_sync', %s, %s)
+        VALUES (%s, %s, %s, %s, 'problem_state_sync', 'pending', %s, %s)
         """,
         (tenant_id, op_id, source_id, row[0], row[1], row[2]),
     )

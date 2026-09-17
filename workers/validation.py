@@ -57,10 +57,12 @@ def _process_pending(conn: psycopg.Connection) -> int:
                 result.operational_evidence_state.value,
             )
         except ValueError as exc:
+            conn.rollback()
             # Not claimable (raced/stale) — leave durable state; the
             # operation remains pending for a later claim or reconciliation.
             logger.warning("validation %s skipped: %s", op_id, exc)
         except Exception:
+            conn.rollback()
             logger.exception("validation %s failed unexpectedly", op_id)
     return processed
 

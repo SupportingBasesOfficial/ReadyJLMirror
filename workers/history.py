@@ -108,8 +108,10 @@ def _process_pending(conn: psycopg.Connection) -> int:
                 len(reader.rows),
             )
         except ValueError as exc:
+            conn.rollback()
             logger.warning("metric history %s skipped: %s", op_id, exc)
         except Exception:
+            conn.rollback()
             logger.exception("metric history %s failed unexpectedly", op_id)
 
     for tenant_id, source_id in list_source_ids_with_pending_projection(conn):
@@ -122,6 +124,7 @@ def _process_pending(conn: psycopg.Connection) -> int:
                     tenant_id, source_id, projected,
                 )
         except Exception:
+            conn.rollback()
             logger.exception(
                 "history projection %s/%s failed", tenant_id, source_id
             )
