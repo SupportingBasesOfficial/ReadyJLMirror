@@ -6,11 +6,16 @@ need the DB will return 503). In production, startup fails if the DB
 is unreachable.
 
 Tenant context for RLS is set per-transaction via `set_tenant_context`.
+
+On Windows, psycopg's async pool requires the selector event loop
+policy. This is set automatically at import time.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -18,6 +23,10 @@ from psycopg import AsyncConnection, AsyncCursor
 from psycopg_pool import AsyncConnectionPool
 
 from app.config import settings
+
+# Fix psycopg async compatibility on Windows
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 logger = logging.getLogger(__name__)
 
