@@ -1,0 +1,3 @@
+[submodule "vendor/ProjectJLMirror"]
+	path = vendor/ProjectJLMirror
+	url = https://github.com/SupportingBasesOfficial/ProjectJLMirror.git

@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ready-jlmirror"
+version = "0.1.0"
+description = "ReadyJLMirror — runnable JLMirror application stack"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115,<0.116",
+    "uvicorn[standard]>=0.30,<0.31",
+    "psycopg[binary,pool]>=3.2,<3.3",
+    "pydantic>=2.7,<3",
+    "python-multipart>=0.0.9,<0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "pytest-asyncio>=0.23,<0.24",
+    "httpx>=0.27,<0.28",
+    "ruff>=0.5,<0.6",
+]
+
+[project.scripts]
+ready-jlmirror-api = "app.main:run"
+ready-jlmirror-migrate = "scripts.migrate:main"
+ready-jlmirror-worker = "app.workers.run_all:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*", "scripts*"]
+
+[tool.setuptools.package-dir]
+"" = "."
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
