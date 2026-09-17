@@ -27,6 +27,11 @@ from jlmirror_monitoring.metric_current_state import (
     ZabbixCurrentValueEvidence,
 )
 from jlmirror_monitoring.metric_history import ZabbixHistoryEvidence
+from jlmirror_monitoring.problem_state import (
+    ProviderTag,
+    ZabbixProblemEvidence,
+    ZabbixRecoveryEvidence,
+)
 from jlmirror_monitoring.metric_definitions import (
     ZabbixItemEvidence,
     ZabbixItemOperationalState,
@@ -402,3 +407,138 @@ class ZabbixClient:
                     f"history.get entry failed normalization: {exc}"
                 ) from exc
         return rows
+
+    def read_active_problems(
+        self,
+        endpoint: AdmittedProviderEndpoint,
+        credential: ResolvedZabbixCredential,
+        *,
+        max_rows: int,
+    ) -> tuple[Sequence[ZabbixProblemEvidence], bool]:
+        """Active trigger problems (r_eventid='0') with explicit truncation
+        detection — requests max_rows+1 so an over-bound response is provable."""
+        result = _rpc(
+            endpoint.api_url,
+            "problem.get",
+            {
+                "source": 0,
+                "object": 0,
+                "output": ["eventid", "objectid", "clock", "name",
+                           "severity", "acknowledged", "r_eventid"],
+                "selectTags": "extend",
+                "sortfield": "eventid",
+                "limit": max_rows + 1,
+            },
+            credential.api_token,
+        )
+        if not isinstance(result, list):
+            raise ProviderProtocolError("problem.get result is not a list")
+
+        complete = len(result) <= max_rows
+        rows: list[ZabbixProblemEvidence] = []
+        for item in result[:max_rows]:
+            if not isinstance(item, dict) or "eventid" not in item:
+                raise ProviderProtocolError("problem.get malformed entry")
+            if str(item.get("r_eventid", "0")) != "0":
+                continue  # resolved — recovery evidence handled separately
+            try:
+                tags = tuple(
+                    ProviderTag(
+                        key=str(t.get("tag", "")), value=str(t.get("value", ""))
+                    )
+                    for t in (item.get("tags") or [])
+                    if isinstance(t, dict) and t.get("tag")
+                )
+                rows.append(
+                    ZabbixProblemEvidence(
+                        eventid=str(item["eventid"]),
+                        objectid=str(item["objectid"]),
+                        clock=int(item["clock"]),
+                        name=str(item.get("name", "")),
+                        severity=int(item.get("severity", 0)),
+                        acknowledged=str(item.get("acknowledged", "0")) == "1",
+                        tags=tags,
+                    )
+                )
+            except (TypeError, ValueError) as exc:
+                raise ProviderProtocolError(
+                    f"problem.get entry failed normalization: {exc}"
+                ) from exc
+        return rows, complete
+
+    def read_recovery_events(
+        self,
+        endpoint: AdmittedProviderEndpoint,
+        credential: ResolvedZabbixCredential,
+        problem_eventids: Sequence[str],
+        *,
+        max_rows: int,
+    ) -> Sequence[ZabbixRecoveryEvidence]:
+        """Recovery evidence for known problem events — problem.get on the
+        problem identity returns r_eventid/r_clock for resolved events."""
+        if not problem_eventids:
+            return ()
+        result = _rpc(
+            endpoint.api_url,
+            "problem.get",
+            {
+                "eventids": list(problem_eventids),
+                "output": ["eventid", "r_eventid", "r_clock"],
+                "limit": max_rows,
+            },
+            credential.api_token,
+        )
+        if not isinstance(result, list):
+            raise ProviderProtocolError("problem.get recovery result invalid")
+
+        rows: list[ZabbixRecoveryEvidence] = []
+        for item in result:
+            if not isinstance(item, dict) or "eventid" not in item:
+                raise ProviderProtocolError("problem.get recovery malformed")
+            r_eventid = str(item.get("r_eventid", "0"))
+            if r_eventid == "0":
+                continue  # still active
+            try:
+                rows.append(
+                    ZabbixRecoveryEvidence(
+                        problem_eventid=str(item["eventid"]),
+                        recovery_eventid=r_eventid,
+                        clock=int(item.get("r_clock", 0)),
+                    )
+                )
+            except (TypeError, ValueError) as exc:
+                raise ProviderProtocolError(
+                    f"recovery entry failed normalization: {exc}"
+                ) from exc
+        return rows
+
+    def read_trigger_associations(
+        self,
+        endpoint: AdmittedProviderEndpoint,
+        credential: ResolvedZabbixCredential,
+        *,
+        max_rows: int,
+    ) -> Sequence[tuple[str, str]]:
+        """trigger.get selectHosts -> (triggerid, hostid) pairs. Provider
+        evidence only — canonical binding happens repository-side."""
+        result = _rpc(
+            endpoint.api_url,
+            "trigger.get",
+            {
+                "output": ["triggerid"],
+                "selectHosts": ["hostid"],
+                "limit": max_rows,
+            },
+            credential.api_token,
+        )
+        if not isinstance(result, list):
+            raise ProviderProtocolError("trigger.get result is not a list")
+        pairs: list[tuple[str, str]] = []
+        for item in result:
+            if not isinstance(item, dict) or "triggerid" not in item:
+                raise ProviderProtocolError("trigger.get malformed entry")
+            hosts = item.get("hosts") or []
+            if not hosts:
+                continue
+            pairs.append((str(item["triggerid"]), str(hosts[0]["hostid"])))
+        return pairs

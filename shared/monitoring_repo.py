@@ -54,6 +54,15 @@ from jlmirror_monitoring.metric_history import (
     MetricHistoryWindow,
     ZabbixHistoryEvidence,
 )
+from jlmirror_monitoring.problem_state import (
+    CanonicalProblemState,
+    ProblemAssociationTarget,
+    ProblemStateClaim,
+    ProblemStateFailureClass,
+    ProblemStateResult,
+    ZabbixProblemEvidence,
+    ZabbixRecoveryEvidence,
+)
 from jlmirror_monitoring.source import (
     ConfiguredProviderScope,
     ZabbixProviderConfiguration,
@@ -2382,6 +2391,804 @@ def list_source_ids_with_pending_projection(
         SELECT DISTINCT tenant_id, monitoring_source_id
           FROM monitoring.monitoring_metric_observation_acceptance
          WHERE history_projection_state = 'pending'
+        """
+    )
+    return [tuple(r) for r in cur.fetchall()]
+
+
+class PgProblemStateRepository:
+    """Claim/complete adapter for problem-state polls.
+
+    Claim requires: source authority current + 'current' evidence + a
+    volatile runtime admission for the current problem poll epoch
+    (fail-closed recovery admission — re-established per pass by the
+    worker). Poll generation is assigned at claim time (source.gen + 1).
+
+    Completion binds canonical problem_id to the scoped provider eventid,
+    projects state/severity with immutable transitions, applies recovery
+    evidence (provider_recovery), and resolves omissions only when the
+    snapshot is proven complete (authoritative_negative).
+    """
+
+    def __init__(self, conn: Connection, tenant_id: str) -> None:
+        self._conn = conn
+        self._tenant_id = tenant_id
+
+    # -- admission + trigger bindings (worker-facing, pre-claim) ----------
+
+    def reestablish_problem_admission(
+        self, monitoring_source_id: str, source_instance_generation: str
+    ) -> None:
+        """Refresh the volatile recovery admission for the source's current
+        problem poll epoch."""
+        self._conn.execute(
+            """
+            INSERT INTO monitoring.monitoring_problem_state_runtime_admission
+                (tenant_id, monitoring_source_id, problem_poll_epoch,
+                 recovery_generation, recovery_admission_ref)
+            SELECT s.tenant_id, s.monitoring_source_id, s.problem_poll_epoch,
+                   %s, %s
+              FROM monitoring.monitoring_source s
+             WHERE s.tenant_id = %s AND s.monitoring_source_id = %s
+               AND s.active_source_instance_generation = %s
+            ON CONFLICT (tenant_id, monitoring_source_id)
+            DO UPDATE SET problem_poll_epoch = EXCLUDED.problem_poll_epoch,
+                          recovery_generation = EXCLUDED.recovery_generation,
+                          recovery_admission_ref =
+                              EXCLUDED.recovery_admission_ref,
+                          admitted_at = transaction_timestamp()
+            """,
+            (
+                _opaque("mon-recgen"), _opaque("mon-recadm"),
+                self._tenant_id, monitoring_source_id,
+                source_instance_generation,
+            ),
+        )
+        self._conn.commit()
+
+    def refresh_trigger_bindings(
+        self,
+        monitoring_source_id: str,
+        source_instance_generation: str,
+        trigger_host_pairs: Sequence[tuple[str, str]],
+    ) -> int:
+        """Upsert provider trigger->resource associations for in-scope
+        resources. Returns the number of bindings upserted."""
+        if not trigger_host_pairs:
+            return 0
+        hostids = {h for _, h in trigger_host_pairs}
+        cur = self._conn.execute(
+            """
+            SELECT provider_external_ref, monitoring_resource_id
+              FROM monitoring.monitoring_resource
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+               AND source_instance_generation = %s
+               AND scope_state = 'in_scope'
+            """,
+            (self._tenant_id, monitoring_source_id,
+             source_instance_generation),
+        )
+        host_to_resource = {r[0]: r[1] for r in cur.fetchall()}
+        n = 0
+        for trigger_ref, hostid in trigger_host_pairs:
+            resource_id = host_to_resource.get(hostid)
+            if resource_id is None:
+                continue  # out-of-scope host — no association
+            self._conn.execute(
+                """
+                INSERT INTO monitoring.monitoring_trigger_binding
+                    (tenant_id, monitoring_source_id,
+                     source_instance_generation, provider_trigger_ref,
+                     monitoring_resource_id)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (tenant_id, monitoring_source_id,
+                             source_instance_generation, provider_trigger_ref)
+                DO UPDATE SET monitoring_resource_id =
+                                  EXCLUDED.monitoring_resource_id,
+                              updated_at = transaction_timestamp()
+                """,
+                (
+                    self._tenant_id, monitoring_source_id,
+                    source_instance_generation, trigger_ref, resource_id,
+                ),
+            )
+            n += 1
+        self._conn.commit()
+        return n
+
+    # -- canonical claim/complete ports ------------------------------------
+
+    def peek_op_source(
+        self, monitoring_sync_operation_id: str
+    ) -> tuple[str, str]:
+        """(source_id, generation) for a pending problem_state_sync op —
+        read-only, used to refresh admission before claiming."""
+        cur = self._conn.execute(
+            """
+            SELECT monitoring_source_id, source_instance_generation
+              FROM monitoring.monitoring_sync_operation
+             WHERE tenant_id = %s
+               AND monitoring_sync_operation_id = %s
+               AND responsibility_kind = 'problem_state_sync'
+            """,
+            (self._tenant_id, monitoring_sync_operation_id),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError("monitoring.problem_state_op_not_found")
+        return row[0], row[1]
+
+    def trigger_associations(
+        self, monitoring_source_id: str, source_instance_generation: str
+    ) -> tuple[ProblemAssociationTarget, ...]:
+        """Current trigger->resource association snapshot for a claim."""
+        cur = self._conn.execute(
+            """
+            SELECT provider_trigger_ref, monitoring_resource_id
+              FROM monitoring.monitoring_trigger_binding
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+               AND source_instance_generation = %s
+             ORDER BY provider_trigger_ref
+            """,
+            (self._tenant_id, monitoring_source_id,
+             source_instance_generation),
+        )
+        return tuple(
+            ProblemAssociationTarget(
+                provider_trigger_ref=r[0], monitoring_resource_id=r[1])
+            for r in cur.fetchall()
+        )
+
+    def known_problem_eventids(
+        self, monitoring_source_id: str, source_instance_generation: str
+    ) -> list[str]:
+        """All bound provider eventids for the source generation — feeds the
+        recovery-evidence read."""
+        cur = self._conn.execute(
+            """
+            SELECT provider_external_ref
+              FROM monitoring.monitoring_problem_provider_binding
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+               AND source_instance_generation = %s
+             ORDER BY provider_external_ref
+            """,
+            (self._tenant_id, monitoring_source_id,
+             source_instance_generation),
+        )
+        return [r[0] for r in cur.fetchall()]
+
+    def claim_problem_state(
+        self, monitoring_sync_operation_id: str, *, claim_token: str
+    ) -> ProblemStateClaim:
+        cur = self._conn.execute(
+            """
+            SELECT o.monitoring_source_id, o.source_instance_generation,
+                   o.configuration_revision, o.scope_revision,
+                   s.problem_poll_epoch, s.problem_poll_generation,
+                   s.provider_scope_tenant_binding_id,
+                   g.provider_instance_ref, g.provider_base_url,
+                   s.credential_binding_ref
+              FROM monitoring.monitoring_sync_operation o
+              JOIN monitoring.monitoring_source s
+                ON s.tenant_id = o.tenant_id
+               AND s.monitoring_source_id = o.monitoring_source_id
+              JOIN monitoring.monitoring_source_generation g
+                ON g.tenant_id = o.tenant_id
+               AND g.monitoring_source_id = o.monitoring_source_id
+               AND g.source_instance_generation = o.source_instance_generation
+             WHERE o.tenant_id = %s
+               AND o.monitoring_sync_operation_id = %s
+               AND o.state = 'pending'
+               AND o.claim_token IS NULL
+               AND o.responsibility_kind = 'problem_state_sync'
+               AND s.active_source_instance_generation = o.source_instance_generation
+               AND s.configuration_revision = o.configuration_revision
+               AND s.scope_revision = o.scope_revision
+               AND s.operational_evidence_state = 'current'
+             FOR UPDATE OF o, s
+            """,
+            (self._tenant_id, monitoring_sync_operation_id),
+        )
+        row = cur.fetchone()
+        if row is None:
+            self._conn.rollback()
+            raise ValueError("monitoring.problem_state_not_claimable")
+
+        (source_id, generation, config_rev, scope_rev, epoch, gen,
+         _binding, provider_instance_ref, base_url, cred_ref) = row
+        poll_gen = gen + 1
+
+        # Fail-closed recovery admission must exist for this epoch
+        cur = self._conn.execute(
+            """
+            SELECT 1
+              FROM monitoring.monitoring_problem_state_runtime_admission
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+               AND problem_poll_epoch = %s
+            """,
+            (self._tenant_id, source_id, epoch),
+        )
+        if cur.fetchone() is None:
+            self._conn.rollback()
+            raise ValueError("monitoring.problem_state_recovery_admission_required")
+
+        cur = self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_source
+               SET problem_poll_generation = %s,
+                   updated_at = transaction_timestamp()
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+            """,
+            (poll_gen, self._tenant_id, source_id),
+        )
+        cur = self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_sync_operation
+               SET state = 'running', claim_token = %s,
+                   started_at = transaction_timestamp(),
+                   attempt_count = attempt_count + 1,
+                   problem_poll_epoch = %s, problem_poll_generation = %s
+             WHERE tenant_id = %s
+               AND monitoring_sync_operation_id = %s
+               AND state = 'pending' AND claim_token IS NULL
+            """,
+            (claim_token, epoch, poll_gen,
+             self._tenant_id, monitoring_sync_operation_id),
+        )
+        if cur.rowcount != 1:
+            self._conn.rollback()
+            raise ValueError("monitoring.problem_state_not_claimable")
+
+        cur = self._conn.execute(
+            """
+            SELECT provider_trigger_ref, monitoring_resource_id
+              FROM monitoring.monitoring_trigger_binding
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+               AND source_instance_generation = %s
+             ORDER BY provider_trigger_ref
+            """,
+            (self._tenant_id, source_id, generation),
+        )
+        associations = tuple(
+            ProblemAssociationTarget(
+                provider_trigger_ref=r[0], monitoring_resource_id=r[1]
+            )
+            for r in cur.fetchall()
+        )
+
+        self._conn.commit()
+        return ProblemStateClaim(
+            claim_token=claim_token,
+            tenant_id=self._tenant_id,
+            monitoring_sync_operation_id=monitoring_sync_operation_id,
+            monitoring_source_id=source_id,
+            source_instance_generation=generation,
+            configuration_revision=config_rev,
+            scope_revision=scope_rev,
+            problem_poll_epoch=epoch,
+            problem_poll_generation=poll_gen,
+            provider_instance_ref=provider_instance_ref,
+            provider_configuration=ZabbixProviderConfiguration(base_url=base_url),
+            credential_binding_ref=cred_ref,
+            associations=associations,
+        )
+
+    def complete_problem_state(
+        self,
+        claim: ProblemStateClaim,
+        result: ProblemStateResult,
+        *,
+        raw_rows: Sequence[ZabbixProblemEvidence] = (),
+        recoveries: Sequence[ZabbixRecoveryEvidence] = (),
+    ) -> ProblemStateResult:
+        cur = self._conn.execute(
+            """
+            SELECT 1
+              FROM monitoring.monitoring_sync_operation o
+              JOIN monitoring.monitoring_source s
+                ON s.tenant_id = o.tenant_id
+               AND s.monitoring_source_id = o.monitoring_source_id
+             WHERE o.tenant_id = %s
+               AND o.monitoring_sync_operation_id = %s
+               AND o.state = 'running'
+               AND o.claim_token = %s
+               AND s.active_source_instance_generation = %s
+               AND s.configuration_revision = %s
+               AND s.scope_revision = %s
+               AND s.problem_poll_epoch = %s
+               AND s.problem_poll_generation = %s
+             FOR UPDATE OF o, s
+            """,
+            (
+                claim.tenant_id,
+                claim.monitoring_sync_operation_id,
+                claim.claim_token,
+                claim.source_instance_generation,
+                claim.configuration_revision,
+                claim.scope_revision,
+                claim.problem_poll_epoch,
+                claim.problem_poll_generation,
+            ),
+        )
+        if cur.fetchone() is None:
+            self._conn.rollback()
+            raise ValueError("monitoring.problem_state_claim_lost")
+
+        seen_eventids: list[str] = []
+        if result.succeeded:
+            seen_eventids = self._persist_problems(claim, result, raw_rows)
+            self._persist_recoveries(claim, recoveries)
+            self._apply_omission(claim, result, seen_eventids)
+            self._conn.execute(
+                """
+                INSERT INTO monitoring.monitoring_problem_snapshot_evidence
+                    (tenant_id, snapshot_evidence_id,
+                     monitoring_sync_operation_id, monitoring_source_id,
+                     source_instance_generation, problem_poll_epoch,
+                     problem_poll_generation, complete_snapshot,
+                     active_problem_count, recovery_count)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (tenant_id, monitoring_sync_operation_id)
+                DO NOTHING
+                """,
+                (
+                    claim.tenant_id, _opaque("mon-snap"),
+                    claim.monitoring_sync_operation_id,
+                    claim.monitoring_source_id,
+                    claim.source_instance_generation,
+                    claim.problem_poll_epoch, claim.problem_poll_generation,
+                    result.complete_snapshot, len(result.problems),
+                    len(recoveries),
+                ),
+            )
+
+        self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_source
+               SET operational_evidence_state = %s,
+                   last_attempt_at = transaction_timestamp(),
+                   last_successful_sync_at = CASE WHEN %s = 'succeeded'
+                       THEN transaction_timestamp()
+                       ELSE last_successful_sync_at END,
+                   updated_at = transaction_timestamp()
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+            """,
+            (
+                result.operational_evidence_state.value,
+                result.operation_state.value,
+                claim.tenant_id, claim.monitoring_source_id,
+            ),
+        )
+        op_state = (
+            result.operation_state.value if result.complete_snapshot
+            else "reconciliation_required"
+        )
+        self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_sync_operation
+               SET state = %s, completed_at = transaction_timestamp(),
+                   claim_token = NULL, last_error_class = %s
+             WHERE tenant_id = %s AND monitoring_sync_operation_id = %s
+            """,
+            (
+                op_state,
+                result.failure_class.value if result.failure_class
+                else (None if result.complete_snapshot
+                      else "monitoring.problem_snapshot_incomplete"),
+                claim.tenant_id, claim.monitoring_sync_operation_id,
+            ),
+        )
+        self._conn.commit()
+        return result
+
+    def _persist_problems(
+        self,
+        claim: ProblemStateClaim,
+        result: ProblemStateResult,
+        raw_rows: Sequence[ZabbixProblemEvidence],
+    ) -> list[str]:
+        from datetime import datetime, timezone
+
+        trigger_by_event = {r.eventid: r.objectid for r in raw_rows}
+        seen: list[str] = []
+        for prob in result.problems:
+            trigger_ref = trigger_by_event.get(prob.provider_eventid)
+            if trigger_ref is None:
+                continue  # collect already bound it; raw row required for binding
+            self._assert_resource_current(claim, prob.monitoring_resource_id)
+
+            # Stable canonical identity bound to scoped provider eventid
+            cur = self._conn.execute(
+                """
+                INSERT INTO monitoring.monitoring_problem_provider_binding
+                    (tenant_id, problem_id, monitoring_source_id,
+                     source_instance_generation, monitoring_resource_id,
+                     provider_profile, provider_external_ref,
+                     provider_trigger_ref)
+                VALUES (%s, %s, %s, %s, %s, 'zabbix', %s, %s)
+                ON CONFLICT (tenant_id, monitoring_source_id,
+                             source_instance_generation, provider_profile,
+                             provider_external_ref)
+                DO NOTHING
+                RETURNING problem_id
+                """,
+                (
+                    claim.tenant_id, _opaque("mon-prob"),
+                    claim.monitoring_source_id,
+                    claim.source_instance_generation,
+                    prob.monitoring_resource_id, prob.provider_eventid,
+                    trigger_ref,
+                ),
+            )
+            row = cur.fetchone()
+            if row is None:
+                cur = self._conn.execute(
+                    """
+                    SELECT problem_id, monitoring_resource_id,
+                           provider_trigger_ref
+                      FROM monitoring.monitoring_problem_provider_binding
+                     WHERE tenant_id = %s AND monitoring_source_id = %s
+                       AND source_instance_generation = %s
+                       AND provider_external_ref = %s
+                    """,
+                    (claim.tenant_id, claim.monitoring_source_id,
+                     claim.source_instance_generation,
+                     prob.provider_eventid),
+                )
+                b = cur.fetchone()
+                if (b is None or b[1] != prob.monitoring_resource_id
+                        or b[2] != trigger_ref):
+                    raise ValueError(
+                        "monitoring.problem_state_provider_identity_collision")
+                problem_id = b[0]
+            else:
+                problem_id = row[0]
+
+            opened_at = datetime.fromtimestamp(
+                prob.opened_at_epoch_seconds, tz=timezone.utc)
+            cur = self._conn.execute(
+                """
+                SELECT problem_state, severity_class, summary,
+                       projection_revision, provider_acknowledged,
+                       provider_metadata
+                  FROM monitoring.monitoring_problem
+                 WHERE tenant_id = %s AND problem_id = %s
+                 FOR UPDATE
+                """,
+                (claim.tenant_id, problem_id),
+            )
+            existing = cur.fetchone()
+            metadata = json.dumps(
+                {t.key: t.value for t in prob.tags}, sort_keys=True)
+
+            if existing is None:
+                self._conn.execute(
+                    """
+                    INSERT INTO monitoring.monitoring_problem
+                        (tenant_id, problem_id, monitoring_source_id,
+                         source_instance_generation, monitoring_resource_id,
+                         problem_state, severity_class, summary, opened_at,
+                         resolved_at, last_confirmed_at, evidence_state,
+                         projection_revision, problem_poll_epoch,
+                         problem_poll_generation, provider_acknowledged,
+                         provider_metadata)
+                    VALUES (%s, %s, %s, %s, %s, 'active', %s, %s, %s, NULL,
+                            %s, 'current', 1, %s, %s, %s, %s::jsonb)
+                    """,
+                    (
+                        claim.tenant_id, problem_id,
+                        claim.monitoring_source_id,
+                        claim.source_instance_generation,
+                        prob.monitoring_resource_id,
+                        prob.severity_class.value, prob.summary, opened_at,
+                        opened_at, claim.problem_poll_epoch,
+                        claim.problem_poll_generation,
+                        prob.provider_acknowledged, metadata,
+                    ),
+                )
+                self._insert_transition(
+                    claim, problem_id, prob.monitoring_resource_id,
+                    None, "active", None, prob.severity_class.value,
+                    "provider_positive",
+                    f"zabbix-problem:{prob.provider_eventid}", 1,
+                )
+            else:
+                (state, severity, summary, rev, ack, old_meta) = existing
+                if state == "resolved":
+                    raise ValueError(
+                        "monitoring.problem_state_resolved_event_reappeared")
+                meta_same = json.loads(old_meta or "{}") == json.loads(metadata)
+                changed = (severity != prob.severity_class.value
+                           or summary != prob.summary
+                           or ack != prob.provider_acknowledged
+                           or not meta_same)
+                if changed:
+                    new_rev = rev + 1
+                    self._conn.execute(
+                        """
+                        UPDATE monitoring.monitoring_problem
+                           SET severity_class = %s, summary = %s,
+                               last_confirmed_at = %s,
+                               evidence_state = 'current',
+                               projection_revision = %s,
+                               problem_poll_epoch = %s,
+                               problem_poll_generation = %s,
+                               provider_acknowledged = %s,
+                               provider_metadata = %s::jsonb,
+                               updated_at = transaction_timestamp()
+                         WHERE tenant_id = %s AND problem_id = %s
+                        """,
+                        (prob.severity_class.value, prob.summary, opened_at,
+                         new_rev, claim.problem_poll_epoch,
+                         claim.problem_poll_generation,
+                         prob.provider_acknowledged, metadata,
+                         claim.tenant_id, problem_id),
+                    )
+                    if severity != prob.severity_class.value:
+                        self._insert_transition(
+                            claim, problem_id, prob.monitoring_resource_id,
+                            "active", "active", severity,
+                            prob.severity_class.value, "severity_change",
+                            f"zabbix-problem:{prob.provider_eventid}",
+                            new_rev,
+                        )
+                else:
+                    self._conn.execute(
+                        """
+                        UPDATE monitoring.monitoring_problem
+                           SET last_confirmed_at =
+                                   GREATEST(last_confirmed_at, %s),
+                               evidence_state = 'current',
+                               problem_poll_epoch = %s,
+                               problem_poll_generation = %s,
+                               updated_at = transaction_timestamp()
+                         WHERE tenant_id = %s AND problem_id = %s
+                        """,
+                        (opened_at, claim.problem_poll_epoch,
+                         claim.problem_poll_generation,
+                         claim.tenant_id, problem_id),
+                    )
+            seen.append(prob.provider_eventid)
+        return seen
+
+    def _persist_recoveries(
+        self,
+        claim: ProblemStateClaim,
+        recoveries: Sequence[ZabbixRecoveryEvidence],
+    ) -> None:
+        from datetime import datetime, timezone
+
+        for rec in recoveries:
+            resolved_at = datetime.fromtimestamp(rec.clock, tz=timezone.utc)
+            cur = self._conn.execute(
+                """
+                SELECT p.problem_id, p.monitoring_resource_id,
+                       p.problem_state, p.severity_class,
+                       p.projection_revision, p.resolved_at
+                  FROM monitoring.monitoring_problem_provider_binding b
+                  JOIN monitoring.monitoring_problem p
+                    ON p.tenant_id = b.tenant_id AND p.problem_id = b.problem_id
+                 WHERE b.tenant_id = %s AND b.monitoring_source_id = %s
+                   AND b.source_instance_generation = %s
+                   AND b.provider_external_ref = %s
+                 FOR UPDATE OF p
+                """,
+                (claim.tenant_id, claim.monitoring_source_id,
+                 claim.source_instance_generation, rec.problem_eventid),
+            )
+            row = cur.fetchone()
+            if row is None:
+                continue  # recovery for unknown problem — no binding authority
+            (problem_id, resource_id, state, severity, rev,
+             existing_resolved) = row
+            if state == "active":
+                new_rev = rev + 1
+                self._conn.execute(
+                    """
+                    UPDATE monitoring.monitoring_problem
+                       SET problem_state = 'resolved', resolved_at = %s,
+                           last_confirmed_at = %s, evidence_state = 'current',
+                           projection_revision = %s, problem_poll_epoch = %s,
+                           problem_poll_generation = %s,
+                           updated_at = transaction_timestamp()
+                     WHERE tenant_id = %s AND problem_id = %s
+                    """,
+                    (resolved_at, resolved_at, new_rev,
+                     claim.problem_poll_epoch, claim.problem_poll_generation,
+                     claim.tenant_id, problem_id),
+                )
+                self._insert_transition(
+                    claim, problem_id, resource_id, "active", "resolved",
+                    severity, severity, "provider_recovery",
+                    f"zabbix-recovery:{rec.recovery_eventid}", new_rev,
+                )
+            elif existing_resolved is not None and existing_resolved != resolved_at:
+                raise ValueError(
+                    "monitoring.problem_state_conflicting_recovery_evidence")
+
+    def _apply_omission(
+        self,
+        claim: ProblemStateClaim,
+        result: ProblemStateResult,
+        seen_eventids: Sequence[str],
+    ) -> None:
+        if result.complete_snapshot:
+            # Omission has negative authority only on a proven-complete
+            # snapshot: unreturned actives resolve via authoritative_negative.
+            cur = self._conn.execute(
+                """
+                SELECT p.problem_id, p.monitoring_resource_id,
+                       p.severity_class, p.projection_revision
+                  FROM monitoring.monitoring_problem p
+                  JOIN monitoring.monitoring_problem_provider_binding b
+                    ON b.tenant_id = p.tenant_id AND b.problem_id = p.problem_id
+                 WHERE p.tenant_id = %s
+                   AND p.monitoring_source_id = %s
+                   AND p.source_instance_generation = %s
+                   AND p.problem_state = 'active'
+                   AND NOT (b.provider_external_ref = ANY(%s))
+                 FOR UPDATE OF p
+                """,
+                (claim.tenant_id, claim.monitoring_source_id,
+                 claim.source_instance_generation, seen_eventids or ["∅"]),
+            )
+            for problem_id, resource_id, severity, rev in cur.fetchall():
+                new_rev = rev + 1
+                self._conn.execute(
+                    """
+                    UPDATE monitoring.monitoring_problem
+                       SET problem_state = 'resolved',
+                           resolved_at = transaction_timestamp(),
+                           last_confirmed_at = transaction_timestamp(),
+                           evidence_state = 'current',
+                           projection_revision = %s,
+                           problem_poll_epoch = %s,
+                           problem_poll_generation = %s,
+                           updated_at = transaction_timestamp()
+                     WHERE tenant_id = %s AND problem_id = %s
+                    """,
+                    (new_rev, claim.problem_poll_epoch,
+                     claim.problem_poll_generation,
+                     claim.tenant_id, problem_id),
+                )
+                self._insert_transition(
+                    claim, problem_id, resource_id, "active", "resolved",
+                    severity, severity, "authoritative_negative",
+                    f"problem.get:complete:{claim.monitoring_sync_operation_id}",
+                    new_rev,
+                )
+        else:
+            self._conn.execute(
+                """
+                UPDATE monitoring.monitoring_problem p
+                   SET evidence_state = 'reconciliation_required',
+                       updated_at = transaction_timestamp()
+                 WHERE p.tenant_id = %s AND p.monitoring_source_id = %s
+                   AND p.source_instance_generation = %s
+                   AND p.problem_state = 'active'
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM monitoring.monitoring_problem_provider_binding b
+                        WHERE b.tenant_id = p.tenant_id
+                          AND b.problem_id = p.problem_id
+                          AND b.provider_external_ref = ANY(%s))
+                """,
+                (claim.tenant_id, claim.monitoring_source_id,
+                 claim.source_instance_generation, seen_eventids or ["∅"]),
+            )
+
+    def _assert_resource_current(
+        self, claim: ProblemStateClaim, monitoring_resource_id: str
+    ) -> None:
+        cur = self._conn.execute(
+            """
+            SELECT 1 FROM monitoring.monitoring_resource
+             WHERE tenant_id = %s AND monitoring_resource_id = %s
+               AND monitoring_source_id = %s
+               AND source_instance_generation = %s
+               AND scope_state = 'in_scope'
+               AND scope_evidence_state = 'current'
+            """,
+            (claim.tenant_id, monitoring_resource_id,
+             claim.monitoring_source_id, claim.source_instance_generation),
+        )
+        if cur.fetchone() is None:
+            raise ValueError(
+                "monitoring.problem_state_resource_association_not_current")
+
+    def _insert_transition(
+        self, claim: ProblemStateClaim, problem_id: str,
+        resource_id: str, from_state, to_state, from_sev, to_sev,
+        reason: str, evidence_ref: str, revision: int,
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO monitoring.monitoring_problem_transition
+                (tenant_id, problem_transition_id, problem_id,
+                 monitoring_source_id, source_instance_generation,
+                 monitoring_resource_id, from_problem_state,
+                 to_problem_state, from_severity_class, to_severity_class,
+                 transition_reason, provider_evidence_ref,
+                 projection_revision)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                claim.tenant_id, _opaque("mon-ptrans"), problem_id,
+                claim.monitoring_source_id, claim.source_instance_generation,
+                resource_id, from_state, to_state, from_sev, to_sev,
+                reason, evidence_ref, revision,
+            ),
+        )
+
+
+async def enqueue_problem_state_sync(
+    conn: AsyncConnection, tenant_id: str, source_id: str
+) -> str | None:
+    """Enqueue a problem_state_sync op — source must be 'current'."""
+    cur = await conn.execute(
+        """
+        SELECT active_source_instance_generation, configuration_revision,
+               scope_revision
+          FROM monitoring.monitoring_source
+         WHERE tenant_id = %s AND monitoring_source_id = %s
+           AND operational_evidence_state = 'current'
+        """,
+        (tenant_id, source_id),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return None
+    op_id = _opaque("mon-op")
+    await conn.execute(
+        """
+        INSERT INTO monitoring.monitoring_sync_operation
+            (tenant_id, monitoring_sync_operation_id, monitoring_source_id,
+             source_instance_generation, responsibility_kind,
+             configuration_revision, scope_revision)
+        VALUES (%s, %s, %s, %s, 'problem_state_sync', %s, %s)
+        """,
+        (tenant_id, op_id, source_id, row[0], row[1], row[2]),
+    )
+    await conn.commit()
+    return op_id
+
+
+async def list_problems(
+    conn: AsyncConnection, tenant_id: str, source_id: str,
+    *, active_only: bool = False,
+) -> list[dict]:
+    cur = await conn.execute(
+        """
+        SELECT p.problem_id, p.problem_state, p.severity_class, p.summary,
+               p.opened_at, p.resolved_at, p.last_confirmed_at,
+               p.evidence_state, p.projection_revision,
+               p.provider_acknowledged,
+               b.provider_external_ref AS provider_eventid
+          FROM monitoring.monitoring_problem p
+          JOIN monitoring.monitoring_problem_provider_binding b
+            ON b.tenant_id = p.tenant_id AND b.problem_id = p.problem_id
+         WHERE p.tenant_id = %s AND p.monitoring_source_id = %s
+           AND (NOT %s OR p.problem_state = 'active')
+         ORDER BY p.opened_at DESC
+        """,
+        (tenant_id, source_id, active_only),
+    )
+    keys = ("problem_id", "problem_state", "severity_class", "summary",
+            "opened_at", "resolved_at", "last_confirmed_at",
+            "evidence_state", "projection_revision",
+            "provider_acknowledged", "provider_eventid")
+    return [dict(zip(keys, r)) for r in await cur.fetchall()]
+
+
+def list_all_pending_problem_syncs(conn: Connection) -> list[tuple[str, str]]:
+    """All tenants' pending problem_state_sync ops — (tenant_id, op_id)."""
+    cur = conn.execute(
+        """
+        SELECT tenant_id, monitoring_sync_operation_id
+          FROM monitoring.monitoring_sync_operation
+         WHERE state = 'pending'
+           AND responsibility_kind = 'problem_state_sync'
+         ORDER BY created_at
         """
     )
     return [tuple(r) for r in cur.fetchall()]

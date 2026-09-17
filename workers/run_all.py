@@ -10,6 +10,7 @@ import logging
 
 from workers.current_state import run_current_state_worker
 from workers.history import run_history_worker
+from workers.problem_state import run_problem_state_worker
 from workers.inventory import run_inventory_worker
 from workers.metrics import run_metrics_worker
 from workers.outbox_dispatcher import run_outbox_dispatcher
@@ -31,6 +32,7 @@ def main() -> None:
         ("metrics", run_metrics_worker),
         ("current_state", run_current_state_worker),
         ("history", run_history_worker),
+        ("problem_state", run_problem_state_worker),
     ):
         try:
             runner(poll_interval=2, once=True)

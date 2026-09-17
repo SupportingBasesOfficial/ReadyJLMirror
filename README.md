@@ -164,14 +164,19 @@ Real persistence + real Zabbix adapter, implementing the accepted
   evidence on truncated windows). The same pass projects
   `history_projection_state='pending'` acceptance envelopes — the
   History obligation carried by current-state acceptances
-- `POST /sources/{id}/inventory` + `GET /sources/{id}/resources` —
-  enqueue `host_inventory_sync` and read canonical resources
-- `workers/inventory.py` — canonical `HostInventoryWorker`:
-  hostgroup.get (anchor visibility) → host.get (bounded snapshot,
-  truncation-detected via `limit: max+1`) → fenced complete →
-  `monitoring_resource` upsert + immutable snapshot/provider evidence;
-  absent hosts become `removed` only on complete snapshots — degraded
-  evidence never removes resources (fail closed, no inference)
+- `POST /sources/{id}/problems/poll` + `GET /sources/{id}/problems`
+  (`?active_only=`) — `problem_state_sync` ops require source evidence
+  `current` and a volatile fail-closed recovery admission per poll epoch
+- `workers/problem_state.py` — canonical `collect_problem_state`:
+  trigger.get selectHosts refreshes trigger→resource bindings →
+  problem.get active problems (bounded, r_eventid='0', dedup eventid) →
+  recovery evidence (r_eventid/r_clock) → stable canonical `problem_id`
+  binding (provider eventid never becomes canonical identity) →
+  `monitoring_problem` projection + immutable transitions
+  (`provider_positive`, `severity_change`, `provider_recovery`,
+  `authoritative_negative`); resolved problems never reopen under the
+  same event identity; omission resolves only on a proven-complete
+  snapshot — incomplete snapshots mark actives `reconciliation_required`
 - `providers/credentials.py` — env-based dev resolver
   (`ZABBIX_CRED_<REF>`); production = OpenBao/secret manager
 - `providers/egress.py` — dev egress admission (https +

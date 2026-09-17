@@ -26,12 +26,14 @@ from shared.monitoring_repo import (
     enqueue_current_state_poll,
     enqueue_history_sync,
     enqueue_metric_definition_poll,
+    enqueue_problem_state_sync,
     enqueue_sync_operation,
     get_source,
     list_current_states,
     list_history_observations,
     list_history_streams,
     list_metric_definitions,
+    list_problems,
     list_resources,
     list_sources,
 )
@@ -534,6 +536,57 @@ async def run_history_once() -> dict:
     def _run() -> int:
         with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
             return _run_history(conn)
+
+    processed = await asyncio.to_thread(_run)
+    return {"processed": processed}
+
+
+# ---------------------------------------------------------------------------
+# Problem state
+# ---------------------------------------------------------------------------
+
+
+@router.post("/sources/{source_id}/problems/poll", status_code=202)
+async def enqueue_problem_poll(source_id: str, request: Request,
+                               tenant_id: str | None = None) -> dict:
+    """Enqueue a problem_state_sync op — requires source evidence 'current'."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_connection() as conn:
+        op_id = await enqueue_problem_state_sync(conn, tenant, source_id)
+    if op_id is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    return {"monitoring_sync_operation_id": op_id, "state": "pending"}
+
+
+@router.get("/sources/{source_id}/problems")
+async def list_problems_endpoint(source_id: str, request: Request,
+                                 tenant_id: str | None = None,
+                                 active_only: bool = False) -> list[dict]:
+    """List canonical problem projections for a source."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_connection() as conn:
+        rows = await list_problems(
+            conn, tenant, source_id, active_only=active_only)
+    for r in rows:
+        for k in ("opened_at", "resolved_at", "last_confirmed_at"):
+            if r.get(k) is not None:
+                r[k] = r[k].isoformat()
+    return rows
+
+
+@router.post("/problems/run", status_code=200)
+async def run_problems_once() -> dict:
+    """Dev trigger: one problem-state poll pass over pending ops."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available")
+    import asyncio
+
+    import psycopg
+    from workers.problem_state import _process_pending as _run_problems
+
+    def _run() -> int:
+        with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
+            return _run_problems(conn)
 
     processed = await asyncio.to_thread(_run)
     return {"processed": processed}
