@@ -11,8 +11,8 @@ from __future__ import annotations
 import logging
 import time
 
-from app.auth import utcnow
-from app.routers.async_ops import _outbox
+from shared.auth import utcnow
+from api.routers.async_ops import _outbox
 from jlmirror_async.outbox import BrokerPublicationReceipt
 
 logger = logging.getLogger(__name__)

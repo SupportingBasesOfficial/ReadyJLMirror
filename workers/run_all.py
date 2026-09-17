@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import logging
 
-from app.workers.outbox_dispatcher import run_outbox_dispatcher
-from app.workers.reconciliation import run_reconciliation_worker
-from app.workers.validation import run_validation_worker
+from workers.outbox_dispatcher import run_outbox_dispatcher
+from workers.reconciliation import run_reconciliation_worker
+from workers.validation import run_validation_worker
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

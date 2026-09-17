@@ -8,14 +8,14 @@ from typing import Annotated
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
 
-from app.auth import (
+from shared.auth import (
     fence_store,
     session_store,
     make_dev_principal,
     utcnow,
     default_session_lifetime,
 )
-from app.tenant import make_dev_tenant_context
+from shared.tenant import make_dev_tenant_context
 from jlmirror_authority.session import (
     BrowserSessionHandle,
     issue_browser_session,

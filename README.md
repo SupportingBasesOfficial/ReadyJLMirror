@@ -1,150 +1,122 @@
 # ReadyJLMirror
 
-Runnable application stack for [JLMirror](https://github.com/SupportingBasesOfficial/ProjectJLMirror) — a specification-first enterprise monitoring and observability platform.
+Runnable product implementation of [JLMirror](https://github.com/SupportingBasesOfficial/ProjectJLMirror) — a specification-first enterprise multi-tenant operations platform.
 
-This repository contains **only the application code** (API, workers, Docker setup, tests). The domain primitives, ADRs, SQL schema, and governance are consumed as a git submodule from [`ProjectJLMirror`](https://github.com/SupportingBasesOfficial/ProjectJLMirror).
+This repository implements the product slices authorized by the canonical specification. The specification itself (ADRs, domain primitives, SQL, governance) is consumed read-only as a git submodule at `vendor/ProjectJLMirror` — it is never modified here.
+
+## Current slice: G1 — Identity + Tenant + Protected Shell
+
+The first authorized product slice (`g1.identity-tenant-protected-shell@1`):
+
+- **Confidential BFF** — OIDC Authorization Code Flow + PKCE S256, server-side token exchange
+- **Opaque session capability** — browser holds only an opaque HttpOnly cookie; the handle's SHA-256 digest is the only persisted form
+- **Durable session authority** — PostgreSQL (`g1.browser_sessions`); revocation survives restarts
+- **CSRF double-submit** — token bound to the session row, required on all mutations
+- **Tenant binding via membership** — `tenant_id` from the client is never authority; only active membership in an active tenant binds a session
+- **Fail-closed** — unknown principals, revoked sessions, suspended tenants, stale/expired state all deny without existence leakage
+- **Protected shell** — minimal UI with explicit states: `loading / unauthenticated / needs_tenant / ready / forbidden / unavailable`
+- **Signed internal context** — BFF→API requests carry an HMAC-signed principal/session/tenant context (dev trust model; production = SPIFFE/SPIRE per D3 candidates)
 
 ## Quickstart
 
-### Prerequisites
-
-- Python 3.11+
-- Docker and Docker Compose (for the full stack)
-- Git (with submodule support)
-
-### Option 1 — Docker Compose (recommended)
+### Docker Compose (recommended)
 
 ```bash
-# Clone with submodules
 git clone --recursive https://github.com/SupportingBasesOfficial/ReadyJLMirror.git
 cd ReadyJLMirror
-
-# Copy environment template
 cp .env.example .env
 
-# Start the database and API
-docker compose up -d db api
+docker compose up -d db keycloak migrate api bff
 
-# Run migrations (one-time)
-docker compose --profile migrate run --rm migrate
-
-# Verify
-curl http://localhost:8000/health
-curl http://localhost:8000/docs
+# Open http://localhost:8080 — sign in as alice / alice (dev realm)
 ```
 
-### Option 2 — Local development
+Services:
+
+| Service | Port | Purpose |
+|---|---|---|
+| `bff` | 8080 | Public boundary — shell + auth + API proxy |
+| `keycloak` | 8180 | IdP (dev realm auto-imported) |
+| `api` | internal | Protected API — signed-context only |
+| `db` | 5432 | PostgreSQL 16 + TimescaleDB |
+| `migrate` | — | Applies `sql/` migrations, exits |
+
+### Local development (without Docker)
 
 ```bash
-# Clone with submodules
 git clone --recursive https://github.com/SupportingBasesOfficial/ReadyJLMirror.git
 cd ReadyJLMirror
-
-# Install dependencies (includes ProjectJLMirror as local package)
 pip install -e ".[dev]"
 
-# Run the API
-make dev
+# Requires a local PostgreSQL with the G1 schema applied:
+python -m scripts.migrate
 
-# Run tests
-make test
+# Dev auth bypass (no Keycloak needed for local iteration):
+$env:DEV_AUTH_BYPASS="true"   # or export on Linux/macOS
 
-# Run workers
-make worker
+# Terminal 1 — internal API
+uvicorn api.main:app --port 8000
+
+# Terminal 2 — BFF + shell (public boundary)
+uvicorn bff.main:app --port 8080
+
+# Open http://localhost:8080, then:
+#   GET /auth/dev-login  (simulates the OIDC callback in dev)
 ```
 
 ## Architecture
 
 ```
-ReadyJLMirror/
-├── app/                    # Application code (this repo)
-│   ├── main.py            # FastAPI entry point
-│   ├── config.py          # Environment configuration
-│   ├── db.py              # PostgreSQL pool + tenant context
-│   ├── auth.py            # Development authority adapters
-│   ├── tenant.py          # Development tenant context builder
-│   ├── context.py         # Tenant context middleware
-│   ├── routers/           # Domain API routers
-│   │   ├── authority.py   # Session + fence endpoints
-│   │   ├── monitoring.py  # Source planning + health projection
-│   │   ├── async_ops.py   # Outbox operations
-│   │   ├── observability.py # Reliability/observability joins
-│   │   └── release.py     # Change outcome classification
-│   └── workers/           # Background workers
-│       ├── outbox_dispatcher.py
-│       ├── validation.py
-│       ├── reconciliation.py
-│       └── run_all.py
-├── vendor/ProjectJLMirror/ # Git submodule (specification + domain primitives)
-│   ├── src/                # Python domain packages (jlmirror_*)
-│   ├── sql/                # PostgreSQL schema (18k+ lines, RLS, SECURITY DEFINER)
-│   ├── adr/                # 22 accepted ADRs
-│   └── docs/               # 258 design documents
-├── docker/                 # Docker init scripts
-├── scripts/                # Migration runner
-├── tests/                  # Integration tests
-├── docker-compose.yml      # PostgreSQL + API + workers
-├── Dockerfile              # Application image
-├── pyproject.toml          # Python project metadata
-└── Makefile                # Development commands
+browser ──► bff:8080 ──(signed ctx)──► api:8000
+   │            │                         │
+   │            ▼                         ▼
+   │      g1.browser_sessions        g1.* (authority checks)
+   │            │
+   └──► keycloak:8180 (OIDC / realm: jlmirror)
+
+workers/ — outbox dispatcher, validation, reconciliation (dev stubs)
+sql/g1/ — G1 schema (tenants, principals, memberships, sessions, oidc states)
+vendor/ProjectJLMirror/ — canonical spec + domain primitives (submodule)
 ```
 
-## API Endpoints
+## The shell states
 
-| Domain | Endpoint | Method | Description |
-|---|---|---|---|
-| Health | `/health` | GET | Liveness probe |
-| Health | `/health/ready` | GET | Readiness probe (checks DB) |
-| Authority | `/api/v1/auth/session/issue` | POST | Issue browser session |
-| Authority | `/api/v1/auth/session/retire` | POST | Retire browser session |
-| Authority | `/api/v1/fence/bootstrap` | POST | Bootstrap fence scope |
-| Authority | `/api/v1/fence/acquire` | POST | Acquire next fence epoch |
-| Authority | `/api/v1/fence/current/{id}` | GET | Get current fence state |
-| Monitoring | `/api/v1/monitoring/sources/plan` | POST | Plan source creation |
-| Monitoring | `/api/v1/monitoring/health/derive` | POST | Derive health decision |
-| Async | `/api/v1/async/outbox/append` | POST | Append outbox message |
-| Async | `/api/v1/async/outbox/claim-next` | POST | Claim next outbox message |
-| Async | `/api/v1/async/outbox/mark-published` | POST | Mark message as published |
-| Async | `/api/v1/async/outbox/pending` | GET | List pending messages |
-| Observability | `/api/v1/observability/profiles` | GET | List reliability profiles |
-| Observability | `/api/v1/observability/profiles/{id}` | GET | Get observability join |
-| Release | `/api/v1/release/outcome/classify` | POST | Classify change outcome |
-| Release | `/api/v1/release/outcomes` | GET | List outcome classes |
+| State | Meaning |
+|---|---|
+| `loading` | Session state being resolved |
+| `unauthenticated` | No session or expired → "Sign in" |
+| `needs_tenant` | Authenticated, pick a tenant |
+| `ready` | Bound to a tenant; principal + role shown |
+| `forbidden` | Membership revoked / tenant suspended — no existence leakage |
+| `unavailable` | Infrastructure failure — fail closed |
 
-Interactive docs available at `/docs` (Swagger UI) and `/redoc`.
+## Security properties (G1 invariants)
 
-## Development Notes
+- ID token validated against realm JWKS: signature, iss, aud, exp, nonce
+- PKCE S256 enforced; OIDC `state` is a one-shot digest, consumed on use
+- `sub`/`sid` are external references (`idp_subject_ref`/`idp_session_ref`), never platform IDs
+- `resolve_or_provision_principal` JIT-provisions only in development; production fails closed
+- Session `retired`/`expires_at` and principal `active` are re-checked on every protected call
+- Cross-tenant denial returns a single `forbidden` shape — no membership enumeration
 
-### What is development mode?
-
-The application starts with **in-memory authority adapters** (sessions, fences, outbox). These are suitable for local development and testing. They are **not production-safe** — they lose state on restart and provide no durability.
-
-### What is production mode?
-
-Set `APP_ENVIRONMENT=production`. The application will:
-- Require database connectivity at startup
-- Require all tenant context headers (no defaults)
-- Disable hot reload
-
-### Updating the submodule
-
-When `ProjectJLMirror` is updated:
+## Tests
 
 ```bash
-git submodule update --remote vendor/ProjectJLMirror
-git add vendor/ProjectJLMirror
-git commit -m "chore: update ProjectJLMirror submodule"
+python -m pytest tests/ -v
 ```
 
-## Limitations
+- `test_api.py` — domain sandbox endpoints (15 tests)
+- `test_g1_unit.py` — digests, PKCE RFC 7636 vector, HMAC context signatures (7 tests)
+- `test_g1_integration.py` — full G1 flow (7 tests; require running DB, skip otherwise)
 
-This is a runnable MVP. The following are **not yet implemented**:
+## What this is NOT yet
 
-- **Persistence**: Repositories connecting domain operations to PostgreSQL
-- **Real identity**: Keycloak/OIDC integration (candidates in conformance)
-- **Real broker**: Kafka integration (proposed, 4 closure conditions pending)
-- **Frontend**: No web UI
-- **Realtime**: WebSocket gateway (deferred per ADR-011)
-- **Alerting/Notification/ITSM**: Not yet authorized per governance
+- Not production-ready: dev HMAC trust (not SPIFFE), dev auth bypass flag, no real Zabbix/Kafka, no CSRF key ring rotation, dev realm passwords
+- No Monitoring UI, Alerting, ITSM, Automation, AIOps — those slices remain governed by the canonical spec's authorization chain
 
-See the [deep analysis](https://github.com/SupportingBasesOfficial/ProjectJLMirror) in the specification repository for the full roadmap.
+## Submodule
+
+```bash
+git submodule update --remote vendor/ProjectJLMirror   # pull latest spec
+git add vendor/ProjectJLMirror && git commit -m "chore: update spec submodule"
+```

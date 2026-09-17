@@ -17,7 +17,7 @@ from jlmirror_authority.model import (
     TenantContext,
 )
 
-from app.auth import fence_store
+from shared.auth import fence_store
 
 
 def make_dev_tenant_context(

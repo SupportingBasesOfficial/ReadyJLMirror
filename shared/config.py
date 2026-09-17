@@ -38,6 +38,44 @@ class Settings:
     api_port: int = field(default_factory=lambda: int(_env("API_PORT", "8000")))
     api_version: str = field(default_factory=lambda: _env("API_VERSION", "v1"))
 
+    # BFF (G1 identity + tenant + protected shell)
+    bff_host: str = field(default_factory=lambda: _env("BFF_HOST", "0.0.0.0"))
+    bff_port: int = field(default_factory=lambda: int(_env("BFF_PORT", "8080")))
+    bff_public_url: str = field(default_factory=lambda: _env("BFF_PUBLIC_URL", "http://localhost:8080"))
+    api_internal_url: str = field(default_factory=lambda: _env("API_INTERNAL_URL", "http://localhost:8000"))
+
+    # Internal trust: BFF -> API signed context (dev HMAC; production = SPIRE/mTLS)
+    bff_internal_secret: str = field(
+        default_factory=lambda: _env("BFF_INTERNAL_SECRET", "dev-internal-secret-change-me")
+    )
+
+    # Keycloak / OIDC (IR-D-001 candidate: Keycloak 26.7.x)
+    keycloak_internal_url: str = field(
+        default_factory=lambda: _env("KEYCLOAK_INTERNAL_URL", "http://localhost:8180")
+    )
+    keycloak_public_url: str = field(
+        default_factory=lambda: _env("KEYCLOAK_PUBLIC_URL", "http://localhost:8180")
+    )
+    keycloak_realm: str = field(default_factory=lambda: _env("KEYCLOAK_REALM", "jlmirror"))
+    keycloak_client_id: str = field(default_factory=lambda: _env("KEYCLOAK_CLIENT_ID", "jlmirror-bff"))
+    keycloak_client_secret: str = field(
+        default_factory=lambda: _env("KEYCLOAK_CLIENT_SECRET", "dev-bff-secret-change-me")
+    )
+
+    # Session policy
+    session_lifetime_hours: int = field(
+        default_factory=lambda: int(_env("SESSION_LIFETIME_HOURS", "8"))
+    )
+    cookie_secure: bool = field(
+        default_factory=lambda: _env("COOKIE_SECURE", "false").lower() == "true"
+    )
+
+    # Dev-only auth bypass: simulates the OIDC callback without Keycloak.
+    # MUST be false in production. Only honored when environment=development.
+    dev_auth_bypass: bool = field(
+        default_factory=lambda: _env("DEV_AUTH_BYPASS", "false").lower() == "true"
+    )
+
     # Authority (development adapter)
     dev_principal_id: str = field(default_factory=lambda: _env("DEV_PRINCIPAL_ID", "dev-local-user"))
     dev_tenant_id: str = field(default_factory=lambda: _env("DEV_TENANT_ID", "tenant:dev"))

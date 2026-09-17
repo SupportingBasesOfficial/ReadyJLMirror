@@ -9,8 +9,8 @@ from typing import Annotated
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
 
-from app.auth import utcnow
-from app.tenant import make_dev_tenant_context
+from shared.auth import utcnow
+from shared.tenant import make_dev_tenant_context
 from jlmirror_async.model import (
     ComparisonEvidence,
     MessageClass,

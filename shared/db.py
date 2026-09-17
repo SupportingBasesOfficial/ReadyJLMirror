@@ -22,7 +22,7 @@ from typing import AsyncIterator
 from psycopg import AsyncConnection, AsyncCursor
 from psycopg_pool import AsyncConnectionPool
 
-from app.config import settings
+from shared.config import settings
 
 # Fix psycopg async compatibility on Windows
 if sys.platform == "win32":

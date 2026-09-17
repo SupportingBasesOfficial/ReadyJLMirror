@@ -13,7 +13,7 @@ from typing import Annotated
 
 from fastapi import Header, HTTPException, status
 
-from app.config import settings
+from shared.config import settings
 
 
 @dataclass(frozen=True)

@@ -13,24 +13,26 @@ dependencies = [
     "psycopg[binary,pool]>=3.2,<3.3",
     "pydantic>=2.7,<3",
     "python-multipart>=0.0.9,<0.1",
+    "httpx>=0.27,<0.28",
+    "PyJWT[crypto]>=2.8,<3",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8,<9",
     "pytest-asyncio>=0.23,<0.24",
-    "httpx>=0.27,<0.28",
     "ruff>=0.5,<0.6",
 ]
 
 [project.scripts]
-ready-jlmirror-api = "app.main:run"
+ready-jlmirror-api = "api.main:run"
+ready-jlmirror-bff = "bff.main:run"
 ready-jlmirror-migrate = "scripts.migrate:main"
-ready-jlmirror-worker = "app.workers.run_all:main"
+ready-jlmirror-worker = "workers.run_all:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*", "scripts*"]
+include = ["shared*", "api*", "bff*", "workers*", "scripts*"]
 
 [tool.setuptools.package-dir]
 "" = "."

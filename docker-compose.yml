@@ -16,21 +16,25 @@ services:
       timeout: 5s
       retries: 10
 
-  api:
-    build: .
-    ports:
-      - "8000:8000"
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: start-dev --import-realm
     environment:
-      APP_ENVIRONMENT: development
-      DB_HOST: db
-      DB_PORT: "5432"
-      DB_NAME: jlmirror
-      DB_USER: jlmirror_app
-      DB_PASSWORD: jlmirror_dev
-    depends_on:
-      db:
-        condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: "8180"
+      KC_HOSTNAME_STRICT: "false"
+    volumes:
+      - ./docker/keycloak:/opt/keycloak/data/import:ro
+    ports:
+      - "8180:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
   migrate:
     build: .
@@ -44,8 +48,51 @@ services:
       db:
         condition: service_healthy
     command: python -m scripts.migrate
-    profiles:
-      - migrate
+
+  api:
+    build: .
+    environment:
+      APP_ENVIRONMENT: development
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: jlmirror
+      DB_USER: jlmirror_app
+      DB_PASSWORD: jlmirror_dev
+      BFF_INTERNAL_SECRET: dev-internal-secret-change-me
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    # Internal only — the BFF is the public boundary.
+
+  bff:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      APP_ENVIRONMENT: development
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: jlmirror
+      DB_USER: jlmirror_app
+      DB_PASSWORD: jlmirror_dev
+      BFF_PUBLIC_URL: http://localhost:8080
+      API_INTERNAL_URL: http://api:8000
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_PUBLIC_URL: http://localhost:8180
+      KEYCLOAK_REALM: jlmirror
+      KEYCLOAK_CLIENT_ID: jlmirror-bff
+      KEYCLOAK_CLIENT_SECRET: dev-bff-secret-change-me
+      BFF_INTERNAL_SECRET: dev-internal-secret-change-me
+      DEV_AUTH_BYPASS: "true"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+      keycloak:
+        condition: service_started
+    command: uvicorn bff.main:app --host 0.0.0.0 --port 8080
 
   worker:
     build: .
@@ -57,9 +104,9 @@ services:
       DB_USER: jlmirror_app
       DB_PASSWORD: jlmirror_dev
     depends_on:
-      db:
-        condition: service_healthy
-    command: python -m app.workers.run_all
+      migrate:
+        condition: service_completed_successfully
+    command: python -m workers.run_all
     profiles:
       - worker
 

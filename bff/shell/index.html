@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JLMirror</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #0f1115; color: #e6e8ec; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .card {
+    background: #161a22; border: 1px solid #262c3a; border-radius: 10px;
+    padding: 2.5rem 3rem; min-width: 340px; max-width: 480px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.4);
+  }
+  h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: .25rem; }
+  h1 .brand { color: #6ea8fe; }
+  .sub { color: #8b93a5; font-size: .85rem; margin-bottom: 1.5rem; }
+  button, .btn {
+    display: inline-block; background: #2f6fed; color: #fff; border: 0;
+    border-radius: 6px; padding: .55rem 1.1rem; font-size: .9rem;
+    cursor: pointer; text-decoration: none;
+  }
+  button:hover, .btn:hover { background: #265cd6; }
+  button.secondary { background: #262c3a; }
+  button.secondary:hover { background: #313950; }
+  .tenant { margin: .5rem 0; padding: .75rem 1rem; background: #1c2130;
+    border: 1px solid #262c3a; border-radius: 8px; display: flex;
+    justify-content: space-between; align-items: center; }
+  .meta { font-size: .8rem; color: #8b93a5; margin-top: 1.5rem; }
+  .meta code { color: #b6bfce; }
+  .header { display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 1.5rem; }
+  .badge { font-size: .7rem; background: #1c2130; border: 1px solid #262c3a;
+    padding: .2rem .6rem; border-radius: 999px; color: #8b93a5; }
+  .error { color: #f08080; font-size: .85rem; margin-bottom: 1rem; }
+  .spinner { width: 18px; height: 18px; border: 2px solid #262c3a;
+    border-top-color: #6ea8fe; border-radius: 50%; margin: 0 auto 1rem;
+    animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="header">
+    <h1><span class="brand">JL</span>Mirror</h1>
+    <span class="badge" id="envBadge">shell</span>
+  </div>
+  <div class="sub">Enterprise operations platform</div>
+  <div class="error hidden" id="err"></div>
+  <div id="root"><div class="spinner"></div></div>
+  <div class="meta" id="meta"></div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
