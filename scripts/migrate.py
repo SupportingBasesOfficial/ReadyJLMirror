@@ -72,7 +72,7 @@ def main() -> None:
         ensure_migrations_table(conn)
         applied = 0
         for filepath in sorted(sql_dir.rglob("*.sql")):
-            rel_name = str(filepath.relative_to(sql_dir))
+            rel_name = filepath.relative_to(sql_dir).as_posix()
             if is_applied(conn, rel_name):
                 logger.debug("Already applied: %s", rel_name)
                 continue

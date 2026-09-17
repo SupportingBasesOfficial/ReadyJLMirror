@@ -23,7 +23,7 @@ os.environ.setdefault("DEV_AUTH_BYPASS", "true")
 
 from bff.main import app  # noqa: E402
 from shared.config import settings  # noqa: E402
-from shared.db import close_pool, init_pool  # noqa: E402
+
 
 
 @pytest.fixture(scope="module")
@@ -41,15 +41,9 @@ def db_available():
 
 @pytest.fixture(scope="module")
 def client(db_available):
-    import asyncio
-
-    async def _setup():
-        await init_pool()
-
-    asyncio.run(_setup())
+    # The BFF lifespan owns the pool — init/close inside TestClient's loop.
     with TestClient(app) as c:
         yield c
-    asyncio.run(close_pool())
 
 
 def _csrf(client: TestClient) -> dict:

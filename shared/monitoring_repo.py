@@ -2343,7 +2343,6 @@ async def enqueue_history_sync(
                s.scope_revision
           FROM monitoring.monitoring_source s
          WHERE s.tenant_id = %s AND s.monitoring_source_id = %s
-           AND s.monitoring_source_state = 'active'
         """,
         (tenant_id, monitoring_source_id),
     )
@@ -2355,10 +2354,11 @@ async def enqueue_history_sync(
         """
         INSERT INTO monitoring.monitoring_sync_operation
             (tenant_id, monitoring_sync_operation_id, monitoring_source_id,
-             source_instance_generation, responsibility_kind,
+             source_instance_generation, responsibility_kind, state,
              configuration_revision, scope_revision,
              history_time_from, history_time_till)
-        VALUES (%s, %s, %s, %s, 'metric_history_sync', %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, 'metric_history_sync', 'pending',
+                %s, %s, %s, %s)
         """,
         (tenant_id, op_id, monitoring_source_id, row[0], row[1], row[2],
          time_from, time_till),

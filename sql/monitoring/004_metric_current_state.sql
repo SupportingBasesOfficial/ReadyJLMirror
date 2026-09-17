@@ -70,7 +70,14 @@ CREATE TABLE IF NOT EXISTS monitoring.monitoring_metric_observation_acceptance (
     FOREIGN KEY (tenant_id, monitoring_source_id, source_instance_generation)
         REFERENCES monitoring.monitoring_source_generation(
             tenant_id, monitoring_source_id, source_instance_generation)
-        DEFERRAL current_state (
+        DEFERRABLE INITIALLY DEFERRED
+);
+
+-- -------------------------------------------------------------------------
+-- Current state projection
+-- -------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS monitoring.metric_current_state (
     tenant_id TEXT NOT NULL,
     metric_definition_id TEXT NOT NULL,
     monitoring_resource_id TEXT NOT NULL,
