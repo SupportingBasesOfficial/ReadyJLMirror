@@ -10,6 +10,7 @@ COPY pyproject.toml ./
 COPY shared/ shared/
 COPY api/ api/
 COPY bff/ bff/
+COPY providers/ providers/
 COPY workers/ workers/
 COPY scripts/ scripts/
 COPY sql/ sql/

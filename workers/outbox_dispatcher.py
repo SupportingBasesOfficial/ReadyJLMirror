@@ -148,9 +148,12 @@ def _publish_durable(conn: psycopg.Connection) -> int:
 def _dispatch_inmemory(processed: int, batch_size: int) -> int:
     """Legacy in-memory demo ledger drain (async_ops endpoint)."""
     for _ in range(batch_size):
+        now = datetime.now(timezone.utc)
         claim = _outbox.claim_next(
             owner_id="worker-outbox-dispatcher",
-            now=datetime.now(timezone.utc),
+            observed_at=now,
+            claim_expires_at=datetime.fromtimestamp(
+                now.timestamp() + 300, tz=timezone.utc),
         )
         if claim is None:
             break

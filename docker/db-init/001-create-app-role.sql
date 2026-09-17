@@ -23,3 +23,12 @@ GRANT USAGE ON SCHEMA g1 TO jlmirror_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA g1 TO jlmirror_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA g1
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO jlmirror_app;
+
+-- Monitoring schema (Wave 4 mirrored authority) — same least-privilege
+-- DML grants; DDL stays with the owner/migration role.
+CREATE SCHEMA IF NOT EXISTS monitoring AUTHORIZATION jlmirror_owner;
+GRANT USAGE ON SCHEMA monitoring TO jlmirror_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA monitoring
+    TO jlmirror_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA monitoring
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO jlmirror_app;
