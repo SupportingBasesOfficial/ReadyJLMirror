@@ -15,6 +15,14 @@ from typing import Any, Optional, Sequence
 
 import httpx
 
+from jlmirror_monitoring.host_inventory import (
+    ZabbixHostEvidence,
+    ZabbixHostInterfaceEvidence,
+    ZabbixHostSnapshot,
+    ZabbixInventoryEvidence,
+    ZabbixNamedRefEvidence,
+    ZabbixTagEvidence,
+)
 from jlmirror_monitoring.validation_worker import (
     AdmittedProviderEndpoint,
     ProviderAuthenticationError,
@@ -23,6 +31,8 @@ from jlmirror_monitoring.validation_worker import (
     ResolvedZabbixCredential,
     ZabbixHostGroup,
 )
+
+_INTERFACE_TYPES = {1: "agent", 2: "snmp", 3: "ipmi", 4: "jmx"}
 
 logger = logging.getLogger(__name__)
 
@@ -107,3 +117,108 @@ class ZabbixClient:
         """Provider version probe (unauthenticated by design in Zabbix)."""
         result = _rpc(endpoint.api_url, "apiinfo.version", {}, "")
         return str(result)
+
+    def host_get(
+        self,
+        endpoint: AdmittedProviderEndpoint,
+        credential: ResolvedZabbixCredential,
+        host_group_refs: Sequence[str],
+        *,
+        max_hosts: int,
+    ) -> ZabbixHostSnapshot:
+        """Fetch hosts for the configured groups as normalized evidence.
+
+        Requests `max_hosts + 1` so truncation is detectable: more rows
+        than max_hosts means the snapshot is incomplete (the domain
+        requires `hosts <= MAX_HOSTS_PER_SNAPSHOT` for construction).
+        """
+        result = _rpc(
+            endpoint.api_url,
+            "host.get",
+            {
+                "output": ["hostid", "host", "name"],
+                "groupids": list(host_group_refs),
+                "selectInterfaces": [
+                    "interfaceid", "type", "main", "useip", "ip", "dns", "port"
+                ],
+                "selectGroups": ["groupid", "name"],
+                "selectParentTemplates": ["templateid", "name"],
+                "selectTags": ["tag", "value"],
+                "selectInventory": "extend",
+                "limit": max_hosts + 1,
+            },
+            credential.api_token,
+        )
+        if not isinstance(result, list):
+            raise ProviderProtocolError("host.get result is not a list")
+
+        complete = len(result) <= max_hosts
+        hosts = [self._map_host(item) for item in result[:max_hosts]]
+        return ZabbixHostSnapshot(hosts=tuple(hosts), complete=complete)
+
+    @staticmethod
+    def _map_host(item: Any) -> ZabbixHostEvidence:
+        if not isinstance(item, dict) or "hostid" not in item:
+            raise ProviderProtocolError("host.get malformed entry")
+        try:
+            raw_inventory = item.get("inventory") or {}
+            inventory = ZabbixInventoryEvidence(
+                device_type=raw_inventory.get("type") or None,
+                device_type_full=raw_inventory.get("type_full") or None,
+                os=raw_inventory.get("os") or None,
+                os_full=raw_inventory.get("os_full") or None,
+                vendor=raw_inventory.get("vendor") or None,
+                model=raw_inventory.get("model") or None,
+                serial_primary=raw_inventory.get("serialno_a") or None,
+                serial_secondary=raw_inventory.get("serialno_b") or None,
+                asset_tag=raw_inventory.get("tag") or None,
+                hardware=raw_inventory.get("hardware") or None,
+                software=raw_inventory.get("software") or None,
+                location=raw_inventory.get("location") or None,
+            )
+            interfaces = tuple(
+                ZabbixHostInterfaceEvidence(
+                    interfaceid=str(iface["interfaceid"]),
+                    interface_type=_INTERFACE_TYPES.get(
+                        int(iface.get("type", 0)), "unknown"
+                    ),
+                    main=str(iface.get("main", "0")) == "1",
+                    use_ip=str(iface.get("useip", "0")) == "1",
+                    ip=iface.get("ip") or None,
+                    dns=iface.get("dns") or None,
+                    port=iface.get("port") or None,
+                )
+                for iface in item.get("interfaces") or []
+            )
+            groups = tuple(
+                ZabbixNamedRefEvidence(
+                    ref=str(g["groupid"]), name=g.get("name")
+                )
+                for g in item.get("groups") or []
+            )
+            templates = tuple(
+                ZabbixNamedRefEvidence(
+                    ref=str(t["templateid"]), name=t.get("name")
+                )
+                for t in item.get("parentTemplates") or []
+            )
+            tags = tuple(
+                ZabbixTagEvidence(
+                    tag=str(t["tag"]), value=str(t.get("value", ""))
+                )
+                for t in item.get("tags") or []
+            )
+            return ZabbixHostEvidence(
+                hostid=str(item["hostid"]),
+                technical_name=str(item.get("host", "")),
+                display_name=str(item.get("name", "")),
+                inventory=inventory,
+                interfaces=interfaces,
+                groups=groups,
+                templates=templates,
+                tags=tags,
+            )
+        except (KeyError, AttributeError, TypeError, ValueError) as exc:
+            raise ProviderProtocolError(
+                f"host.get entry failed normalization: {exc}"
+            ) from exc

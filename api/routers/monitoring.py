@@ -23,7 +23,9 @@ from shared.config import settings
 from shared.db import db_connection
 from shared.monitoring_repo import (
     create_zabbix_source,
+    enqueue_sync_operation,
     get_source,
+    list_resources,
     list_sources,
 )
 from jlmirror_monitoring.source import (
@@ -280,6 +282,63 @@ async def run_sync_once() -> dict:
 
     import psycopg
     from workers.validation import _process_pending
+
+    def _run() -> int:
+        with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
+            return _process_pending(conn)
+
+    processed = await asyncio.to_thread(_run)
+    return {"processed": processed}
+
+
+# ---------------------------------------------------------------------------
+# Host inventory
+# ---------------------------------------------------------------------------
+
+
+@router.post("/sources/{source_id}/inventory", status_code=202)
+async def enqueue_inventory(source_id: str, request: Request,
+                            tenant_id: str | None = None) -> dict:
+    """Enqueue a `host_inventory_sync` operation for the source.
+
+    Snapshots the source's current generation + revisions into the new
+    operation; the inventory worker claims it and collects host.get.
+    """
+    tenant = _authoritative_tenant(request, tenant_id)
+    try:
+        async with db_connection() as conn:
+            op_id = await enqueue_sync_operation(
+                conn, tenant_id=tenant, source_id=source_id,
+                responsibility_kind="host_inventory_sync",
+            )
+    except ValueError:
+        raise HTTPException(status_code=404, detail="source not found")
+    return {"monitoring_sync_operation_id": op_id, "state": "pending"}
+
+
+@router.get("/sources/{source_id}/resources")
+async def list_resources_endpoint(source_id: str, request: Request,
+                                  tenant_id: str | None = None) -> list[dict]:
+    """List canonical monitored resources for a source."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_connection() as conn:
+        rows = await list_resources(conn, tenant, source_id)
+    for r in rows:
+        for k in ("last_observed_at", "removed_at"):
+            if r.get(k) is not None:
+                r[k] = r[k].isoformat()
+    return rows
+
+
+@router.post("/inventory/run", status_code=200)
+async def run_inventory_once() -> dict:
+    """Dev trigger: one host-inventory pass over pending operations."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available")
+    import asyncio
+
+    import psycopg
+    from workers.inventory import _process_pending
 
     def _run() -> int:
         with psycopg.connect(settings.db_dsn, autocommit=False) as conn:

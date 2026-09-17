@@ -27,6 +27,10 @@ from typing import Optional, Sequence
 
 from psycopg import AsyncConnection, Connection
 
+from jlmirror_monitoring.host_inventory import (
+    HostInventoryClaim,
+    HostInventoryResult,
+)
 from jlmirror_monitoring.source import (
     ConfiguredProviderScope,
     ZabbixProviderConfiguration,
@@ -428,6 +432,418 @@ def list_all_pending_validations(conn: Connection) -> list[tuple[str, str]]:
           FROM monitoring.monitoring_sync_operation
          WHERE state = 'pending'
            AND responsibility_kind = 'validation_and_initial_sync'
+         ORDER BY created_at
+        """
+    )
+    return [tuple(r) for r in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Operation enqueue (async — API path)
+# ---------------------------------------------------------------------------
+
+
+async def enqueue_sync_operation(
+    conn: AsyncConnection,
+    *,
+    tenant_id: str,
+    source_id: str,
+    responsibility_kind: str,
+) -> str:
+    """Create a pending sync op snapshotting the source's current
+    generation + revisions. Returns the new operation id."""
+    cur = await conn.execute(
+        """
+        SELECT active_source_instance_generation,
+               configuration_revision, scope_revision
+          FROM monitoring.monitoring_source
+         WHERE tenant_id = %s AND monitoring_source_id = %s
+        """,
+        (tenant_id, source_id),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        raise ValueError("monitoring.source_not_found")
+    generation, config_rev, scope_rev = row
+    op_id = _opaque("mon-sync")
+    await conn.execute(
+        """
+        INSERT INTO monitoring.monitoring_sync_operation
+            (tenant_id, monitoring_sync_operation_id, monitoring_source_id,
+             source_instance_generation, configuration_revision,
+             scope_revision, responsibility_kind, state)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')
+        """,
+        (tenant_id, op_id, source_id, generation, config_rev, scope_rev,
+         responsibility_kind),
+    )
+    await conn.commit()
+    return op_id
+
+
+async def list_resources(
+    conn: AsyncConnection, tenant_id: str, source_id: str
+) -> list[dict]:
+    cur = await conn.execute(
+        """
+        SELECT monitoring_resource_id, provider_external_ref, display_name,
+               scope_state, presence_state, presence_evidence_state,
+               scope_evidence_state, last_observed_at, removed_at
+          FROM monitoring.monitoring_resource
+         WHERE tenant_id = %s AND monitoring_source_id = %s
+         ORDER BY provider_external_ref
+        """,
+        (tenant_id, source_id),
+    )
+    rows = await cur.fetchall()
+    keys = ("monitoring_resource_id", "provider_external_ref", "display_name",
+            "scope_state", "presence_state", "presence_evidence_state",
+            "scope_evidence_state", "last_observed_at", "removed_at")
+    return [dict(zip(keys, r)) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Host inventory repository (sync — worker path, implements
+# MonitoringHostInventoryRepository invoked synchronously by the domain)
+# ---------------------------------------------------------------------------
+
+
+class PgHostInventoryRepository:
+    """Claim/complete adapter for the host inventory worker.
+
+    Completion is fenced identically to validation. On a complete
+    snapshot, resources are upserted (present + in_scope) and absent
+    hosts become removed; on a degraded result no resource is removed —
+    presence evidence degrades instead (fail closed, no inference).
+    """
+
+    def __init__(self, conn: Connection, tenant_id: str) -> None:
+        self._conn = conn
+        self._tenant_id = tenant_id
+
+    def claim_host_inventory(
+        self, monitoring_sync_operation_id: str, *, claim_token: str
+    ) -> HostInventoryClaim:
+        cur = self._conn.execute(
+            """
+            SELECT o.monitoring_source_id, o.source_instance_generation,
+                   o.configuration_revision, o.scope_revision,
+                   s.provider_scope_tenant_binding_id,
+                   g.provider_instance_ref, g.provider_base_url,
+                   s.credential_binding_ref, s.configured_provider_scope
+              FROM monitoring.monitoring_sync_operation o
+              JOIN monitoring.monitoring_source s
+                ON s.tenant_id = o.tenant_id
+               AND s.monitoring_source_id = o.monitoring_source_id
+              JOIN monitoring.monitoring_source_generation g
+                ON g.tenant_id = o.tenant_id
+               AND g.monitoring_source_id = o.monitoring_source_id
+               AND g.source_instance_generation = o.source_instance_generation
+             WHERE o.tenant_id = %s
+               AND o.monitoring_sync_operation_id = %s
+               AND o.state = 'pending'
+               AND o.claim_token IS NULL
+               AND o.responsibility_kind = 'host_inventory_sync'
+               AND s.active_source_instance_generation = o.source_instance_generation
+               AND s.configuration_revision = o.configuration_revision
+               AND s.scope_revision = o.scope_revision
+             FOR UPDATE OF o
+            """,
+            (self._tenant_id, monitoring_sync_operation_id),
+        )
+        row = cur.fetchone()
+        if row is None:
+            self._conn.rollback()
+            raise ValueError("monitoring.host_inventory_not_claimable")
+
+        (source_id, generation, config_rev, scope_rev, binding_id,
+         provider_instance_ref, base_url, cred_ref, scope_json) = row
+
+        cur = self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_sync_operation
+               SET state = 'running', claim_token = %s,
+                   started_at = transaction_timestamp()
+             WHERE tenant_id = %s
+               AND monitoring_sync_operation_id = %s
+               AND state = 'pending' AND claim_token IS NULL
+            """,
+            (claim_token, self._tenant_id, monitoring_sync_operation_id),
+        )
+        if cur.rowcount != 1:
+            self._conn.rollback()
+            raise ValueError("monitoring.host_inventory_not_claimable")
+
+        self._conn.commit()
+
+        scope = scope_json if isinstance(scope_json, dict) else json.loads(scope_json)
+        return HostInventoryClaim(
+            claim_token=claim_token,
+            tenant_id=self._tenant_id,
+            monitoring_sync_operation_id=monitoring_sync_operation_id,
+            monitoring_source_id=source_id,
+            provider_scope_tenant_binding_id=binding_id,
+            source_instance_generation=generation,
+            configuration_revision=config_rev,
+            scope_revision=scope_rev,
+            provider_instance_ref=provider_instance_ref,
+            provider_configuration=ZabbixProviderConfiguration(base_url=base_url),
+            credential_binding_ref=cred_ref,
+            configured_provider_scope=ConfiguredProviderScope.from_refs(
+                scope["host_group_refs"]
+            ),
+        )
+
+    def complete_host_inventory(
+        self,
+        claim: HostInventoryClaim,
+        result: HostInventoryResult,
+        *,
+        snapshot_evidence_id: str,
+    ) -> HostInventoryResult:
+        cur = self._conn.execute(
+            """
+            SELECT 1
+              FROM monitoring.monitoring_sync_operation o
+              JOIN monitoring.monitoring_source s
+                ON s.tenant_id = o.tenant_id
+               AND s.monitoring_source_id = o.monitoring_source_id
+             WHERE o.tenant_id = %s
+               AND o.monitoring_sync_operation_id = %s
+               AND o.state = 'running'
+               AND o.claim_token = %s
+               AND s.active_source_instance_generation = %s
+               AND s.configuration_revision = %s
+               AND s.scope_revision = %s
+               AND s.provider_scope_tenant_binding_id = %s
+             FOR UPDATE OF o, s
+            """,
+            (
+                claim.tenant_id,
+                claim.monitoring_sync_operation_id,
+                claim.claim_token,
+                claim.source_instance_generation,
+                claim.configuration_revision,
+                claim.scope_revision,
+                claim.provider_scope_tenant_binding_id,
+            ),
+        )
+        if cur.fetchone() is None:
+            self._conn.rollback()
+            raise ValueError("monitoring.host_inventory_claim_lost")
+
+        # Immutable snapshot evidence
+        self._conn.execute(
+            """
+            INSERT INTO monitoring.monitoring_host_inventory_snapshot_evidence
+                (tenant_id, host_inventory_snapshot_evidence_id,
+                 monitoring_sync_operation_id, monitoring_source_id,
+                 provider_scope_tenant_binding_id, source_instance_generation,
+                 configuration_revision, scope_revision, provider_instance_ref,
+                 snapshot_complete, host_count, operational_evidence_state,
+                 operation_state, failure_class, egress_decision_ref,
+                 credential_generation_ref)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                claim.tenant_id,
+                snapshot_evidence_id,
+                claim.monitoring_sync_operation_id,
+                claim.monitoring_source_id,
+                claim.provider_scope_tenant_binding_id,
+                claim.source_instance_generation,
+                claim.configuration_revision,
+                claim.scope_revision,
+                claim.provider_instance_ref,
+                result.snapshot_complete,
+                len(result.hosts),
+                result.operational_evidence_state.value,
+                result.operation_state.value,
+                result.failure_class.value if result.failure_class else None,
+                result.egress_decision_ref,
+                result.credential_generation_ref,
+            ),
+        )
+
+        if result.succeeded:
+            self._persist_snapshot(claim, result, snapshot_evidence_id)
+        else:
+            # Degraded — no removals, only evidence degradation
+            self._conn.execute(
+                """
+                UPDATE monitoring.monitoring_resource
+                   SET presence_evidence_state = %s,
+                       updated_at = transaction_timestamp()
+                 WHERE tenant_id = %s AND monitoring_source_id = %s
+                   AND source_instance_generation = %s
+                   AND presence_state = 'present'
+                """,
+                (
+                    result.operational_evidence_state.value,
+                    claim.tenant_id,
+                    claim.monitoring_source_id,
+                    claim.source_instance_generation,
+                ),
+            )
+
+        self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_sync_operation
+               SET state = %s, completed_at = transaction_timestamp(),
+                   last_error_class = %s,
+                   host_inventory_snapshot_evidence_id = %s
+             WHERE tenant_id = %s AND monitoring_sync_operation_id = %s
+            """,
+            (
+                result.operation_state.value,
+                result.failure_class.value if result.failure_class else None,
+                snapshot_evidence_id,
+                claim.tenant_id,
+                claim.monitoring_sync_operation_id,
+            ),
+        )
+        self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_source
+               SET operational_evidence_state = %s,
+                   last_attempt_at = transaction_timestamp(),
+                   last_successful_sync_at = CASE WHEN %s = 'succeeded'
+                       THEN transaction_timestamp()
+                       ELSE last_successful_sync_at END,
+                   updated_at = transaction_timestamp()
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+            """,
+            (
+                result.operational_evidence_state.value,
+                result.operation_state.value,
+                claim.tenant_id,
+                claim.monitoring_source_id,
+            ),
+        )
+        self._conn.commit()
+        return result
+
+    def _persist_snapshot(
+        self,
+        claim: HostInventoryClaim,
+        result: HostInventoryResult,
+        snapshot_evidence_id: str,
+    ) -> None:
+        """Upsert resources + provider evidence for a complete snapshot."""
+        seen_refs: list[str] = []
+        for host in result.hosts:
+            seen_refs.append(host.hostid)
+            cur = self._conn.execute(
+                """
+                SELECT monitoring_resource_id
+                  FROM monitoring.monitoring_resource
+                 WHERE tenant_id = %s AND monitoring_source_id = %s
+                   AND source_instance_generation = %s
+                   AND provider_external_ref = %s
+                 FOR UPDATE
+                """,
+                (claim.tenant_id, claim.monitoring_source_id,
+                 claim.source_instance_generation, host.hostid),
+            )
+            row = cur.fetchone()
+            if row is None:
+                resource_id = _opaque("mon-res")
+                self._conn.execute(
+                    """
+                    INSERT INTO monitoring.monitoring_resource
+                        (tenant_id, monitoring_resource_id,
+                         monitoring_source_id, source_instance_generation,
+                         resource_kind, provider_object_kind,
+                         provider_external_ref, display_name, scope_state,
+                         scope_projection_revision, scope_evidence_state,
+                         presence_state, presence_evidence_state,
+                         last_observed_at, last_confirmed_present_at)
+                    VALUES (%s, %s, %s, %s, 'host', 'zabbix_host', %s, %s,
+                            'in_scope', %s, 'current', 'present', 'current',
+                            transaction_timestamp(), transaction_timestamp())
+                    """,
+                    (claim.tenant_id, resource_id, claim.monitoring_source_id,
+                     claim.source_instance_generation, host.hostid,
+                     host.display_name, claim.scope_revision),
+                )
+            else:
+                resource_id = row[0]
+                self._conn.execute(
+                    """
+                    UPDATE monitoring.monitoring_resource
+                       SET display_name = %s, scope_state = 'in_scope',
+                           scope_projection_revision = %s,
+                           scope_evidence_state = 'current',
+                           presence_state = 'present',
+                           presence_evidence_state = 'current',
+                           last_observed_at = transaction_timestamp(),
+                           last_confirmed_present_at = transaction_timestamp(),
+                           removed_at = NULL,
+                           updated_at = transaction_timestamp()
+                     WHERE tenant_id = %s AND monitoring_resource_id = %s
+                    """,
+                    (host.display_name, claim.scope_revision,
+                     claim.tenant_id, resource_id),
+                )
+
+            evidence_id = _opaque("mon-ev")
+            self._conn.execute(
+                """
+                INSERT INTO monitoring.monitoring_resource_provider_evidence
+                    (tenant_id, provider_evidence_id,
+                     host_inventory_snapshot_evidence_id,
+                     monitoring_resource_id, monitoring_source_id,
+                     source_instance_generation, provider_object_kind,
+                     provider_external_ref, evidence_fingerprint,
+                     normalized_evidence, observed_at)
+                VALUES (%s, %s, %s, %s, %s, %s, 'zabbix_host', %s, %s,
+                        %s::jsonb, transaction_timestamp())
+                """,
+                (
+                    claim.tenant_id, evidence_id, snapshot_evidence_id,
+                    resource_id, claim.monitoring_source_id,
+                    claim.source_instance_generation, host.hostid,
+                    host.evidence_fingerprint(),
+                    json.dumps(host.canonical_evidence()),
+                ),
+            )
+            self._conn.execute(
+                """
+                UPDATE monitoring.monitoring_resource
+                   SET latest_provider_evidence_id = %s
+                 WHERE tenant_id = %s AND monitoring_resource_id = %s
+                """,
+                (evidence_id, claim.tenant_id, resource_id),
+            )
+
+        # Complete snapshot: resources not seen become removed
+        self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_resource
+               SET presence_state = 'removed',
+                   removed_at = transaction_timestamp(),
+                   presence_evidence_state = 'current',
+                   updated_at = transaction_timestamp()
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+               AND source_instance_generation = %s
+               AND presence_state = 'present'
+               AND provider_external_ref <> ALL(%s)
+            """,
+            (
+                claim.tenant_id, claim.monitoring_source_id,
+                claim.source_instance_generation, seen_refs,
+            ),
+        )
+
+
+def list_all_pending_host_inventory(conn: Connection) -> list[tuple[str, str]]:
+    """All tenants' pending host inventory ops — (tenant_id, op_id)."""
+    cur = conn.execute(
+        """
+        SELECT tenant_id, monitoring_sync_operation_id
+          FROM monitoring.monitoring_sync_operation
+         WHERE state = 'pending'
+           AND responsibility_kind = 'host_inventory_sync'
          ORDER BY created_at
         """
     )

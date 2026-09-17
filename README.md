@@ -122,8 +122,24 @@ Real persistence + real Zabbix adapter, implementing the accepted
   canonical `InitialValidationWorker`: CredentialResolver →
   OutboundAdmission → `hostgroup.get` → fenced complete (generation +
   revisions must still be current or completion fails closed)
-- `providers/zabbix.py` — real JSON-RPC client (`hostgroup.get` by
-  groupid), mapping Zabbix errors to the domain failure classes
+- `providers/zabbix.py` — real JSON-RPC client (`hostgroup.get` and
+  `host.get` with truncation detection), mapping Zabbix errors to the
+  domain failure classes
+- `POST /sources/{id}/inventory` + `GET /sources/{id}/resources` —
+  enqueue `host_inventory_sync` and read canonical resources
+- `workers/inventory.py` — canonical `HostInventoryWorker`:
+  hostgroup.get (anchor visibility) → host.get (bounded snapshot)
+  → fenced complete → `monitoring_resource` upsert + immutable
+  snapshot/provider evidence; absent hosts become `removed` only on
+  complete snapshots — degraded evidence never removes resources
+- `POST /sources/{id}/inventory` + `GET /sources/{id}/resources` —
+  enqueue `host_inventory_sync` and read canonical resources
+- `workers/inventory.py` — canonical `HostInventoryWorker`:
+  hostgroup.get (anchor visibility) → host.get (bounded snapshot,
+  truncation-detected via `limit: max+1`) → fenced complete →
+  `monitoring_resource` upsert + immutable snapshot/provider evidence;
+  absent hosts become `removed` only on complete snapshots — degraded
+  evidence never removes resources (fail closed, no inference)
 - `providers/credentials.py` — env-based dev resolver
   (`ZABBIX_CRED_<REF>`); production = OpenBao/secret manager
 - `providers/egress.py` — dev egress admission (https +
