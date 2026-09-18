@@ -59,6 +59,7 @@ async function refresh() {
       break;
     }
     case "ready": {
+      document.querySelector(".card").classList.add("wide");
       render(
         `<p>Signed in to <strong>${s.tenant.display_name}</strong></p>` +
         `<div class="meta" style="margin:1rem 0 1.25rem">` +
@@ -66,7 +67,9 @@ async function refresh() {
         `<div style="display:flex;gap:.5rem">` +
         `<button class="secondary" id="changeTenant">Change tenant</button>` +
         `<form method="post" action="/auth/logout"><button class="secondary">Sign out</button></form>` +
-        `</div>`);
+        `</div>` +
+        `<div class="section"><h2>Monitoring</h2><div id="mon">` +
+        `<div class="spinner"></div></div></div>`);
       document.getElementById("changeTenant").addEventListener("click", async () => {
         render(`<p style="margin-bottom:.75rem">Select a tenant:</p>` +
           s.memberships.map(m =>
@@ -76,6 +79,7 @@ async function refresh() {
           b.addEventListener("click", () => selectTenant(b.dataset.t)));
       });
       meta.innerHTML = `authenticated at <code>${s.authenticated_at}</code>`;
+      loadMonitoring(s);
       break;
     }
     default: {
@@ -97,6 +101,110 @@ async function selectTenant(tenantId) {
     return;
   }
   refresh();
+}
+
+// ---------------------------------------------------------------------------
+// Monitoring view — read-only projections + dev poll triggers
+// ---------------------------------------------------------------------------
+
+function api(path) {
+  return fetch(`/api/v1/monitoring${path}`, { credentials: "same-origin" })
+    .then(r => r.json());
+}
+
+async function poll(sourceId, kind, tenantId) {
+  await fetch(`/api/v1/monitoring/sources/${sourceId}/${kind}?tenant_id=${tenantId}`, {
+    method: "POST", credentials: "same-origin", headers: csrfHeaders(),
+  });
+}
+
+async function loadMonitoring(s) {
+  const mon = document.getElementById("mon");
+  const tid = s.tenant.tenant_id;
+  let sources;
+  try {
+    sources = await api(`/sources?tenant_id=${tid}`);
+  } catch {
+    mon.innerHTML = '<p class="empty">Monitoring unavailable.</p>';
+    return;
+  }
+  if (!Array.isArray(sources) || sources.length === 0) {
+    mon.innerHTML = '<p class="empty">No monitoring sources configured.</p>';
+    return;
+  }
+
+  mon.innerHTML =
+    `<table><thead><tr><th>Source</th><th>Provider</th>` +
+    `<th>Evidence</th></tr></thead><tbody>` +
+    sources.map(src =>
+      `<tr class="clickable" data-src="${src.monitoring_source_id}">` +
+      `<td>${src.display_name}</td>` +
+      `<td><code>${src.provider_instance_ref}</code></td>` +
+      `<td>${src.operational_evidence_state}</td></tr>`).join("") +
+    `</tbody></table><div id="monDetail"></div>`;
+
+  mon.querySelectorAll("[data-src]").forEach(row =>
+    row.addEventListener("click", () =>
+      loadSourceDetail(row.dataset.src, tid)));
+}
+
+async function loadSourceDetail(sourceId, tid) {
+  const det = document.getElementById("monDetail");
+  det.innerHTML = '<div class="spinner"></div>';
+  const [health, problems, current] = await Promise.all([
+    api(`/sources/${sourceId}/health?tenant_id=${tid}`),
+    api(`/sources/${sourceId}/problems?tenant_id=${tid}&active_only=true`),
+    api(`/sources/${sourceId}/current?tenant_id=${tid}`),
+  ]);
+
+  const healthRows = Array.isArray(health) && health.length
+    ? health.map(h =>
+        `<tr><td><code>${h.monitoring_resource_id}</code></td>` +
+        `<td class="h-${h.health_class}">${h.health_class}</td>` +
+        `<td>${h.evidence_state}</td>` +
+        `<td>r${h.projection_revision}</td></tr>`).join("")
+    : `<tr><td colspan="4" class="empty">No health projections yet</td></tr>`;
+
+  const problemRows = Array.isArray(problems) && problems.length
+    ? problems.map(p =>
+        `<tr><td class="sev-${p.severity_class}">${p.severity_class}</td>` +
+        `<td>${p.summary || ""}</td>` +
+        `<td><code>${p.provider_eventid || ""}</code></td>` +
+        `<td>${p.evidence_state}</td></tr>`).join("")
+    : `<tr><td colspan="4" class="empty">No active problems</td></tr>`;
+
+  const currentRows = Array.isArray(current) && current.length
+    ? current.slice(0, 20).map(c =>
+        `<tr><td>${c.name || c.metric_definition_id}</td>` +
+        `<td><code>${c.canonical_value}</code></td>` +
+        `<td>${c.evidence_state}</td></tr>`).join("")
+    : `<tr><td colspan="3" class="empty">No current state</td></tr>`;
+
+  det.innerHTML =
+    `<div class="actions">` +
+    `<button class="secondary" data-p="inventory">inventory</button>` +
+    `<button class="secondary" data-p="metrics/poll">metrics</button>` +
+    `<button class="secondary" data-p="current/poll">current</button>` +
+    `<button class="secondary" data-p="history/poll">history</button>` +
+    `<button class="secondary" data-p="problems/poll">problems</button>` +
+    `<button class="secondary" id="monRefresh">refresh</button></div>` +
+    `<div class="section"><h2>Health</h2>` +
+    `<table><thead><tr><th>Resource</th><th>Health</th><th>Evidence</th>` +
+    `<th>Rev</th></tr></thead><tbody>${healthRows}</tbody></table></div>` +
+    `<div class="section"><h2>Active problems</h2>` +
+    `<table><thead><tr><th>Severity</th><th>Summary</th><th>Event</th>` +
+    `<th>Evidence</th></tr></thead><tbody>${problemRows}</tbody></table></div>` +
+    `<div class="section"><h2>Current metrics</h2>` +
+    `<table><thead><tr><th>Metric</th><th>Value</th><th>Evidence</th>` +
+    `</tr></thead><tbody>${currentRows}</tbody></table></div>`;
+
+  det.querySelectorAll("[data-p]").forEach(b =>
+    b.addEventListener("click", async () => {
+      await poll(sourceId, b.dataset.p, tid);
+      b.disabled = true; b.textContent = "queued";
+    }));
+  document.getElementById("monRefresh").addEventListener("click", () =>
+    loadSourceDetail(sourceId, tid));
 }
 
 // Surface auth errors from the callback redirect (e.g. /?error=forbidden)

@@ -17,6 +17,32 @@
     padding: 2.5rem 3rem; min-width: 340px; max-width: 480px;
     box-shadow: 0 8px 30px rgba(0,0,0,.4);
   }
+  .card.wide { max-width: 980px; min-width: 720px; }
+  table { width: 100%; border-collapse: collapse; font-size: .82rem;
+    margin: .5rem 0 1rem; }
+  th, td { text-align: left; padding: .45rem .6rem;
+    border-bottom: 1px solid #262c3a; }
+  th { color: #8b93a5; font-weight: 500; font-size: .72rem;
+    text-transform: uppercase; letter-spacing: .04em; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover td { background: #1c2130; }
+  .sev-unknown { color: #8b93a5; }
+  .sev-informational { color: #6ea8fe; }
+  .sev-warning { color: #e6b450; }
+  .sev-degraded { color: #f08080; }
+  .sev-critical { color: #ff6b6b; font-weight: 600; }
+  .h-healthy { color: #6fdc8c; }
+  .h-degraded { color: #e6b450; }
+  .h-unhealthy { color: #ff6b6b; font-weight: 600; }
+  .h-unknown { color: #8b93a5; }
+  .section { margin-top: 1.5rem; padding-top: 1rem;
+    border-top: 1px solid #262c3a; }
+  .section h2 { font-size: .72rem; font-weight: 500; text-transform: uppercase;
+    letter-spacing: .05em; margin-bottom: .5rem; color: #8b93a5; }
+  .actions { display: flex; gap: .4rem; flex-wrap: wrap;
+    margin: .75rem 0 1rem; }
+  .actions button { font-size: .75rem; padding: .35rem .7rem; }
+  .empty { color: #8b93a5; font-size: .82rem; margin: .5rem 0; }
   h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: .25rem; }
   h1 .brand { color: #6ea8fe; }
   .sub { color: #8b93a5; font-size: .85rem; margin-bottom: 1.5rem; }
