@@ -28,95 +28,7 @@ from shared.config import settings
 logger = logging.getLogger("dev_e2e")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-NOW = int(time.time())
-
-# ---------------------------------------------------------------------------
-# Canned Zabbix JSON-RPC responses
-# ---------------------------------------------------------------------------
-
-HOSTS = [
-    {
-        "hostid": "10101", "host": "web-01", "name": "Web Server 01",
-        "interfaces": [{"interfaceid": "1", "type": "1", "main": "1",
-                        "useip": "1", "ip": "10.0.0.11", "dns": "",
-                        "port": "10050"}],
-        "groups": [{"groupid": "5", "name": "Linux servers"}],
-        "parentTemplates": [], "tags": [{"tag": "env", "value": "dev"}],
-        "inventory": {"os": "Linux", "vendor": "ACME"},
-    },
-    {
-        "hostid": "10202", "host": "db-01", "name": "Database 01",
-        "interfaces": [{"interfaceid": "2", "type": "1", "main": "1",
-                        "useip": "1", "ip": "10.0.0.12", "dns": "",
-                        "port": "10050"}],
-        "groups": [{"groupid": "5", "name": "Linux servers"}],
-        "parentTemplates": [], "tags": [], "inventory": {},
-    },
-]
-
-ITEMS = [
-    {"itemid": "20101", "hostid": "10101", "name": "CPU load",
-     "key_": "system.cpu.load", "units": "", "value_type": "0",
-     "state": "0", "status": "0",
-     "lastvalue": "0.42", "lastclock": str(NOW - 10), "lastns": "500000000"},
-    {"itemid": "20102", "hostid": "10101", "name": "Memory used %",
-     "key_": "vm.memory.util", "units": "%", "value_type": "0",
-     "state": "0", "status": "0",
-     "lastvalue": "71.5", "lastclock": str(NOW - 10), "lastns": "600000000"},
-    {"itemid": "20201", "hostid": "10202", "name": "CPU load",
-     "key_": "system.cpu.load", "units": "", "value_type": "0",
-     "state": "0", "status": "0",
-     "lastvalue": "1.87", "lastclock": str(NOW - 10), "lastns": "700000000"},
-]
-
-# One active problem on web-01's trigger 30001 (severity 3 = average).
-PROBLEMS = [
-    {"eventid": "90001", "objectid": "30001", "clock": str(NOW - 120),
-     "name": "High CPU load on web-01", "severity": "3",
-     "acknowledged": "0", "r_eventid": "0",
-     "tags": [{"tag": "scope", "value": "perf"}]},
-]
-
-TRIGGERS = [
-    {"triggerid": "30001", "hosts": [{"hostid": "10101"}]},
-]
-
-
-def fake_rpc(endpoint: str, method: str, params: dict, api_token: str):
-    """Canned JSON-RPC responder keyed on method + params."""
-    if method == "apiinfo.version":
-        return "7.4.0"
-    if method == "hostgroup.get":
-        return [{"groupid": "5", "name": "Linux servers"}]
-    if method == "host.get":
-        return list(HOSTS)
-    if method == "item.get":
-        output = params.get("output") or []
-        wanted = params.get("itemids")
-        rows = [dict(i) for i in ITEMS
-                if wanted is None or i["itemid"] in wanted]
-        if "lastvalue" in output:
-            return [{k: r[k] for k in ("itemid", "lastvalue",
-                                       "lastclock", "lastns") if k in r}
-                    for r in rows]
-        return [{k: r[k] for k in output if k in r} for r in rows]
-    if method == "history.get":
-        rows = []
-        frm, till = params["time_from"], params["time_till"]
-        for itemid in params.get("itemids", []):
-            for offset in (300, 240, 180):
-                clock = frm + offset
-                if frm <= clock <= till:
-                    rows.append({"itemid": itemid, "clock": str(clock),
-                                 "ns": "100000000", "value": "1.5"})
-        return rows
-    if method == "problem.get":
-        if "eventids" in params:
-            return []  # no recoveries
-        return list(PROBLEMS)
-    if method == "trigger.get":
-        return list(TRIGGERS)
-    raise RuntimeError(f"fake_rpc: unhandled method {method}")
+from scripts.fake_zabbix import make_dev_server, rpc_client
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +47,8 @@ def _dump(conn, label, sql):
 
 def main() -> None:
     import providers.zabbix as zb
-    zb._rpc = fake_rpc  # noqa: SLF001 — dev E2E transport stub
+    server = make_dev_server(api_token="dev-token")
+    zb._rpc = rpc_client(server)  # noqa: SLF001 — dev E2E transport stub
 
     from fastapi.testclient import TestClient
     from api.main import app
