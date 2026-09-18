@@ -128,24 +128,84 @@ async function loadMonitoring(s) {
     mon.innerHTML = '<p class="empty">Monitoring unavailable.</p>';
     return;
   }
-  if (!Array.isArray(sources) || sources.length === 0) {
-    mon.innerHTML = '<p class="empty">No monitoring sources configured.</p>';
-    return;
-  }
+  const listHtml = (!Array.isArray(sources) || sources.length === 0)
+    ? '<p class="empty">No monitoring sources configured.</p>'
+    : `<table><thead><tr><th>Source</th><th>Provider</th>` +
+      `<th>Evidence</th></tr></thead><tbody>` +
+      sources.map(src =>
+        `<tr class="clickable" data-src="${src.monitoring_source_id}">` +
+        `<td>${src.display_name}</td>` +
+        `<td><code>${src.provider_instance_ref}</code></td>` +
+        `<td>${src.operational_evidence_state}</td></tr>`).join("") +
+      `</tbody></table>`;
 
   mon.innerHTML =
-    `<table><thead><tr><th>Source</th><th>Provider</th>` +
-    `<th>Evidence</th></tr></thead><tbody>` +
-    sources.map(src =>
-      `<tr class="clickable" data-src="${src.monitoring_source_id}">` +
-      `<td>${src.display_name}</td>` +
-      `<td><code>${src.provider_instance_ref}</code></td>` +
-      `<td>${src.operational_evidence_state}</td></tr>`).join("") +
-    `</tbody></table><div id="monDetail"></div>`;
+    `<div class="actions"><button class="secondary" id="addSource">` +
+    `+ add source</button></div>` + listHtml +
+    `<div id="monDetail"></div>`;
+
+  document.getElementById("addSource").addEventListener(
+    "click", () => renderOnboardForm(tid));
 
   mon.querySelectorAll("[data-src]").forEach(row =>
     row.addEventListener("click", () =>
       loadSourceDetail(row.dataset.src, tid)));
+}
+
+// ---------------------------------------------------------------------------
+// Source onboarding — the user-facing provider configuration path.
+// provider_base_url + credential binding ref + host-group refs are
+// user inputs, exactly as the API contract requires; the credential
+// VALUE itself resolves through the credential binding (dev: env).
+// ---------------------------------------------------------------------------
+
+function renderOnboardForm(tid) {
+  const det = document.getElementById("monDetail");
+  det.innerHTML =
+    `<div class="section"><h2>Add Zabbix source</h2>` +
+    `<form id="onboardForm">` +
+    `<label>Display name<input name="display_name" required` +
+    ` placeholder="prod-zabbix"></label>` +
+    `<label>Provider instance ref<input name="provider_instance_ref" required` +
+    ` placeholder="zabbix-prod-1"></label>` +
+    `<label>Base URL<input name="provider_base_url" required` +
+    ` placeholder="https://zabbix.example.com" pattern="https://.*"></label>` +
+    `<label>Credential binding ref<input name="credential_binding_ref"` +
+    ` required placeholder="cred-binding-1"></label>` +
+    `<label>Host group refs<input name="host_group_refs" required` +
+    ` placeholder="5,6 (comma-separated groupids)"></label>` +
+    `<button type="submit">Create source</button>` +
+    `<div class="error hidden" id="onboardErr"></div></form></div>`;
+
+  document.getElementById("onboardForm").addEventListener(
+    "submit", async (ev) => {
+      ev.preventDefault();
+      const f = ev.target;
+      const body = {
+        tenant_id: tid,
+        display_name: f.display_name.value.trim(),
+        provider_instance_ref: f.provider_instance_ref.value.trim(),
+        provider_base_url: f.provider_base_url.value.trim(),
+        credential_binding_ref: f.credential_binding_ref.value.trim(),
+        host_group_refs: f.host_group_refs.value.split(",")
+          .map(s => s.trim()).filter(Boolean),
+      };
+      const r = await fetch("/api/v1/monitoring/sources", {
+        method: "POST", credentials: "same-origin",
+        headers: csrfHeaders(), body: JSON.stringify(body),
+      });
+      const resp = await r.json();
+      if (r.status !== 201) {
+        const e = document.getElementById("onboardErr");
+        e.textContent = resp.detail
+          ? (typeof resp.detail === "string" ? resp.detail
+             : JSON.stringify(resp.detail))
+          : "Create failed";
+        e.classList.remove("hidden");
+        return;
+      }
+      refresh();  // validation op enqueued automatically with the source
+    });
 }
 
 async function loadSourceDetail(sourceId, tid) {
