@@ -8,10 +8,16 @@ BEGIN
         CREATE ROLE jlmirror_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS
             PASSWORD 'jlmirror_dev';
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'jlmirror_worker') THEN
+        CREATE ROLE jlmirror_worker LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS
+            PASSWORD 'jlmirror_dev';
+    END IF;
 END
 $$;
 
 GRANT CONNECT ON DATABASE jlmirror TO jlmirror_app;
+GRANT CONNECT ON DATABASE jlmirror TO jlmirror_worker;
+GRANT USAGE ON SCHEMA public TO jlmirror_worker;
 GRANT USAGE ON SCHEMA public TO jlmirror_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO jlmirror_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
@@ -30,5 +36,9 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA g1
 -- the onboarding/enqueue tables only). DML authority: jlmirror_worker.
 CREATE SCHEMA IF NOT EXISTS monitoring AUTHORIZATION jlmirror_owner;
 GRANT USAGE ON SCHEMA monitoring TO jlmirror_app;
+GRANT USAGE ON SCHEMA g1 TO jlmirror_worker;
+GRANT USAGE ON SCHEMA monitoring TO jlmirror_worker;
 ALTER DEFAULT PRIVILEGES FOR ROLE jlmirror_owner IN SCHEMA monitoring
     GRANT SELECT ON TABLES TO jlmirror_app;
+-- Worker table privileges stay per-migration (sql/monitoring/*) —
+-- immutable transition/evidence tables must not inherit DML.
