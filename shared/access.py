@@ -67,6 +67,13 @@ async def principal_is_platform_admin(
     return await cur.fetchone() is not None
 
 
+# Display/TV principals (§9): narrow read-only set by construction.
+DISPLAY_PERMISSIONS = frozenset({
+    "tenant:read", "monitoring:read",
+    "alerting:read", "observability:read",
+})
+
+
 async def effective_permissions(
         conn: AsyncConnection, principal_id: str,
         tenant_id: str) -> frozenset[str]:
@@ -75,6 +82,17 @@ async def effective_permissions(
     full tenant permission set — the privilege is the cross-tenant
     reach, not a different vocabulary."""
     perms: set[str] = set()
+
+    cur = await conn.execute(
+        """
+        SELECT kind FROM g1.principals
+         WHERE principal_id = %s AND active = TRUE
+        """, (principal_id,))
+    row = await cur.fetchone()
+    if row is None:
+        return frozenset()
+    if row[0] == "display_principal":
+        perms |= DISPLAY_PERMISSIONS
 
     cur = await conn.execute(
         """

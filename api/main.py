@@ -109,6 +109,40 @@ def _verify_bff_context(request: Request) -> Optional[dict]:
     }
 
 
+async def _display_token_context(request: Request) -> dict | None:
+    """Resolve an X-Display-Token into a minimal authority context.
+
+    The device token is the credential binding (§9); currentness is
+    the token's own state (unretired, unexpired) plus the principal
+    being active — no browser session is involved.
+    """
+    token = request.headers.get("X-Display-Token")
+    if not token:
+        return None
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    try:
+        async with db_connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT t.principal_id, t.tenant_id
+                  FROM g1.display_tokens t
+                  JOIN g1.principals p USING (principal_id)
+                 WHERE t.token_digest = %s
+                   AND t.retired = FALSE
+                   AND (t.expires_at IS NULL OR t.expires_at > now())
+                   AND p.active = TRUE
+                """, (digest,))
+            row = await cur.fetchone()
+    except RuntimeError:
+        return None
+    if row is None:
+        return None
+    return {"principal_id": row[0], "tenant_id": row[1],
+            "session_digest": "", "session_generation": "",
+            "correlation_id": telemetry.extract_correlation_id(
+                request.headers), "display": True}
+
+
 async def _session_current(ctx: dict) -> bool:
     """Re-check durable session currentness — signed headers alone are
     never sufficient authority for protected reads."""
@@ -175,10 +209,16 @@ async def verify_context(request: Request, call_next):
         return await call_next(request)
 
     ctx = _verify_bff_context(request)
+    display_ctx = False
+    if ctx is None:
+        # Display/TV principals authenticate via a device token —
+        # independently attributable, read-only, revocable (§9).
+        ctx = await _display_token_context(request)
+        display_ctx = ctx is not None
     if ctx is None:
         return JSONResponse({"state": "unauthenticated"},
                             status_code=status.HTTP_401_UNAUTHORIZED)
-    if not await _session_current(ctx):
+    if not display_ctx and not await _session_current(ctx):
         return JSONResponse({"state": "forbidden"},
                             status_code=status.HTTP_403_FORBIDDEN)
 

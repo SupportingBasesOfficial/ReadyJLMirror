@@ -399,6 +399,269 @@ async def service_provider_transfer(request: Request,
             "successor_relationships": successors}
 
 
+# ---------------------------------------------------------------------------
+# Display/TV principals (contract §9 — modelable part)
+# ---------------------------------------------------------------------------
+
+DISPLAY_PERMISSIONS = ("tenant:read", "monitoring:read",
+                       "alerting:read", "observability:read")
+
+
+class DisplayTokenCreate(BaseModel):
+    tenant_id: str
+    label: str | None = None
+    expires_in_days: int | None = None
+
+
+@router.get("/display-principals")
+async def list_display_principals(request: Request) -> list[dict]:
+    await _require_platform_admin(request)
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            """
+            SELECT p.principal_id, t.tenant_id, t.label,
+                   t.created_at, t.expires_at, t.retired
+              FROM g1.display_tokens t
+              JOIN g1.principals p USING (principal_id)
+             ORDER BY t.created_at DESC
+            """)
+        return [{"principal_id": r[0], "tenant_id": r[1],
+                 "label": r[2], "created_at": r[3].isoformat(),
+                 "expires_at": r[4].isoformat() if r[4] else None,
+                 "retired": r[5]} for r in await cur.fetchall()]
+
+
+@router.post("/display-tokens", status_code=201)
+async def create_display_token(request: Request,
+                               body: DisplayTokenCreate) -> dict:
+    """Issue a display principal + device token. The raw token is
+    returned ONCE — only its digest is stored (same rule as browser
+    session handles). Rotation = issue a new token and retire this
+    one."""
+    actor = await _require_platform_admin(request)
+    import hashlib as _hashlib
+
+    principal_id = f"display_{secrets.token_urlsafe(10)}"
+    token = f"jld_{secrets.token_urlsafe(32)}"
+    digest = _hashlib.sha256(token.encode()).hexdigest()
+    expires_sql = (
+        "transaction_timestamp() + (%s || ' days')::interval"
+        if body.expires_in_days else "NULL")
+    async with db_tenant_connection("platform") as conn:
+        await conn.execute(
+            """
+            INSERT INTO g1.principals
+                (principal_id, kind, credential_generation)
+            VALUES (%s, 'display_principal', %s)
+            """,
+            (principal_id, f"cg-{secrets.token_urlsafe(8)}"))
+        await conn.execute(
+            f"""
+            INSERT INTO g1.display_tokens
+                (token_digest, principal_id, tenant_id, label,
+                 expires_at)
+            VALUES (%s, %s, %s, %s, {expires_sql})
+            """,
+            (digest, principal_id, body.tenant_id, body.label,
+             *( [str(body.expires_in_days)]
+                if body.expires_in_days else [])))
+        await record_audit_event(
+            conn, "platform",
+            action="platform.display_token.issued",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="display_token", subject_id=principal_id,
+            detail={"tenant_id": body.tenant_id,
+                    "label": body.label})
+        await conn.commit()
+    return {"principal_id": principal_id, "token": token,
+            "permissions": list(DISPLAY_PERMISSIONS)}
+
+
+@router.post("/display-tokens/{principal_id}/revoke")
+async def revoke_display_token(request: Request,
+                               principal_id: str) -> dict:
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        await conn.execute(
+            """
+            UPDATE g1.display_tokens SET retired = TRUE
+             WHERE principal_id = %s AND retired = FALSE
+            """, (principal_id,))
+        await conn.execute(
+            "UPDATE g1.principals SET active = FALSE "
+            "WHERE principal_id = %s", (principal_id,))
+        await record_audit_event(
+            conn, "platform",
+            action="platform.display_token.revoked",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="display_token", subject_id=principal_id)
+        await conn.commit()
+    return {"principal_id": principal_id, "state": "revoked"}
+
+
+# ---------------------------------------------------------------------------
+# Commercial attribution (§10-12) — structure, no pricing
+# ---------------------------------------------------------------------------
+
+
+class CommercialAccountCreate(BaseModel):
+    account_id: str
+    organization_id: str
+
+
+@router.get("/commercial-accounts")
+async def list_commercial_accounts(request: Request) -> list[dict]:
+    await _require_platform_admin(request)
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            "SELECT account_id, organization_id, state, created_at "
+            "FROM g1.commercial_accounts ORDER BY account_id")
+        return [{"account_id": r[0], "organization_id": r[1],
+                 "state": r[2], "created_at": r[3].isoformat()}
+                for r in await cur.fetchall()]
+
+
+@router.post("/commercial-accounts", status_code=201)
+async def create_commercial_account(
+        request: Request, body: CommercialAccountCreate) -> dict:
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        await conn.execute(
+            "INSERT INTO g1.commercial_accounts (account_id, "
+            "organization_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (body.account_id, body.organization_id))
+        await record_audit_event(
+            conn, "platform",
+            action="platform.commercial_account.created",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="commercial_account",
+            subject_id=body.account_id,
+            detail={"organization_id": body.organization_id})
+        await conn.commit()
+    return {"account_id": body.account_id}
+
+
+class ContractCreate(BaseModel):
+    contract_id: str
+    account_id: str
+    plan_ref: str | None = None
+
+
+@router.get("/contracts")
+async def list_contracts(request: Request) -> list[dict]:
+    await _require_platform_admin(request)
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            "SELECT contract_id, account_id, plan_ref, state, "
+            "effective_from, effective_until "
+            "FROM g1.contracts ORDER BY contract_id")
+        return [{"contract_id": r[0], "account_id": r[1],
+                 "plan_ref": r[2], "state": r[3],
+                 "effective_from": r[4].isoformat(),
+                 "effective_until": r[5].isoformat() if r[5] else None}
+                for r in await cur.fetchall()]
+
+
+@router.post("/contracts", status_code=201)
+async def create_contract(request: Request,
+                          body: ContractCreate) -> dict:
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        await conn.execute(
+            "INSERT INTO g1.contracts (contract_id, account_id, "
+            "plan_ref) VALUES (%s, %s, %s)",
+            (body.contract_id, body.account_id, body.plan_ref))
+        await record_audit_event(
+            conn, "platform",
+            action="platform.contract.created",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="contract", subject_id=body.contract_id,
+            detail={"account_id": body.account_id,
+                    "plan_ref": body.plan_ref})
+        await conn.commit()
+    return {"contract_id": body.contract_id}
+
+
+class EntitlementCreate(BaseModel):
+    contract_id: str
+    capability: str
+    assigned_organization_id: str | None = None
+
+
+@router.get("/entitlements")
+async def list_entitlements(request: Request) -> list[dict]:
+    await _require_platform_admin(request)
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            "SELECT entitlement_id, contract_id, capability, "
+            "assigned_organization_id, state "
+            "FROM g1.entitlements ORDER BY contract_id")
+        return [{"entitlement_id": r[0], "contract_id": r[1],
+                 "capability": r[2],
+                 "assigned_organization_id": r[3], "state": r[4]}
+                for r in await cur.fetchall()]
+
+
+@router.post("/entitlements", status_code=201)
+async def create_entitlement(request: Request,
+                             body: EntitlementCreate) -> dict:
+    """Entitlement != Permission (contract §11): assigning a
+    capability to an organization is explicit and inspectable —
+    it never grants authority by itself."""
+    actor = await _require_platform_admin(request)
+    ent_id = f"ent_{secrets.token_urlsafe(12)}"
+    async with db_tenant_connection("platform") as conn:
+        await conn.execute(
+            """
+            INSERT INTO g1.entitlements
+                (entitlement_id, contract_id, capability,
+                 assigned_organization_id)
+            VALUES (%s, %s, %s, %s)
+            """, (ent_id, body.contract_id, body.capability,
+                  body.assigned_organization_id))
+        await record_audit_event(
+            conn, "platform",
+            action="platform.entitlement.assigned",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="entitlement", subject_id=ent_id,
+            detail={"contract_id": body.contract_id,
+                    "capability": body.capability,
+                    "organization_id": body.assigned_organization_id})
+        await conn.commit()
+    return {"entitlement_id": ent_id}
+
+
+@router.get("/usage")
+async def list_usage(request: Request,
+                     tenant_id: str | None = None) -> list[dict]:
+    """Usage/meter records — traceable to tenant, beneficiary org,
+    contract and billing account (§12)."""
+    await _require_platform_admin(request)
+    clauses = ["1=1"]
+    params: list = []
+    if tenant_id:
+        clauses.append("tenant_id = %s")
+        params.append(tenant_id)
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            f"""
+            SELECT usage_id, tenant_id,
+                   beneficiary_organization_id, contract_id,
+                   billing_account_id, meter, quantity,
+                   window_start, window_end
+              FROM g1.usage_meters
+             WHERE {' AND '.join(clauses)}
+             ORDER BY window_start DESC LIMIT 200
+            """, tuple(params))
+        return [{"usage_id": r[0], "tenant_id": r[1],
+                 "beneficiary_organization_id": r[2],
+                 "contract_id": r[3], "billing_account_id": r[4],
+                 "meter": r[5], "quantity": float(r[6]),
+                 "window_start": r[7].isoformat(),
+                 "window_end": r[8].isoformat()}
+                for r in await cur.fetchall()]
+
+
 @router.get("/tenants")
 async def list_tenants(request: Request) -> list[dict]:
     """Platform sovereign view of tenants (§14) — read-only."""
