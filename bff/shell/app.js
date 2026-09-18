@@ -261,8 +261,11 @@ async function loadSourceDetail(sourceId, tid) {
         `<td>${o.responsibility_kind}</td>` +
         `<td><code>${(o.monitoring_sync_operation_id || "").slice(0, 20)}</code></td>` +
         `<td>${o.last_error_class || ""}</td>` +
-        `<td>${o.created_at || ""}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="empty">No operations</td></tr>`;
+        `<td>${o.created_at || ""}</td>` +
+        `<td>${badStates.has(o.state)
+            ? `<button class="secondary op-requeue" data-op="${o.monitoring_sync_operation_id}">retry</button>`
+            : ""}</td></tr>`).join("")
+    : `<tr><td colspan="6" class="empty">No operations</td></tr>`;
 
   det.innerHTML =
     `<div class="actions">` +
@@ -287,13 +290,24 @@ async function loadSourceDetail(sourceId, tid) {
     `<tbody>${alertRows}</tbody></table></div>` +
     `<div class="section"><h2>Operations (DLQ)</h2>` +
     `<table><thead><tr><th>State</th><th>Kind</th><th>Op</th>` +
-    `<th>Error class</th><th>Created</th></tr></thead>` +
+    `<th>Error class</th><th>Created</th><th></th></tr></thead>` +
     `<tbody>${opRows}</tbody></table></div>`;
 
   det.querySelectorAll("[data-p]").forEach(b =>
     b.addEventListener("click", async () => {
       await poll(sourceId, b.dataset.p, tid);
       b.disabled = true; b.textContent = "queued";
+    }));
+  det.querySelectorAll(".op-requeue").forEach(b =>
+    b.addEventListener("click", async () => {
+      b.disabled = true; b.textContent = "queued";
+      const r = await fetch(
+        `/api/v1/monitoring/sources/${sourceId}/operations/` +
+        `${b.dataset.op}/requeue?tenant_id=${tid}`,
+        { method: "POST", credentials: "same-origin",
+          headers: csrfHeaders() });
+      if (!r.ok) { b.textContent = "failed"; b.disabled = false; }
+      else { await loadSourceDetail(sourceId, tid); }
     }));
   document.getElementById("monRefresh").addEventListener("click", () =>
     loadSourceDetail(sourceId, tid));

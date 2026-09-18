@@ -38,6 +38,7 @@ from shared.monitoring_repo import (
     list_resources,
     list_sources,
     list_sync_operations,
+    requeue_sync_operation,
 )
 from jlmirror_monitoring.source import (
     ConfiguredProviderScope,
@@ -615,6 +616,25 @@ async def list_operations_endpoint(
             if r.get(k) is not None:
                 r[k] = r[k].isoformat()
     return rows
+
+
+@router.post("/sources/{source_id}/operations/{operation_id}/requeue")
+async def requeue_operation_endpoint(
+        source_id: str, operation_id: str, request: Request,
+        tenant_id: str | None = None) -> dict:
+    """Operator reconciliation: move a failed operation
+    (reconciliation_required | failed_terminal) back to `pending`
+    so a worker can claim it again."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        ok = await requeue_sync_operation(
+            conn, tenant, source_id, operation_id)
+        await conn.commit()
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="operation is not in a requeueable state")
+    return {"state": "pending"}
 
 
 @router.get("/sources/{source_id}/health")

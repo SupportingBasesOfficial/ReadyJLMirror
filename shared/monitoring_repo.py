@@ -3544,6 +3544,21 @@ async def list_sync_operations(
     return [dict(zip(keys, r)) for r in await cur.fetchall()]
 
 
+async def requeue_sync_operation(
+    conn: AsyncConnection, tenant_id: str, source_id: str,
+    operation_id: str,
+) -> bool:
+    """Operator reconciliation: move a failed op back to `pending`
+    so a worker can claim it again. Only durable failure states are
+    requeueable — last_error_class stays as evidence of the previous
+    attempt. Returns False when the op is not in a requeueable state."""
+    cur = await conn.execute(
+        "SELECT monitoring.requeue_sync_operation(%s, %s, %s)",
+        (tenant_id, source_id, operation_id),
+    )
+    return bool((await cur.fetchone())[0])
+
+
 async def list_health_projections(
     conn: AsyncConnection, tenant_id: str, source_id: str
 ) -> list[dict]:
