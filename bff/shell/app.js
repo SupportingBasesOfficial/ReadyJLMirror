@@ -211,11 +211,14 @@ function renderOnboardForm(tid) {
 async function loadSourceDetail(sourceId, tid) {
   const det = document.getElementById("monDetail");
   det.innerHTML = '<div class="spinner"></div>';
-  const [health, problems, current, ops] = await Promise.all([
+  const [health, problems, current, ops, alerts] = await Promise.all([
     api(`/sources/${sourceId}/health?tenant_id=${tid}`),
     api(`/sources/${sourceId}/problems?tenant_id=${tid}&active_only=true`),
     api(`/sources/${sourceId}/current?tenant_id=${tid}`),
     api(`/sources/${sourceId}/operations?tenant_id=${tid}`),
+    fetch(`/api/v1/alerting/alerts?tenant_id=${tid}&source_id=${sourceId}`,
+          { credentials: "same-origin" })
+        .then(r => r.ok ? r.json() : []),
   ]);
 
   const healthRows = Array.isArray(health) && health.length
@@ -240,6 +243,15 @@ async function loadSourceDetail(sourceId, tid) {
         `<td><code>${c.canonical_value}</code></td>` +
         `<td>${c.evidence_state}</td></tr>`).join("")
     : `<tr><td colspan="3" class="empty">No current state</td></tr>`;
+
+  const alertRows = Array.isArray(alerts) && alerts.length
+    ? alerts.map(a =>
+        `<tr><td class="a-${a.lifecycle_state}">${a.lifecycle_state}</td>` +
+        `<td><code>${(a.alert_id || "").slice(0, 18)}</code></td>` +
+        `<td>${a.source_kind}</td>` +
+        `<td>${a.policy_id} v${a.policy_version}</td>` +
+        `<td>r${a.projection_revision}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="empty">No alerts — none authorized yet</td></tr>`;
 
   const badStates = new Set(["reconciliation_required", "failed_terminal"]);
   const opRows = Array.isArray(ops) && ops.length
@@ -269,6 +281,10 @@ async function loadSourceDetail(sourceId, tid) {
     `<div class="section"><h2>Current metrics</h2>` +
     `<table><thead><tr><th>Metric</th><th>Value</th><th>Evidence</th>` +
     `</tr></thead><tbody>${currentRows}</tbody></table></div>` +
+    `<div class="section"><h2>Alerts</h2>` +
+    `<table><thead><tr><th>State</th><th>Alert</th><th>Source kind</th>` +
+    `<th>Policy</th><th>Rev</th></tr></thead>` +
+    `<tbody>${alertRows}</tbody></table></div>` +
     `<div class="section"><h2>Operations (DLQ)</h2>` +
     `<table><thead><tr><th>State</th><th>Kind</th><th>Op</th>` +
     `<th>Error class</th><th>Created</th></tr></thead>` +
