@@ -26,7 +26,14 @@ from fastapi.responses import JSONResponse
 from shared.config import settings
 from shared.db import check_db_ready, close_pool, db_connection, init_pool
 from shared import telemetry
-from api.routers import authority, async_ops, monitoring, observability, release
+from api.routers import (
+    alerting,
+    authority,
+    async_ops,
+    monitoring,
+    observability,
+    release,
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=settings.log_level)
@@ -186,6 +193,7 @@ app.include_router(monitoring.router)
 app.include_router(async_ops.router)
 app.include_router(observability.router)
 app.include_router(release.router)
+app.include_router(alerting.router)
 
 
 @app.get("/health", tags=["health"])
