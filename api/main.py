@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import os
 import time
@@ -172,6 +173,50 @@ async def verify_context(request: Request, call_next):
 # ---------------------------------------------------------------------------
 # G1 protected endpoints
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Dev webhook sink — real HTTP delivery target for the outbox
+# dispatcher (proves the wire path end-to-end; production = broker).
+# Internal-only route, dev-gated.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/dev/outbox-sink", tags=["dev"])
+async def dev_outbox_sink(request: Request) -> dict:
+    if not settings.is_development:
+        return JSONResponse({"state": "forbidden"}, status_code=403)
+    envelope = await request.json()
+    async with db_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO g1.webhook_delivery
+                (message_id, contract_name, correlation_id, envelope)
+            VALUES (%s, %s, %s, %s::jsonb)
+            """,
+            (envelope.get("message_id", ""),
+             envelope.get("contract_name", ""),
+             envelope.get("correlation_id", ""),
+             json.dumps(envelope)))
+    return {"received": True, "message_id": envelope.get("message_id")}
+
+
+@app.get("/dev/outbox-sink", tags=["dev"])
+async def dev_outbox_sink_list(limit: int = 50) -> list:
+    if not settings.is_development:
+        return JSONResponse({"state": "forbidden"}, status_code=403)
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            """
+            SELECT delivery_id, received_at, message_id, contract_name,
+                   correlation_id
+              FROM g1.webhook_delivery
+             ORDER BY delivery_id DESC LIMIT %s
+            """, (min(limit, 200),))
+        rows = await cur.fetchall()
+    return [{"delivery_id": r[0], "received_at": r[1].isoformat(),
+             "message_id": r[2], "contract_name": r[3],
+             "correlation_id": r[4]} for r in rows]
 
 
 @app.get("/api/v1/me", tags=["g1"])

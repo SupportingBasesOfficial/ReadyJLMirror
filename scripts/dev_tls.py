@@ -136,6 +136,17 @@ def main() -> None:
         issuer_key=ca_key, pub_key=bff_key.public_key(), is_ca=False,
         eku=client_eku, san_names=["bff"], san_ips=[]))
 
+    # Zabbix web server cert (dev provider profile — api_jsonrpc.php
+    # over https so the real egress path applies unchanged)
+    zbx_key = _key()
+    _write_key(OUT / "zbx-key.pem", zbx_key)
+    _write_cert(OUT / "zbx-cert.pem", _issue(
+        subject_cn="zabbix-web", issuer_name=ca_cert.subject,
+        issuer_key=ca_key, pub_key=zbx_key.public_key(), is_ca=False,
+        eku=server_eku,
+        san_names=["zabbix-web", "localhost"],
+        san_ips=[ipaddress.IPv4Address("127.0.0.1")]))
+
     print(f"dev CA + certs written to {OUT}/")
     print("  BFF https : TLS_CERT_FILE/TLS_KEY_FILE -> cert.pem,key.pem")
     print("  API mTLS  : API_MTLS=1 + API_TLS_* -> api-*, ca.pem")

@@ -105,6 +105,13 @@ def _process_pending(conn: psycopg.Connection) -> int:
                 claim_token=f"mon-claim_{secrets.token_urlsafe(24)}",
             )
 
+            # Scope provider reads to the source's host groups —
+            # problem.get/trigger.get must not return out-of-scope
+            # hosts (their problems can never associate -> the
+            # collector would fail closed forever).
+            client.scope_group_ids = repo.source_scope_group_ids(
+                claim.monitoring_source_id) or None
+
             credential = resolver.resolve_zabbix_api_token(
                 claim.credential_binding_ref)
             endpoint = admission.admit_zabbix_api(

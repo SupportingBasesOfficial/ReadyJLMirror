@@ -82,7 +82,7 @@ services:
       - ./secrets:/run/secrets:ro
     healthcheck:
       test: ["CMD-SHELL",
-             "python -c \"import httpx,sys; sys.exit(0 if httpx.get('http://localhost:8000/health',timeout=3).status_code==200 else 1)\""]
+             "python -c \"import os,httpx,sys; mtls=os.environ.get('API_MTLS'); port=os.environ.get('API_PORT','8000'); kw={'cert':('/run/secrets/tls/bff-cert.pem','/run/secrets/tls/bff-key.pem'),'verify':'/run/secrets/tls/ca.pem'} if mtls else {}; scheme='https' if mtls else 'http'; sys.exit(0 if httpx.get(f'{scheme}://localhost:{port}/health',timeout=3,**kw).status_code==200 else 1)\""]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -143,6 +143,13 @@ services:
       DB_PASSWORD: jlmirror_dev
       CREDENTIALS_DIR: /run/secrets
       SECRETS_DIR: /run/secrets
+      # Dev webhook: real HTTP delivery to the API sink — leave
+      # empty for dev-log simulated receipts.
+      ALERTING_WEBHOOK_URL: ${ALERTING_WEBHOOK_URL:-http://api:8000/dev/outbox-sink}
+      # Provider egress (dev Zabbix profile / intranet deployments)
+      EGRESS_ALLOW_HOSTS: ${EGRESS_ALLOW_HOSTS:-}
+      EGRESS_ALLOW_PRIVATE_IPS: ${EGRESS_ALLOW_PRIVATE_IPS:-}
+      PROVIDER_CA_FILE: ${PROVIDER_CA_FILE:-}
     volumes:
       - ./secrets:/run/secrets:ro
     depends_on:
@@ -151,6 +158,57 @@ services:
     command: python -m workers.run_all
     profiles:
       - worker
+
+  # ------------------------------------------------------------------
+  # Dev Zabbix provider profile — a REAL Zabbix server + web API +
+  # agent so the whole monitoring pipeline exercises real provider
+  # traffic (docker compose --profile zabbix up -d).
+  # ------------------------------------------------------------------
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-7.0-latest
+    environment:
+      DB_SERVER_HOST: db
+      POSTGRES_DB: zabbix
+      POSTGRES_USER: jlmirror_owner
+      POSTGRES_PASSWORD: jlmirror_dev
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles:
+      - zabbix
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-7.0-latest
+    environment:
+      DB_SERVER_HOST: db
+      POSTGRES_DB: zabbix
+      POSTGRES_USER: jlmirror_owner
+      POSTGRES_PASSWORD: jlmirror_dev
+      PHP_TZ: UTC
+      ZBX_SERVER_NAME: zabbix-web
+      ZBX_SERVER_HOST: zabbix-server
+    volumes:
+      - ./secrets/tls/zbx-cert.pem:/etc/ssl/nginx/ssl.crt:ro
+      - ./secrets/tls/zbx-key.pem:/etc/ssl/nginx/ssl.key:ro
+      - ./secrets/tls/dhparam.pem:/etc/ssl/nginx/dhparam.pem:ro
+    ports:
+      - "8443:8443"
+    depends_on:
+      zabbix-server:
+        condition: service_started
+    profiles:
+      - zabbix
+
+  zabbix-agent:
+    image: zabbix/zabbix-agent:alpine-7.0-latest
+    environment:
+      ZBX_SERVER_HOST: zabbix-server
+      ZBX_HOSTNAME: zbx-agent-1
+    depends_on:
+      zabbix-server:
+        condition: service_started
+    profiles:
+      - zabbix
 
 volumes:
   db_data:

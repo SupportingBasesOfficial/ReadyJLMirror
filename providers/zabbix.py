@@ -99,7 +99,11 @@ def _rpc(endpoint: str, method: str, params: dict, api_token: str) -> Any:
         extensions["sni_hostname"] = host
 
     try:
-        with httpx.Client(timeout=_TIMEOUT, verify=True) as client:
+        # PROVIDER_CA_FILE: enterprise CA bundle for internal/provider
+        # TLS endpoints (private CAs are the norm for intranet Zabbix).
+        import os
+        verify = os.environ.get("PROVIDER_CA_FILE") or True
+        with httpx.Client(timeout=_TIMEOUT, verify=verify) as client:
             resp = client.post(
                 url,
                 json=payload,
@@ -133,7 +137,18 @@ def _rpc(endpoint: str, method: str, params: dict, api_token: str) -> Any:
 
 
 class ZabbixClient:
-    """Concrete Zabbix adapter implementing the reader ports."""
+    """Concrete Zabbix adapter implementing the reader ports.
+
+    ``scope_group_ids`` narrows provider reads (problem.get,
+    trigger.get) to the source's declared host groups — without it a
+    shared Zabbix instance returns problems for out-of-scope hosts,
+    which the canonical collector must fail closed on. Set by the
+    worker from the claim's provider configuration; None = unscoped
+    (previous behavior).
+    """
+
+    def __init__(self) -> None:
+        self.scope_group_ids: list[str] | None = None
 
     def hostgroup_get(
         self,
@@ -447,6 +462,8 @@ class ZabbixClient:
                 "selectTags": "extend",
                 "sortfield": "eventid",
                 "limit": max_rows + 1,
+                **({"groupids": list(self.scope_group_ids)}
+                   if self.scope_group_ids else {}),
             },
             credential.api_token,
         )
@@ -547,6 +564,8 @@ class ZabbixClient:
                 "output": ["triggerid"],
                 "selectHosts": ["hostid"],
                 "limit": max_rows,
+                **({"groupids": list(self.scope_group_ids)}
+                   if self.scope_group_ids else {}),
             },
             credential.api_token,
         )

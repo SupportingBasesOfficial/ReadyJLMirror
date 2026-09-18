@@ -2577,6 +2577,25 @@ class PgProblemStateRepository:
             raise ValueError("monitoring.problem_state_op_not_found")
         return row[0], row[1]
 
+    def source_scope_group_ids(
+        self, monitoring_source_id: str
+    ) -> list[str]:
+        """Declared host-group refs for the source — used to scope
+        provider reads (problem.get, trigger.get) so out-of-scope
+        problems never reach the canonical collector."""
+        cur = self._conn.execute(
+            """
+            SELECT configured_provider_scope -> 'host_group_refs'
+              FROM monitoring.monitoring_source
+             WHERE tenant_id = %s AND monitoring_source_id = %s
+            """,
+            (self._tenant_id, monitoring_source_id),
+        )
+        row = cur.fetchone()
+        if row is None or not isinstance(row[0], list):
+            return []
+        return [str(v) for v in row[0]]
+
     def trigger_associations(
         self, monitoring_source_id: str, source_instance_generation: str
     ) -> tuple[ProblemAssociationTarget, ...]:
