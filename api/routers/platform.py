@@ -1,4 +1,4 @@
-"""Platform administration surface — the platform-owner control plane
+﻿"""Platform administration surface — the platform-owner control plane
 (organization-operating-model-contract.md §14).
 
 Every endpoint requires the caller's principal to be a
@@ -303,6 +303,100 @@ async def organization_360(request: Request,
         "tenants": tenants, "relationships": relationships,
         "delegated_grants": grants, "members": members,
     }
+
+
+class MspTransfer(BaseModel):
+    """Service-provider transfer (contract §13): the monitored
+    organization's tenant/identity is preserved; old delegated
+    authority is fenced; successor authority is established;
+    history remains attributable to the authority that existed
+    when actions occurred."""
+    target_organization_id: str
+    from_organization_id: str
+    to_organization_id: str
+
+
+@router.post("/service-provider-transfer")
+async def service_provider_transfer(request: Request,
+                                    body: MspTransfer) -> dict:
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        cur = await conn.execute(
+            "SELECT tenant_id FROM g1.tenants "
+            "WHERE organization_id = %s", (body.target_organization_id,))
+        target_tenants = [r[0] for r in await cur.fetchall()]
+        if not target_tenants:
+            raise HTTPException(
+                status_code=404,
+                detail="target organization has no tenants")
+
+        # 1) Fence: revoke every active delegated grant from the
+        #    outgoing provider over the target org's tenants.
+        cur = await conn.execute(
+            """
+            UPDATE g1.delegated_grants
+               SET state = 'revoked',
+                   revoked_at = transaction_timestamp()
+             WHERE source_organization_id = %s
+               AND target_tenant_id = ANY(%s)
+               AND state = 'active'
+             RETURNING grant_id
+            """, (body.from_organization_id, target_tenants))
+        fenced = [r[0] for r in await cur.fetchall()]
+
+        # 2) End the outgoing provider's relationships to the
+        #    target organization.
+        cur = await conn.execute(
+            """
+            UPDATE g1.organization_relationships
+               SET state = 'ended',
+                   effective_until = transaction_timestamp()
+             WHERE source_organization_id = %s
+               AND target_organization_id = %s
+               AND state = 'active'
+             RETURNING relationship_id
+            """, (body.from_organization_id,
+                  body.target_organization_id))
+        ended = [r[0] for r in await cur.fetchall()]
+
+        # 3) Establish successor relationships (same families).
+        cur = await conn.execute(
+            """
+            SELECT family FROM g1.organization_relationships
+             WHERE relationship_id = ANY(%s)
+            """, (ended,))
+        families = [r[0] for r in await cur.fetchall()]
+        successors = []
+        for fam in families:
+            rel_id = f"rel_{secrets.token_urlsafe(12)}"
+            await conn.execute(
+                """
+                INSERT INTO g1.organization_relationships
+                    (relationship_id, family, source_organization_id,
+                     target_organization_id)
+                VALUES (%s, %s, %s, %s)
+                """, (rel_id, fam, body.to_organization_id,
+                      body.target_organization_id))
+            successors.append(rel_id)
+
+        await record_audit_event(
+            conn, "platform",
+            action="platform.service_provider.transferred",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="organization",
+            subject_id=body.target_organization_id,
+            detail={
+                "from": body.from_organization_id,
+                "to": body.to_organization_id,
+                "fenced_grants": fenced,
+                "ended_relationships": ended,
+                "successor_relationships": successors})
+        await conn.commit()
+
+    return {"target_organization_id": body.target_organization_id,
+            "fenced_grants": fenced,
+            "ended_relationships": ended,
+            "successor_relationships": successors}
 
 
 @router.get("/tenants")
