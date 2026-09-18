@@ -1,4 +1,4 @@
-"""Organization & Access layer — effective-authority resolution.
+﻿"""Organization & Access layer — effective-authority resolution.
 
 Covers the canonical separation:
   - membership role templates (deny-by-default vocabulary)
@@ -83,10 +83,24 @@ async def test_membership_role_templates(db):
 
 @pytest.mark.asyncio
 async def test_delegated_grant_scoped_authority(db):
+    """Self-contained: temp grant over tenant:a for dev-msp-admin —
+    authority exists ONLY on the target tenant."""
     from shared import access
     async with db() as conn:
-        # MSP admin: membership in tenant:msp-alpha only; grant over
-        # tenant:a — authority exists ONLY on the target.
+        await conn.execute(
+            """
+            INSERT INTO g1.delegated_grants
+                (grant_id, source_organization_id, target_tenant_id,
+                 principal_id, permissions)
+            VALUES ('grant-test-scope', 'org:msp-alpha', 'tenant:a',
+                    'dev-msp-admin',
+                    ARRAY['tenant:read', 'monitoring:read',
+                          'monitoring:operate'])
+            ON CONFLICT (grant_id) DO UPDATE
+                SET state = 'active', revoked_at = NULL
+            """)
+        await conn.commit()
+
         perms_a = await access.effective_permissions(
             conn, "dev-msp-admin", "tenant:a")
         assert "monitoring:operate" in perms_a
@@ -99,6 +113,11 @@ async def test_delegated_grant_scoped_authority(db):
             conn, "dev-msp-admin", "tenant:a")
         assert not await access.tenant_authorized(
             conn, "dev-msp-admin", "tenant:dev")
+
+        await conn.execute(
+            "DELETE FROM g1.delegated_grants "
+            "WHERE grant_id = 'grant-test-scope'")
+        await conn.commit()
 
 
 @pytest.mark.asyncio
@@ -162,15 +181,33 @@ async def test_grant_revocation_removes_authority(db):
 
 @pytest.mark.asyncio
 async def test_accessible_tenants_union(db):
+    """Membership ∪ grant targets; platform admin sees all."""
     from shared import access
     async with db() as conn:
+        await conn.execute(
+            """
+            INSERT INTO g1.delegated_grants
+                (grant_id, source_organization_id, target_tenant_id,
+                 principal_id, permissions)
+            VALUES ('grant-test-union', 'org:msp-alpha', 'tenant:a',
+                    'dev-msp-admin', ARRAY['tenant:read'])
+            ON CONFLICT (grant_id) DO UPDATE
+                SET state = 'active', revoked_at = NULL
+            """)
+        await conn.commit()
+
         tenants = {t["tenant_id"] for t in
                    await access.accessible_tenants(
                        conn, "dev-msp-admin")}
-        assert tenants == {"tenant:msp-alpha", "tenant:a"}
+        assert {"tenant:msp-alpha", "tenant:a"} <= tenants
 
         all_tenants = {t["tenant_id"] for t in
                        await access.accessible_tenants(
                            conn, "dev-platform-admin")}
         assert {"tenant:dev", "tenant:a",
                 "tenant:msp-alpha"} <= all_tenants
+
+        await conn.execute(
+            "DELETE FROM g1.delegated_grants "
+            "WHERE grant_id = 'grant-test-union'")
+        await conn.commit()

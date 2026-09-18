@@ -205,9 +205,6 @@ async def verify_context(request: Request, call_next):
         "/api/v1/auth/", "/api/v1/fence/", "/api/v1/monitoring/",
         "/api/v1/async/", "/api/v1/observability/", "/api/v1/release/",
     )
-    if settings.is_development and path.startswith(sandbox_prefixes):
-        return await call_next(request)
-
     ctx = _verify_bff_context(request)
     display_ctx = False
     if ctx is None:
@@ -215,6 +212,15 @@ async def verify_context(request: Request, call_next):
         # independently attributable, read-only, revocable (§9).
         ctx = await _display_token_context(request)
         display_ctx = ctx is not None
+
+    # Dev sandbox is open only to ANONYMOUS local exploration — a
+    # presented credential (signed ctx or display token) always gets
+    # gated, never upgraded to sandbox trust.
+    if (settings.is_development
+            and path.startswith(sandbox_prefixes)
+            and ctx is None):
+        return await call_next(request)
+
     if ctx is None:
         return JSONResponse({"state": "unauthenticated"},
                             status_code=status.HTTP_401_UNAUTHORIZED)
