@@ -211,10 +211,11 @@ function renderOnboardForm(tid) {
 async function loadSourceDetail(sourceId, tid) {
   const det = document.getElementById("monDetail");
   det.innerHTML = '<div class="spinner"></div>';
-  const [health, problems, current] = await Promise.all([
+  const [health, problems, current, ops] = await Promise.all([
     api(`/sources/${sourceId}/health?tenant_id=${tid}`),
     api(`/sources/${sourceId}/problems?tenant_id=${tid}&active_only=true`),
     api(`/sources/${sourceId}/current?tenant_id=${tid}`),
+    api(`/sources/${sourceId}/operations?tenant_id=${tid}`),
   ]);
 
   const healthRows = Array.isArray(health) && health.length
@@ -240,6 +241,17 @@ async function loadSourceDetail(sourceId, tid) {
         `<td>${c.evidence_state}</td></tr>`).join("")
     : `<tr><td colspan="3" class="empty">No current state</td></tr>`;
 
+  const badStates = new Set(["reconciliation_required", "failed_terminal"]);
+  const opRows = Array.isArray(ops) && ops.length
+    ? ops.map(o =>
+        `<tr class="${badStates.has(o.state) ? "op-bad" : ""}">` +
+        `<td class="op-${o.state}">${o.state}</td>` +
+        `<td>${o.responsibility_kind}</td>` +
+        `<td><code>${(o.monitoring_sync_operation_id || "").slice(0, 20)}</code></td>` +
+        `<td>${o.last_error_class || ""}</td>` +
+        `<td>${o.created_at || ""}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="empty">No operations</td></tr>`;
+
   det.innerHTML =
     `<div class="actions">` +
     `<button class="secondary" data-p="inventory">inventory</button>` +
@@ -256,7 +268,11 @@ async function loadSourceDetail(sourceId, tid) {
     `<th>Evidence</th></tr></thead><tbody>${problemRows}</tbody></table></div>` +
     `<div class="section"><h2>Current metrics</h2>` +
     `<table><thead><tr><th>Metric</th><th>Value</th><th>Evidence</th>` +
-    `</tr></thead><tbody>${currentRows}</tbody></table></div>`;
+    `</tr></thead><tbody>${currentRows}</tbody></table></div>` +
+    `<div class="section"><h2>Operations (DLQ)</h2>` +
+    `<table><thead><tr><th>State</th><th>Kind</th><th>Op</th>` +
+    `<th>Error class</th><th>Created</th></tr></thead>` +
+    `<tbody>${opRows}</tbody></table></div>`;
 
   det.querySelectorAll("[data-p]").forEach(b =>
     b.addEventListener("click", async () => {

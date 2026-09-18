@@ -3516,6 +3516,34 @@ def list_all_monitoring_sources(conn: Connection) -> list[tuple[str, str]]:
     return [tuple(r) for r in cur.fetchall()]
 
 
+async def list_sync_operations(
+    conn: AsyncConnection, tenant_id: str, source_id: str,
+    state: str | None = None,
+) -> list[dict]:
+    """DLQ/failure visibility (ADR-010): durable sync ops for a source,
+    newest first. state filter narrows to e.g. reconciliation_required
+    or failed_terminal."""
+    state_filter = "AND o.state = %s" if state else ""
+    params = (tenant_id, source_id, state) if state else (tenant_id, source_id)
+    cur = await conn.execute(
+        f"""
+        SELECT o.monitoring_sync_operation_id, o.responsibility_kind,
+               o.state, o.last_error_class, o.claim_token,
+               o.created_at, o.started_at, o.completed_at
+          FROM monitoring.monitoring_sync_operation o
+         WHERE o.tenant_id = %s AND o.monitoring_source_id = %s
+           {state_filter}
+         ORDER BY o.created_at DESC
+         LIMIT 50
+        """,
+        params,
+    )
+    keys = ("monitoring_sync_operation_id", "responsibility_kind",
+            "state", "last_error_class", "claim_token",
+            "created_at", "started_at", "completed_at")
+    return [dict(zip(keys, r)) for r in await cur.fetchall()]
+
+
 async def list_health_projections(
     conn: AsyncConnection, tenant_id: str, source_id: str
 ) -> list[dict]:

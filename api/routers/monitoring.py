@@ -37,6 +37,7 @@ from shared.monitoring_repo import (
     list_problems,
     list_resources,
     list_sources,
+    list_sync_operations,
 )
 from jlmirror_monitoring.source import (
     ConfiguredProviderScope,
@@ -596,6 +597,24 @@ async def run_problems_once() -> dict:
 # ---------------------------------------------------------------------------
 # Health projection (canonical derived authority — no provider polling)
 # ---------------------------------------------------------------------------
+
+
+@router.get("/sources/{source_id}/operations")
+async def list_operations_endpoint(
+        source_id: str, request: Request,
+        tenant_id: str | None = None,
+        state: str | None = None) -> list[dict]:
+    """DLQ visibility (ADR-010): durable sync operations for a source —
+    pending, running, succeeded, reconciliation_required, failed_terminal —
+    newest first. state filter narrows to one class."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        rows = await list_sync_operations(conn, tenant, source_id, state)
+    for r in rows:
+        for k in ("created_at", "started_at", "completed_at"):
+            if r.get(k) is not None:
+                r[k] = r[k].isoformat()
+    return rows
 
 
 @router.get("/sources/{source_id}/health")
