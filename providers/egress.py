@@ -11,9 +11,10 @@ Enforcement layers (all applied before any request leaves):
    address is screened and private/loopback/link-local/
    multicast/reserved targets are denied unless
    `EGRESS_ALLOW_PRIVATE_IPS=true` (intranet Zabbix deployments,
-   still bound to the allowlist). TOCTOU note: httpx re-resolves at
-   connect time — true DNS pinning (resolve-once + connect-to-IP
-   with Host/SNI) belongs to the production engine behind this port.
+   still bound to the allowlist). The host resolves ONCE here and
+   the admitted IP is pinned — the transport connects to that IP
+   with Host/SNI bound to the hostname (no connect-time re-resolve,
+   so no DNS-rebinding TOCTOU).
 4. **No redirect following** — the Zabbix transport performs a
    single POST; redirects are not followed anywhere.
 
@@ -87,26 +88,58 @@ class DevOutboundAdmission:
                     f"host {host} not in EGRESS_ALLOW_HOSTS"
                 )
 
-        if not _env_flag("EGRESS_ALLOW_PRIVATE_IPS"):
-            self._screen_dns(host)
-
         api_url = base + "/api_jsonrpc.php"
+        private_mode = _env_flag("EGRESS_ALLOW_PRIVATE_IPS")
+        try:
+            ips = self._resolve(host)
+        except EgressAdmissionError:
+            if not private_mode:
+                raise
+            # Intranet mode already accepts the operator-declared
+            # private target; an unresolvable-at-admission host is
+            # admitted without a pin (same posture as before).
+            ips = []
+        if not private_mode:
+            self._screen_ips(host, ips)
+        # DNS pinning: the transport connects to the admitted IP
+        # (Host/SNI keep the hostname identity) — no second lookup.
+        if ips:
+            from providers import pins
+            pins.pin(api_url, host, ips[0])
         return AdmittedProviderEndpoint(
             api_url=api_url,
             egress_decision_ref=f"egress-dev-{secrets.token_urlsafe(8)}",
         )
 
     @staticmethod
-    def _screen_dns(host: str) -> None:
-        """Resolve the host and deny non-public destinations (SSRF)."""
+    def _resolve(host: str) -> list[str]:
+        """Resolve the host once — the single DNS point of truth."""
+        # IP literals need no lookup.
+        try:
+            ipaddress.ip_address(host)
+            return [host]
+        except ValueError:
+            pass
         try:
             infos = socket.getaddrinfo(host, None)
         except socket.gaierror as exc:
             raise EgressAdmissionError(
                 f"host {host} does not resolve") from exc
+        addrs = []
+        for i in infos:
+            ip = str(ipaddress.ip_address(i[4][0]))
+            if ip not in addrs:
+                addrs.append(ip)
+        if not addrs:
+            raise EgressAdmissionError(f"host {host} has no addresses")
+        return addrs
+
+    @staticmethod
+    def _screen_ips(host: str, ips: list[str]) -> None:
+        """Deny non-public destinations (SSRF) among the resolved set."""
         blocked = {
-            str(ipaddress.ip_address(i[4][0])) for i in infos
-            if _blocked_ip(ipaddress.ip_address(i[4][0]))
+            ip for ip in ips
+            if _blocked_ip(ipaddress.ip_address(ip))
         }
         if blocked:
             raise EgressAdmissionError(

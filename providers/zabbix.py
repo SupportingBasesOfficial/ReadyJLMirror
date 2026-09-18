@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Sequence
+from urllib.parse import urlparse
 
 import httpx
 
@@ -80,12 +81,30 @@ def _rpc(endpoint: str, method: str, params: dict, api_token: str) -> Any:
         "params": params,
         "id": 1,
     }
+    headers = {"Authorization": f"Bearer {api_token}"}
+    extensions: dict = {}
+    url = endpoint
+
+    # DNS pinning: the egress admission resolved once and pinned the
+    # admitted IP. Connect to the IP with Host + SNI bound to the
+    # hostname — TLS identity is preserved, no second lookup exists.
+    from providers import pins
+    pinned = pins.get(endpoint)
+    if pinned is not None:
+        host, ip = pinned
+        parsed = urlparse(endpoint)
+        port = f":{parsed.port}" if parsed.port else ""
+        url = f"{parsed.scheme}://{ip}{port}{parsed.path}"
+        headers["Host"] = host
+        extensions["sni_hostname"] = host
+
     try:
         with httpx.Client(timeout=_TIMEOUT, verify=True) as client:
             resp = client.post(
-                endpoint,
+                url,
                 json=payload,
-                headers={"Authorization": f"Bearer {api_token}"},
+                headers=headers,
+                extensions=extensions,
             )
     except httpx.TimeoutException as exc:
         raise ProviderUnavailableError(f"zabbix timeout: {exc}") from exc
