@@ -12,7 +12,8 @@ This repository implements the product slices authorized by the canonical specif
 | Monitoring Wave 4 | sources → validation → inventory → metrics → current → history → problems → health → outbox, all durable with evidence states |
 | Alerting core model | `alerting.alert` + immutable transitions, closed source-kind law, policy evidence required |
 | Publication bridge | atomic outbox obligations on problem/health transitions |
-| Ops surface | DLQ visibility + operator requeue, worker heartbeat, readiness with declared failure modes, audit trail, backup/restore rehearsal |
+| G6 transport consumer | `alerting.inbox_receipt` dedup + envelope validation + Monitoring owner reread -> durable resync completion (never Alert mutation) |
+| Ops surface | DLQ visibility + operator requeue, worker heartbeat, readiness with declared failure modes, audit trail, backup/restore rehearsal, chaos matrix, SLO probe, DNS-pinned egress |
 | Security | mounted-file secrets, OpenBao dev backend, TLS + opt-in mTLS, least-privilege roles, direct-SQL escape battery |
 
 ## G1 — Identity + Tenant + Protected Shell
@@ -240,6 +241,18 @@ Real persistence + real Zabbix adapter, implementing the accepted
 - **Alerting** — `GET/POST /api/v1/alerting/alerts[/transitions]`:
   the canonical core model (active|resolved, immutable transitions,
   no automatic creation — policy evaluation is a separate gate)
+- **G6 inbox** — `workers/alerting_transport.py` consumes the two
+  accepted outbox contracts: envelope validation -> create-or-observe
+  receipt -> Monitoring owner reread -> durable resync completion;
+  `GET /api/v1/alerting/inbox` shows receipt diagnostics
+- **Chaos matrix** — `python -m scripts.chaos_matrix` injects each
+  dependency failure and asserts the declared mode (db fail_closed,
+  api degraded, worker stale heartbeat, keycloak session-survival)
+- **SLO probe** — `GET /api/v1/observability/slo` latency/error
+  distribution per endpoint
+- **DNS-pinned egress** — admission resolves once, screens and pins
+  the admitted IP; the transport connects to the IP with Host/SNI
+  bound (no rebind TOCTOU)
 
 ## What this is NOT yet
 

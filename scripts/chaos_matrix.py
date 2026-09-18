@@ -122,7 +122,18 @@ def main() -> int:
                   "bff": (200, "ready")},
         restore=lambda: _start("worker"),
         settle=25)   # heartbeat threshold: poll*4 = 20s
-    time.sleep(15)
+    _wait_ready()
+
+    # 4. Keycloak down — durable sessions still authorize; only new
+    #    logins break. Readiness stays ready (IdP is not a data
+    #    dependency for bound sessions).
+    results["keycloak_down"] = _scenario(
+        "KEYCLOAK DOWN — bound sessions keep working (durable auth)",
+        kill=lambda: _stop("keycloak"),
+        expected={"bff": (200, "ready")},
+        restore=lambda: _start("keycloak"),
+        settle=6)
+    _wait_ready()
 
     passed = sum(results.values())
     print(f"\nchaos matrix: {passed}/{len(results)} scenarios PASS")
