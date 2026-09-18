@@ -22,16 +22,14 @@ Usage: python -m scripts.dev_e2e_fake_zabbix
 from __future__ import annotations
 
 import logging
-import time
 
 import psycopg
 
+from scripts.fake_zabbix import make_dev_server, rpc_client
 from shared.config import settings
 
 logger = logging.getLogger("dev_e2e")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-
-from scripts.fake_zabbix import make_dev_server, rpc_client
 
 
 # ---------------------------------------------------------------------------
@@ -105,8 +103,8 @@ def main() -> None:
         print("enqueue problems/poll ->", rr.status_code)
 
     with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
-        print(f"worker problems   ->", prob_w(conn))
-        print(f"worker health     ->", hea_w(conn))
+        print("worker problems   ->", prob_w(conn))
+        print("worker health     ->", hea_w(conn))
         print("worker outbox     ->", _publish_durable(conn))
 
         _dump(conn, "ops",

@@ -30,8 +30,13 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 OUT = Path(os.environ.get("SECRETS_DIR", "secrets")) / "tls"
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
-_VALID = (lambda t: (_NOW - datetime.timedelta(minutes=5),
-                     _NOW + datetime.timedelta(days=825)))
+
+
+def _valid_range() -> tuple[datetime.datetime, datetime.datetime]:
+    return (
+        _NOW - datetime.timedelta(minutes=5),
+        _NOW + datetime.timedelta(days=825),
+    )
 
 
 def _key():
@@ -59,7 +64,7 @@ def _name(cn: str, org: str = "JLMirror Dev") -> x509.Name:
 
 def _issue(*, subject_cn: str, san_names, san_ips, issuer_name,
            issuer_key, pub_key, is_ca: bool, eku) -> x509.Certificate:
-    nvb, nva = _VALID(0)
+    nvb, nva = _valid_range()
     b = (
         x509.CertificateBuilder()
         .subject_name(_name(subject_cn)).issuer_name(issuer_name)

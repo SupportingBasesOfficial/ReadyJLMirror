@@ -11,7 +11,7 @@ Zabbix IDs/names stay external references.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, Sequence
+from typing import Any, Sequence
 
 import httpx
 

@@ -32,7 +32,6 @@ from jlmirror_monitoring.validation_worker import (
     ResolvedZabbixCredential,
     SyncOperationState,
     OperationalEvidenceState,
-    validate_host_group_scope,
 )
 
 

@@ -10,7 +10,6 @@ closed (no existence leakage).
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timezone
 from typing import Optional
 
 from psycopg import AsyncConnection

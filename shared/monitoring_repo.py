@@ -33,7 +33,6 @@ from jlmirror_monitoring.host_inventory import (
 )
 from jlmirror_monitoring.metric_current_state import (
     CurrentMetricTarget,
-    CurrentStateFailureClass,
     MetricCurrentStateClaim,
     MetricCurrentStateResult,
     parse_canonical_value as _parse_canonical_value,
@@ -55,10 +54,8 @@ from jlmirror_monitoring.metric_history import (
     ZabbixHistoryEvidence,
 )
 from jlmirror_monitoring.problem_state import (
-    CanonicalProblemState,
     ProblemAssociationTarget,
     ProblemStateClaim,
-    ProblemStateFailureClass,
     ProblemStateResult,
     ZabbixProblemEvidence,
     ZabbixRecoveryEvidence,
@@ -2502,7 +2499,6 @@ class PgProblemStateRepository:
         resources. Returns the number of bindings upserted."""
         if not trigger_host_pairs:
             return 0
-        hostids = {h for _, h in trigger_host_pairs}
         cur = self._conn.execute(
             """
             SELECT provider_external_ref, monitoring_resource_id

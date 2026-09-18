@@ -8,8 +8,6 @@ Covers the dispatch state machine on a fake psycopg connection:
 
 from __future__ import annotations
 
-import os
-from datetime import datetime, timezone
 
 import workers.outbox_dispatcher as disp
 

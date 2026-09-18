@@ -24,7 +24,6 @@ from jlmirror_monitoring.problem_state import (
     ProblemStateFailureClass,
     ProviderTag,
     ZabbixProblemEvidence,
-    ZabbixRecoveryEvidence,
     collect_problem_state,
     normalize_zabbix_severity,
     ProblemSeverityClass,
@@ -37,7 +36,6 @@ from jlmirror_monitoring.source import (
 )
 from jlmirror_monitoring.validation_worker import (
     AdmittedProviderEndpoint,
-    ProviderProtocolError,
     ResolvedZabbixCredential,
 )
 

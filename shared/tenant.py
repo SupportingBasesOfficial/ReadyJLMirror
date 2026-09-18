@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 
 from jlmirror_authority.model import (
     EnvironmentClass,
-    Principal,
     PrincipalKind,
     TenantContext,
 )

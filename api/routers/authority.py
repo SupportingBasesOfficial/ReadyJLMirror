@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, status
@@ -15,11 +14,9 @@ from shared.auth import (
     utcnow,
     default_session_lifetime,
 )
-from shared.tenant import make_dev_tenant_context
 from jlmirror_authority.session import (
     BrowserSessionHandle,
     issue_browser_session,
-    resolve_browser_session,
     retire_browser_session,
 )
 from jlmirror_authority.fencing import acquire_next_fence

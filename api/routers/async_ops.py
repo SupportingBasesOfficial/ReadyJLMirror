@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import secrets
 from datetime import timedelta
-from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from shared.auth import utcnow
@@ -19,7 +18,6 @@ from jlmirror_async.model import (
 from jlmirror_async.outbox import (
     BrokerPublicationReceipt,
     InMemoryOutboxLedger,
-    OutboxClaim,
     tenant_message_from_context,
 )
 

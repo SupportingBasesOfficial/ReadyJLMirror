@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from providers.zabbix import ZabbixClient
 from jlmirror_monitoring.host_inventory import (

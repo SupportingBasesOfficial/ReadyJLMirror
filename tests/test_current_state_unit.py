@@ -23,7 +23,6 @@ from jlmirror_monitoring.metric_current_state import (
 )
 from jlmirror_monitoring.metric_definitions import MetricValueKind
 from jlmirror_monitoring.source import (
-    OperationalEvidenceState,
     SyncOperationState,
     ZabbixProviderConfiguration,
 )

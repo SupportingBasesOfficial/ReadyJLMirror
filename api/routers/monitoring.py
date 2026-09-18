@@ -20,7 +20,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
 
 from shared.config import settings
-from shared.db import db_connection, db_tenant_connection
+from shared.db import db_tenant_connection
 from shared.monitoring_repo import (
     create_zabbix_source,
     enqueue_current_state_poll,

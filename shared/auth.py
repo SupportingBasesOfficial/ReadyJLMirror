@@ -16,27 +16,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
 from jlmirror_authority.model import (
-    AdmissionDenied,
-    AuthenticationStrengthEvidence,
     Principal,
     PrincipalKind,
 )
 from jlmirror_authority.session import (
-    BrowserSessionHandle,
     BrowserSessionRecord,
-    SessionAuthorityPort,
-    issue_browser_session,
-    resolve_browser_session,
-    rotate_browser_session,
-    retire_browser_session,
 )
 from jlmirror_authority.fencing import (
     EFFECT_ELIGIBLE_FENCE_AUTHORITY_STATE,
-    FenceAuthorityPort,
     FenceRecord,
-    FenceToken,
-    acquire_next_fence,
-    admit_fenced_effect,
 )
 
 
