@@ -199,8 +199,10 @@ Real persistence + real Zabbix adapter, implementing the accepted
   diverge from platform truth
 - `providers/credentials.py` — env-based dev resolver
   (`ZABBIX_CRED_<REF>`); production = OpenBao/secret manager
-- `providers/egress.py` — dev egress admission (https +
-  `EGRESS_ALLOW_HOSTS` allowlist); production = governed egress policy
+- `providers/egress.py` — fail-closed egress admission: https +
+  required `EGRESS_ALLOW_HOSTS` allowlist + DNS screen blocking
+  non-public targets (`EGRESS_ALLOW_PRIVATE_IPS` for intranet);
+  production = governed egress policy engine
 
 ## What this is NOT yet
 

@@ -11,7 +11,10 @@ run for real; only the transport itself is simulated (httpx is already
 covered by unit tests).
 
 Requires: PostgreSQL with migrations applied (DB_* env), plus
-    ZABBIX_CRED_CRED_BINDING_1, EGRESS_ALLOW_HOSTS=zabbix.example.com
+    ZABBIX_CRED_CRED_BINDING_1 (or secrets/cred-binding-1.token),
+    EGRESS_ALLOW_HOSTS=zabbix.example.com,
+    EGRESS_ALLOW_PRIVATE_IPS=true (fake host doesn't resolve — the
+    DNS screen would deny it correctly for a real target)
 
 Usage: python -m scripts.dev_e2e_fake_zabbix
 """

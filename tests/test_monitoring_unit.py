@@ -59,12 +59,20 @@ def test_env_credential_resolver_missing(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_egress_admits_https(monkeypatch):
-    monkeypatch.delenv("EGRESS_ALLOW_HOSTS", raising=False)
+def test_egress_admits_allowlisted_https(monkeypatch):
+    monkeypatch.setenv("EGRESS_ALLOW_HOSTS", "zabbix.example.com")
     cfg = ZabbixProviderConfiguration(base_url="https://zabbix.example.com")
     ep = DevOutboundAdmission().admit_zabbix_api(cfg)
     assert ep.api_url == "https://zabbix.example.com/api_jsonrpc.php"
     assert ep.egress_decision_ref
+
+
+def test_egress_denies_without_allowlist(monkeypatch):
+    monkeypatch.delenv("EGRESS_ALLOW_HOSTS", raising=False)
+    monkeypatch.delenv("EGRESS_ALLOW_ALL_HOSTS", raising=False)
+    cfg = ZabbixProviderConfiguration(base_url="https://zabbix.example.com")
+    with pytest.raises(EgressAdmissionError, match="EGRESS_ALLOW_HOSTS"):
+        DevOutboundAdmission().admit_zabbix_api(cfg)
 
 
 def test_egress_allowlist_blocks(monkeypatch):
@@ -79,6 +87,31 @@ def test_egress_allowlist_permits(monkeypatch):
     cfg = ZabbixProviderConfiguration(base_url="https://zabbix.example.com")
     ep = DevOutboundAdmission().admit_zabbix_api(cfg)
     assert ep.api_url.endswith("/api_jsonrpc.php")
+
+
+def test_egress_dns_screen_blocks_loopback(monkeypatch):
+    monkeypatch.delenv("EGRESS_ALLOW_PRIVATE_IPS", raising=False)
+    monkeypatch.setenv("EGRESS_ALLOW_HOSTS", "localhost")
+    cfg = ZabbixProviderConfiguration(base_url="https://localhost")
+    with pytest.raises(EgressAdmissionError, match="non-public"):
+        DevOutboundAdmission().admit_zabbix_api(cfg)
+
+
+def test_egress_dns_screen_blocks_unresolvable(monkeypatch):
+    monkeypatch.delenv("EGRESS_ALLOW_PRIVATE_IPS", raising=False)
+    monkeypatch.setenv("EGRESS_ALLOW_HOSTS", "no-such-host.invalid")
+    cfg = ZabbixProviderConfiguration(
+        base_url="https://no-such-host.invalid")
+    with pytest.raises(EgressAdmissionError, match="does not resolve"):
+        DevOutboundAdmission().admit_zabbix_api(cfg)
+
+
+def test_egress_private_ips_flag_bypasses_screen(monkeypatch):
+    monkeypatch.setenv("EGRESS_ALLOW_PRIVATE_IPS", "true")
+    monkeypatch.setenv("EGRESS_ALLOW_HOSTS", "localhost")
+    cfg = ZabbixProviderConfiguration(base_url="https://localhost")
+    ep = DevOutboundAdmission().admit_zabbix_api(cfg)
+    assert ep.api_url == "https://localhost/api_jsonrpc.php"
 
 
 # ---------------------------------------------------------------------------
