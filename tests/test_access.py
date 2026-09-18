@@ -31,14 +31,54 @@ async def db():
 
 @pytest.mark.asyncio
 async def test_membership_role_templates(db):
+    """Self-contained: temp principal + operator membership +
+    custom role — template and custom-role resolution."""
     from shared import access
     async with db() as conn:
-        # dev-msp-admin's home membership on tenant:msp-alpha
-        # resolves to an operational permission set
+        await conn.execute(
+            """
+            INSERT INTO g1.principals
+                (principal_id, kind, credential_generation)
+            VALUES ('p-test-roles', 'human_browser_session', 'cg-1')
+            ON CONFLICT DO NOTHING;
+            INSERT INTO g1.tenant_memberships
+                (membership_id, tenant_id, principal_id, role)
+            VALUES ('mem-test-roles', 'tenant:dev',
+                    'p-test-roles', 'operator')
+            ON CONFLICT (tenant_id, principal_id)
+            DO UPDATE SET role = 'operator', state = 'active';
+            INSERT INTO g1.tenant_roles
+                (tenant_id, role_name, permissions)
+            VALUES ('tenant:dev', 'noc-test',
+                    ARRAY['monitoring:read', 'observability:read'])
+            ON CONFLICT (tenant_id, role_name)
+            DO UPDATE SET permissions = EXCLUDED.permissions,
+                          state = 'active'
+            """)
+        await conn.commit()
+
         perms = await access.effective_permissions(
-            conn, "dev-msp-admin", "tenant:msp-alpha")
+            conn, "p-test-roles", "tenant:dev")
         assert "monitoring:operate" in perms
-        assert "monitoring:read" in perms
+        assert "tenant:admin" not in perms
+
+        # Custom role resolution (contract §8 — first-class)
+        await conn.execute(
+            "UPDATE g1.tenant_memberships SET role = 'custom:noc-test'"
+            " WHERE membership_id = 'mem-test-roles'")
+        await conn.commit()
+        perms = await access.effective_permissions(
+            conn, "p-test-roles", "tenant:dev")
+        assert perms == frozenset(
+            {"monitoring:read", "observability:read"})
+
+        await conn.execute(
+            "DELETE FROM g1.tenant_memberships "
+            "WHERE membership_id = 'mem-test-roles';"
+            "DELETE FROM g1.tenant_roles WHERE role_name = 'noc-test';"
+            "DELETE FROM g1.principals "
+            "WHERE principal_id = 'p-test-roles'")
+        await conn.commit()
 
 
 @pytest.mark.asyncio

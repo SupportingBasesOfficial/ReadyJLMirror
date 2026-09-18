@@ -54,11 +54,20 @@ class MemberCreate(BaseModel):
 @router.post("/members", status_code=201)
 async def add_member(request: Request, body: MemberCreate) -> dict:
     tenant, actor = _tenant_ctx(request)
-    if body.role not in ROLES:
-        raise HTTPException(status_code=422,
-                            detail=f"role must be one of {ROLES}")
+    if body.role not in ROLES and not body.role.startswith("custom:"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"role must be one of {ROLES} or 'custom:<name>'")
     membership_id = f"mem_{secrets.token_urlsafe(12)}"
     async with db_tenant_connection(tenant) as conn:
+        if body.role.startswith("custom:"):
+            cur = await conn.execute(
+                "SELECT 1 FROM g1.tenant_roles WHERE tenant_id = %s "
+                "AND role_name = %s AND state = 'active'",
+                (tenant, body.role[7:]))
+            if await cur.fetchone() is None:
+                raise HTTPException(
+                    status_code=404, detail="custom role not found")
         cur = await conn.execute(
             """
             INSERT INTO g1.tenant_memberships
@@ -102,3 +111,83 @@ async def revoke_member(request: Request, membership_id: str) -> dict:
             subject_type="membership", subject_id=membership_id)
         await conn.commit()
     return {"membership_id": membership_id, "state": "revoked"}
+
+
+# ---------------------------------------------------------------------------
+# Custom roles (contract §8 — first-class)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/roles")
+async def list_roles(request: Request) -> list[dict]:
+    tenant, _ = _tenant_ctx(request)
+    async with db_tenant_connection(tenant) as conn:
+        cur = await conn.execute(
+            """
+            SELECT role_name, permissions, state, created_by,
+                   created_at
+              FROM g1.tenant_roles
+             WHERE tenant_id = %s
+             ORDER BY role_name
+            """, (tenant,))
+        return [{"role_name": r[0], "permissions": r[1],
+                 "state": r[2], "created_by": r[3],
+                 "created_at": r[4].isoformat()}
+                for r in await cur.fetchall()]
+
+
+class RoleCreate(BaseModel):
+    name: str
+    permissions: list[str]
+
+
+@router.post("/roles", status_code=201)
+async def create_role(request: Request, body: RoleCreate) -> dict:
+    tenant, actor = _tenant_ctx(request)
+    from shared import access
+    invalid = [p for p in body.permissions if p not in access.PERMISSIONS]
+    if invalid:
+        raise HTTPException(status_code=422,
+                            detail=f"unknown permissions: {invalid}")
+    async with db_tenant_connection(tenant) as conn:
+        try:
+            await conn.execute(
+                """
+                INSERT INTO g1.tenant_roles
+                    (tenant_id, role_name, permissions, created_by)
+                VALUES (%s, %s, %s, %s)
+                """, (tenant, body.name, body.permissions, actor))
+        except Exception:
+            raise HTTPException(
+                status_code=422,
+                detail="invalid role name or duplicate")
+        await record_audit_event(
+            conn, tenant,
+            action="tenant.role.created",
+            actor_kind="principal", actor_id=actor,
+            subject_type="tenant_role", subject_id=body.name,
+            detail={"permissions": body.permissions})
+        await conn.commit()
+    return {"role_name": body.name, "role": f"custom:{body.name}"}
+
+
+@router.post("/roles/{role_name}/retire")
+async def retire_role(request: Request, role_name: str) -> dict:
+    tenant, actor = _tenant_ctx(request)
+    async with db_tenant_connection(tenant) as conn:
+        cur = await conn.execute(
+            """
+            UPDATE g1.tenant_roles SET state = 'retired'
+             WHERE tenant_id = %s AND role_name = %s
+               AND state = 'active'
+            """, (tenant, role_name))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404,
+                                detail="role not found or inactive")
+        await record_audit_event(
+            conn, tenant,
+            action="tenant.role.retired",
+            actor_kind="principal", actor_id=actor,
+            subject_type="tenant_role", subject_id=role_name)
+        await conn.commit()
+    return {"role_name": role_name, "state": "retired"}

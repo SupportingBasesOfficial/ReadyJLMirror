@@ -82,8 +82,22 @@ async def effective_permissions(
          WHERE tenant_id = %s AND principal_id = %s
            AND state = 'active'
         """, (tenant_id, principal_id))
+    custom_roles: list[str] = []
     for (role,) in await cur.fetchall():
-        perms |= ROLE_PERMISSIONS.get(role, frozenset())
+        if role.startswith("custom:"):
+            custom_roles.append(role[7:])
+        else:
+            perms |= ROLE_PERMISSIONS.get(role, frozenset())
+
+    if custom_roles:
+        cur = await conn.execute(
+            """
+            SELECT permissions FROM g1.tenant_roles
+             WHERE tenant_id = %s AND role_name = ANY(%s)
+               AND state = 'active'
+            """, (tenant_id, custom_roles))
+        for (role_perms,) in await cur.fetchall():
+            perms |= {p for p in role_perms if p in PERMISSIONS}
 
     cur = await conn.execute(
         """
