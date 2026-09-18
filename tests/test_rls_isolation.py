@@ -32,6 +32,58 @@ def conn():
         c = psycopg.connect(_APP_DSN, connect_timeout=3, autocommit=True)
     except Exception:
         pytest.skip("PostgreSQL app role is not reachable")
+    # Self-seeding: a fresh database (CI) has no monitoring rows —
+    # the battery needs at least one tenant:dev source to compare
+    # isolation against. Insert via the same app role path the real
+    # create flow uses.
+    c.execute(
+        "SELECT set_config('jlmirror.tenant_id', 'tenant:dev', false)")
+    with c.transaction():
+        c.execute("SET CONSTRAINTS ALL DEFERRED")
+        c.execute(
+            """
+            INSERT INTO monitoring.monitoring_source_generation
+            (tenant_id, monitoring_source_id, source_instance_generation,
+             provider_profile, provider_instance_ref, provider_base_url,
+             created_at)
+        SELECT 'tenant:dev', 'mon-src_rls-battery', 'mon-gen_rls',
+               'zabbix', 'zbx-rls', 'https://zabbix.example.com', now()
+         WHERE NOT EXISTS (
+            SELECT 1 FROM monitoring.monitoring_source_generation
+             WHERE monitoring_source_id = 'mon-src_rls-battery')
+        """)
+        c.execute(
+            """
+            INSERT INTO monitoring.monitoring_sync_operation
+                (tenant_id, monitoring_sync_operation_id,
+                 monitoring_source_id, source_instance_generation,
+                 responsibility_kind, state, configuration_revision,
+                 scope_revision)
+            SELECT 'tenant:dev', 'op-rls', 'mon-src_rls-battery',
+                   'mon-gen_rls', 'validation_and_initial_sync',
+                   'pending', 1, 1
+             WHERE NOT EXISTS (
+                SELECT 1 FROM monitoring.monitoring_sync_operation
+                 WHERE monitoring_sync_operation_id = 'op-rls')
+            """)
+        c.execute(
+            """
+            INSERT INTO monitoring.monitoring_source
+            (tenant_id, monitoring_source_id,
+             provider_scope_tenant_binding_id, provider_profile,
+             active_source_instance_generation, configuration_revision,
+             scope_revision, display_name, credential_binding_ref,
+             configured_provider_scope, operational_evidence_state,
+             last_sync_operation_id)
+        SELECT 'tenant:dev', 'mon-src_rls-battery', 'binding-rls',
+               'zabbix', 'mon-gen_rls', 1, 1, 'rls-battery',
+               'cred-binding-1', '{"host_group_refs": ["5"]}',
+               'unavailable', 'op-rls'
+         WHERE NOT EXISTS (
+            SELECT 1 FROM monitoring.monitoring_source
+             WHERE monitoring_source_id = 'mon-src_rls-battery')
+            """)
+    c.execute("RESET jlmirror.tenant_id")
     yield c
     c.close()
 
