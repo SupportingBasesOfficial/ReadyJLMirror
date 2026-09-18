@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
 from jlmirror_observability.catalog import (
@@ -59,3 +59,29 @@ async def get_profile(profile_id: str) -> ObservabilityJoinResponse:
     except ObservationError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return _join_to_response(join)
+
+
+@router.get("/audit-events")
+async def list_audit_events_endpoint(
+        request: Request,
+        tenant_id: str | None = None,
+        action: str | None = None,
+        subject_type: str | None = None,
+        subject_id: str | None = None,
+        limit: int = 100) -> list[dict]:
+    """Durable accountability evidence (SEC-AUD): immutable audit
+    events committed atomically with the mutations they describe —
+    newest first, tenant-scoped, bounded."""
+    from api.routers.monitoring import _authoritative_tenant
+    from shared.audit import list_audit_events
+    from shared.db import db_tenant_connection
+
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        rows = await list_audit_events(
+            conn, tenant, action=action, subject_type=subject_type,
+            subject_id=subject_id, limit=limit)
+    for r in rows:
+        if r.get("occurred_at") is not None:
+            r["occurred_at"] = r["occurred_at"].isoformat()
+    return rows

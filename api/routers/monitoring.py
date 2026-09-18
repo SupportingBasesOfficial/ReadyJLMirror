@@ -20,6 +20,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
 
 from shared.config import settings
+from shared.audit import record_audit_event
 from shared.db import db_tenant_connection
 from shared.monitoring_repo import (
     create_zabbix_source,
@@ -226,6 +227,15 @@ async def create_source(body: SourceCreateRequest, request: Request) -> SourceRe
                 provider_base_url=body.provider_base_url,
                 credential_binding_ref=body.credential_binding_ref,
                 host_group_refs=body.host_group_refs,
+                audit_ctx={
+                    "actor_kind": "principal",
+                    "actor_id": (getattr(
+                        request.state, "jlmirror_context", {}) or {}
+                    ).get("principal_id"),
+                    "correlation_id": (getattr(
+                        request.state, "jlmirror_context", {}) or {}
+                    ).get("correlation_id"),
+                },
             )
     except ValueError as exc:
         if "idempotency.key_reused" in str(exc):
@@ -629,6 +639,17 @@ async def requeue_operation_endpoint(
     async with db_tenant_connection(tenant) as conn:
         ok = await requeue_sync_operation(
             conn, tenant, source_id, operation_id)
+        if ok:
+            ctx = getattr(request.state, "jlmirror_context", {}) or {}
+            await record_audit_event(
+                conn, tenant,
+                action="monitoring.operation.requeued",
+                actor_kind="operator",
+                actor_id=ctx.get("principal_id"),
+                subject_type="sync_operation",
+                subject_id=operation_id,
+                detail={"monitoring_source_id": source_id},
+                correlation_id=ctx.get("correlation_id"))
         await conn.commit()
     if not ok:
         raise HTTPException(

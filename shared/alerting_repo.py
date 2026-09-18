@@ -23,6 +23,7 @@ separately gated authorization.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from psycopg import AsyncConnection
@@ -246,6 +247,23 @@ async def commit_alert_transition(
          to_state, transition_reason, source_kind, source_transition_id,
          source_projection_revision, policy_id, policy_version,
          correlation_id, causation_id))
+
+    # Accountability evidence commits atomically with the transition.
+    await conn.execute(
+        """
+        INSERT INTO audit.audit_event
+            (tenant_id, audit_event_id, action, actor_kind,
+             subject_type, subject_id, detail, correlation_id)
+        VALUES (%s, %s, %s, 'operator', 'alert', %s, %s::jsonb, %s)
+        """,
+        (tenant_id, f"aud_{alert_transition_id}",
+         f"alerting.transition.{to_state}", alert_id,
+         json.dumps({
+             "from_state": from_state, "to_state": to_state,
+             "transition_reason": transition_reason,
+             "policy_id": policy_id, "policy_version": policy_version,
+             "source_kind": source_kind}),
+         correlation_id))
 
     return await get_alert(conn, tenant_id, alert_id)
 

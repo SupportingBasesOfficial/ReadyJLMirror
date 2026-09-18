@@ -97,6 +97,7 @@ async def create_zabbix_source(
     provider_base_url: str,
     credential_binding_ref: str,
     host_group_refs: Sequence[str],
+    audit_ctx: dict | None = None,
 ) -> dict:
     """Atomic create-or-observe for a monitoring source.
 
@@ -195,6 +196,22 @@ async def create_zabbix_source(
         """,
         (tenant_id, idempotency_key),
     )
+    # Accountability evidence in the same commit as the source creation.
+    if audit_ctx is not None:
+        await conn.execute(
+            """
+            INSERT INTO audit.audit_event
+                (tenant_id, audit_event_id, action, actor_kind, actor_id,
+                 subject_type, subject_id, detail, correlation_id)
+            VALUES (%s, %s, 'monitoring.source.created', %s, %s,
+                    'monitoring_source', %s, %s::jsonb, %s)
+            """,
+            (tenant_id, _opaque("aud"), audit_ctx.get("actor_kind"),
+             audit_ctx.get("actor_id"), source_id,
+             json.dumps({"display_name": display_name,
+                         "provider_instance_ref": provider_instance_ref}),
+             audit_ctx.get("correlation_id")),
+        )
     await conn.commit()
 
     return {
