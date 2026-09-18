@@ -24,7 +24,7 @@ from typing import AsyncIterator, Optional
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
-from shared import slo as _slo
+from shared import access, slo as _slo
 from shared.config import settings
 from shared.db import check_db_ready, close_pool, db_connection, init_pool
 from shared import telemetry
@@ -34,6 +34,7 @@ from api.routers import (
     async_ops,
     monitoring,
     observability,
+    platform,
     release,
 )
 
@@ -131,6 +132,23 @@ async def _session_current(ctx: dict) -> bool:
         return False  # DB unavailable — fail closed
 
 
+# Path-prefix -> permission domain. GET/HEAD = read, anything else =
+# operate. Route-level vocabulary lives in shared/access.py.
+_DOMAIN_PREFIXES = (
+    ("/api/v1/monitoring/", "monitoring"),
+    ("/api/v1/alerting/", "alerting"),
+    ("/api/v1/observability/", "observability"),
+)
+
+
+def _required_permission(path: str, method: str) -> str | None:
+    for prefix, domain in _DOMAIN_PREFIXES:
+        if path.startswith(prefix):
+            verb = "read" if method in ("GET", "HEAD", "OPTIONS") else "operate"
+            return f"{domain}:{verb}"
+    return None
+
+
 @app.middleware("http")
 async def verify_context(request: Request, call_next):
     """Enforce signed+current context on all /api/v1/ routes.
@@ -157,6 +175,18 @@ async def verify_context(request: Request, call_next):
     if not await _session_current(ctx):
         return JSONResponse({"state": "forbidden"},
                             status_code=status.HTTP_403_FORBIDDEN)
+
+    # Deny-by-default permission gate (canonical access model):
+    # domain/method -> required permission; effective authority =
+    # membership role ∪ delegated grants ∪ platform capability.
+    required = _required_permission(path, request.method)
+    if required and ctx.get("tenant_id"):
+        async with db_connection() as conn:
+            perms = await access.effective_permissions(
+                conn, ctx["principal_id"], ctx["tenant_id"])
+        if required not in perms:
+            return JSONResponse({"state": "forbidden"},
+                                status_code=status.HTTP_403_FORBIDDEN)
 
     request.state.jlmirror_context = ctx
     with telemetry.bind(
@@ -242,6 +272,7 @@ app.include_router(async_ops.router)
 app.include_router(observability.router)
 app.include_router(release.router)
 app.include_router(alerting.router)
+app.include_router(platform.router)
 
 
 @app.get("/health", tags=["health"])

@@ -27,12 +27,13 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from shared.config import settings
-from shared.db import close_pool, db_connection, init_pool
-from shared import telemetry
+from shared.db import (
+    close_pool, db_connection, db_tenant_connection, init_pool)
+from shared import access, telemetry
+from shared.audit import record_audit_event
 from bff import oidc
 from bff.identity import (
     check_membership,
-    list_memberships,
     resolve_or_provision_principal,
 )
 from bff.sessions import PgSessionStore, digest_handle, digest_token
@@ -321,7 +322,8 @@ async def api_session(request: Request) -> JSONResponse:
         return JSONResponse({"state": "unauthenticated"})
 
     async with db_connection() as conn:
-        memberships = await list_memberships(conn, session["principal_id"])
+        memberships = await access.accessible_tenants(
+            conn, session["principal_id"])
 
     if not memberships:
         return JSONResponse({"state": "forbidden"})
@@ -371,11 +373,49 @@ async def api_tenant_select(request: Request) -> JSONResponse:
 
     async with db_connection() as conn:
         membership = await check_membership(conn, session["principal_id"], tenant_id)
-        if membership is None:
-            # Same denial for non-member / suspended tenant — no leakage
+        authorized = membership is not None
+        role = membership["role"] if membership else None
+
+        if not authorized:
+            # Delegated grant or platform capability — the other two
+            # legal paths to bind a tenant (same 403 on denial, no
+            # existence leakage).
+            authorized = await access.tenant_authorized(
+                conn, session["principal_id"], tenant_id)
+
+        if not authorized:
             return JSONResponse({"state": "forbidden"},
                                 status_code=status.HTTP_403_FORBIDDEN)
 
+    if role is None:
+        # Delegation / platform entry — accountable, tenant-scoped
+        # audit (audit.audit_event is RLS-protected, needs the tenant
+        # context set).
+        async with db_tenant_connection(tenant_id) as tconn:
+            delegated = await access.effective_permissions(
+                tconn, session["principal_id"], tenant_id)
+            if await access.principal_is_platform_admin(
+                    tconn, session["principal_id"]):
+                role = "platform"
+                await record_audit_event(
+                    tconn, tenant_id,
+                    action="platform.cross_tenant_entry",
+                    actor_kind="platform_admin",
+                    actor_id=session["principal_id"],
+                    subject_type="tenant", subject_id=tenant_id,
+                    detail={"via": "tenant_bind"})
+            else:
+                role = "delegated"
+                await record_audit_event(
+                    tconn, tenant_id,
+                    action="delegation.tenant_entry",
+                    actor_kind="delegated_principal",
+                    actor_id=session["principal_id"],
+                    subject_type="tenant", subject_id=tenant_id,
+                    detail={"permissions": sorted(delegated)})
+            await tconn.commit()
+
+    async with db_connection() as conn:
         store = PgSessionStore(conn)
         ok = await store.bind_tenant(
             session["handle_digest"], tenant_id, session["session_generation"]
@@ -386,7 +426,7 @@ async def api_tenant_select(request: Request) -> JSONResponse:
         return JSONResponse({"state": "unavailable"},
                             status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
     return JSONResponse({"state": "ready", "tenant_id": tenant_id,
-                         "role": membership["role"]})
+                         "role": role})
 
 
 # ---------------------------------------------------------------------------
