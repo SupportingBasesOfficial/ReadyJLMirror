@@ -121,9 +121,13 @@ async function poll(sourceId, kind, tenantId) {
 async function loadMonitoring(s) {
   const mon = document.getElementById("mon");
   const tid = s.tenant.tenant_id;
-  let sources;
+  let sources, alerts;
   try {
-    sources = await api(`/sources?tenant_id=${tid}`);
+    [sources, alerts] = await Promise.all([
+      api(`/sources?tenant_id=${tid}`),
+      fetch(`/api/v1/alerting/alerts?tenant_id=${tid}`,
+            { credentials: "same-origin" }).then(r => r.ok ? r.json() : []),
+    ]);
   } catch {
     mon.innerHTML = '<p class="empty">Monitoring unavailable.</p>';
     return;
@@ -139,9 +143,21 @@ async function loadMonitoring(s) {
         `<td>${src.operational_evidence_state}</td></tr>`).join("") +
       `</tbody></table>`;
 
+  const alertsHtml = (!Array.isArray(alerts) || alerts.length === 0)
+    ? '<p class="empty">No alerts.</p>'
+    : `<table><thead><tr><th>State</th><th>Alert</th>` +
+      `<th>Source kind</th><th>Opened</th></tr></thead><tbody>` +
+      alerts.map(a =>
+        `<tr><td class="a-${a.lifecycle_state}">${a.lifecycle_state}</td>` +
+        `<td><code>${(a.alert_id || "").slice(0, 18)}</code></td>` +
+        `<td>${a.source_kind}</td>` +
+        `<td>${(a.opened_at || "").slice(0, 19)}</td></tr>`).join("") +
+      `</tbody></table>`;
+
   mon.innerHTML =
     `<div class="actions"><button class="secondary" id="addSource">` +
     `+ add source</button></div>` + listHtml +
+    `<div class="section"><h2>Alerts</h2>${alertsHtml}</div>` +
     `<div id="monDetail"></div>`;
 
   document.getElementById("addSource").addEventListener(

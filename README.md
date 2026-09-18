@@ -4,7 +4,18 @@ Runnable product implementation of [JLMirror](https://github.com/SupportingBases
 
 This repository implements the product slices authorized by the canonical specification. The specification itself (ADRs, domain primitives, SQL, governance) is consumed read-only as a git submodule at `vendor/ProjectJLMirror` — it is never modified here.
 
-## Current slice: G1 — Identity + Tenant + Protected Shell
+## Implemented slices
+
+| Slice | What it delivers |
+|---|---|
+| G1 identity/tenant/shell | OIDC BFF, durable sessions, RLS tenant isolation, CSRF |
+| Monitoring Wave 4 | sources → validation → inventory → metrics → current → history → problems → health → outbox, all durable with evidence states |
+| Alerting core model | `alerting.alert` + immutable transitions, closed source-kind law, policy evidence required |
+| Publication bridge | atomic outbox obligations on problem/health transitions |
+| Ops surface | DLQ visibility + operator requeue, worker heartbeat, readiness with declared failure modes, audit trail, backup/restore rehearsal |
+| Security | mounted-file secrets, OpenBao dev backend, TLS + opt-in mTLS, least-privilege roles, direct-SQL escape battery |
+
+## G1 — Identity + Tenant + Protected Shell
 
 The first authorized product slice (`g1.identity-tenant-protected-shell@1`):
 
@@ -44,8 +55,10 @@ Services:
 | `bff` | 8080 | Public boundary — shell + auth + API proxy |
 | `keycloak` | 8180 | IdP (dev realm auto-imported) |
 | `api` | internal | Protected API — signed-context only |
-| `db` | 5432 | PostgreSQL 16 + TimescaleDB |
+| `db` | 5434 | PostgreSQL 16 + TimescaleDB |
 | `migrate` | — | Applies `sql/` migrations, exits |
+| `worker` | — | Continuous pipeline (`--profile worker`) |
+| `openbao` | 8200 | Dev secret backend (`--profile secrets`) |
 
 ### Local development (without Docker)
 
@@ -204,10 +217,34 @@ Real persistence + real Zabbix adapter, implementing the accepted
   non-public targets (`EGRESS_ALLOW_PRIVATE_IPS` for intranet);
   production = governed egress policy engine
 
+## Operations
+
+- **Sync ops / DLQ** — `GET /sources/{id}/operations` lists durable
+  operation state including `reconciliation_required` and
+  `failed_terminal`; `POST /sources/{id}/operations/{op_id}/requeue`
+  is the operator reconciliation path (guarded SECURITY DEFINER —
+  the app role keeps no-UPDATE on operation state)
+- **Worker heartbeat** — `monitoring.worker_heartbeat` upserts every
+  tick; `monitoring.worker_alive(max_age)` exposes staleness to
+  readiness
+- **Readiness** — API `/health/ready` reports database (fail_closed)
+  + workers (degraded); BFF `/health/ready` reports db + api
+- **Audit trail** — `audit.audit_event`, append-only and FORCE RLS,
+  written in the same transaction as source creation, operation
+  requeue and every alert transition;
+  `GET /api/v1/observability/audit-events`
+- **Backup/DR** — `python -m scripts.backup` (dump + watermark
+  manifest), `python -m scripts.restore_verify` (restores into an
+  isolated scratch DB, checks invariants, drops it — never touches
+  live). Runbook: `docs/runbooks/disaster-recovery.md`
+- **Alerting** — `GET/POST /api/v1/alerting/alerts[/transitions]`:
+  the canonical core model (active|resolved, immutable transitions,
+  no automatic creation — policy evaluation is a separate gate)
+
 ## What this is NOT yet
 
 - Not production-ready: dev HMAC trust (not SPIFFE), dev auth bypass flag, no real Zabbix/Kafka, no CSRF key ring rotation, dev realm passwords
-- No problem/health/event ingestion yet (next Wave 4 slices), no Alerting/ITSM/Automation/AIOps — those remain governed by the canonical authorization chain
+- No automatic alert creation/resolution — policy evaluation, ACK, suppression, routing, notification, ITSM, Automation, AIOps remain governed by the canonical authorization chain
 
 ## Submodule
 

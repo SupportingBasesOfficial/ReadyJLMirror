@@ -16,6 +16,7 @@ idempotency/sync-operation counts match the manifest watermarks.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,11 +27,28 @@ from shared.config import settings
 
 DB_CONTAINER = "readyjlmirror-db-1"
 SCRATCH = "jlmirror_restore_rehearsal"
+LOCAL = "--local" in sys.argv
+
+
+def _env() -> dict:
+    env = dict(os.environ)
+    env["PGPASSWORD"] = settings.db_password
+    return env
 
 
 def _exec(*args: str) -> str:
-    r = subprocess.run(["docker", "exec", DB_CONTAINER, *args],
-                       capture_output=True, text=True)
+    if LOCAL:
+        # Run psql/pg_restore directly — the CI shape where the
+        # database is a service container, not a docker-exec target.
+        if args[0] in ("psql", "pg_restore"):
+            cmd = [args[0], "-h", settings.db_host,
+                   "-p", str(settings.db_port), *args[1:]]
+        else:
+            raise RuntimeError(f"local mode: unsupported {args[0]}")
+        r = subprocess.run(cmd, capture_output=True, text=True, env=_env())
+    else:
+        r = subprocess.run(["docker", "exec", DB_CONTAINER, *args],
+                           capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(r.stderr.strip() or r.stdout.strip())
     return r.stdout
@@ -49,21 +67,28 @@ def _scratch_dsn() -> str:
 def main() -> int:
     backups = sorted(Path("backups").glob("*/dump.pg_dump"),
                      key=lambda p: p.stat().st_mtime)
-    target = Path(sys.argv[1]) / "dump.pg_dump" if len(sys.argv) > 1 \
+    positional = [a for a in sys.argv[1:] if not a.startswith("--")]
+    target = Path(positional[0]) / "dump.pg_dump" if positional \
         else backups[-1]
     manifest_path = target.parent / "manifest.json"
     manifest = json.loads(manifest_path.read_text()) \
         if manifest_path.exists() else {}
     print(f"rehearsing restore of {target}")
 
-    # Stage the dump into the container and restore into scratch.
-    subprocess.run(["docker", "cp", str(target),
-                    f"{DB_CONTAINER}:/tmp/restore.pg_dump"], check=True)
+    # Stage the dump and restore into scratch.
     _drop_scratch()
     _exec("psql", "-U", "jlmirror_owner", "-d", "postgres",
           "-c", f"CREATE DATABASE {SCRATCH} OWNER jlmirror_owner")
-    _exec("pg_restore", "-U", "jlmirror_owner", "-d", SCRATCH,
-          "--no-owner", "--role=jlmirror_owner", "/tmp/restore.pg_dump")
+    if LOCAL:
+        _exec("pg_restore", "-U", "jlmirror_owner", "-d", SCRATCH,
+              "--no-owner", "--role=jlmirror_owner", str(target))
+    else:
+        subprocess.run(
+            ["docker", "cp", str(target),
+             f"{DB_CONTAINER}:/tmp/restore.pg_dump"], check=True)
+        _exec("pg_restore", "-U", "jlmirror_owner", "-d", SCRATCH,
+              "--no-owner", "--role=jlmirror_owner",
+              "/tmp/restore.pg_dump")
     print("restored into scratch database:", SCRATCH)
 
     checks: list[tuple[str, bool, str]] = []

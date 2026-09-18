@@ -154,3 +154,49 @@ def test_update_blocked_on_monitoring(conn):
         conn.execute(
             "UPDATE monitoring.monitoring_source "
             "SET display_name='x' WHERE true")
+
+
+def test_alert_transition_history_immutable(conn):
+    """Append-only evidence: UPDATE and DELETE on transition history
+    must be rejected regardless of rows present."""
+    conn.execute(
+        "SELECT set_config('jlmirror.tenant_id', 'tenant:dev', false)")
+    with pytest.raises(psycopg.Error):
+        conn.execute(
+            "UPDATE alerting.alert_transition SET to_state='resolved'")
+    with pytest.raises(psycopg.Error):
+        conn.execute("DELETE FROM alerting.alert_transition")
+
+
+def test_audit_events_immutable(conn):
+    """SEC-AUD: audit evidence is append-only — never updateable or
+    deletable by application roles."""
+    conn.execute(
+        "SELECT set_config('jlmirror.tenant_id', 'tenant:dev', false)")
+    with pytest.raises(psycopg.Error):
+        conn.execute(
+            "UPDATE audit.audit_event SET action='tampered'")
+    with pytest.raises(psycopg.Error):
+        conn.execute("DELETE FROM audit.audit_event")
+
+
+def test_worker_cannot_mutate_alert_history():
+    """The worker role gets INSERT on alert_transition but its
+    UPDATE/DELETE is explicitly revoked — history stays immutable
+    even for the writing authority."""
+    try:
+        c = psycopg.connect(
+            _APP_DSN.replace("jlmirror_app", "jlmirror_worker"),
+            connect_timeout=3, autocommit=True)
+    except Exception:
+        pytest.skip("PostgreSQL worker role is not reachable")
+    try:
+        c.execute(
+            "SELECT set_config('jlmirror.tenant_id', 'tenant:dev', false)")
+        with pytest.raises(psycopg.Error):
+            c.execute(
+                "UPDATE alerting.alert_transition SET to_state='resolved'")
+        with pytest.raises(psycopg.Error):
+            c.execute("DELETE FROM alerting.alert_transition")
+    finally:
+        c.close()

@@ -64,6 +64,17 @@ jobs:
           DEV_AUTH_BYPASS: "true"
         run: pytest -q
 
+      - name: Restore rehearsal (ADR-018 — backup + isolated verify)
+        env:
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_NAME: jlmirror
+          DB_USER: jlmirror_owner
+          DB_PASSWORD: jlmirror_dev
+        run: |
+          python -m scripts.backup --local
+          python -m scripts.restore_verify --local
+
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 15

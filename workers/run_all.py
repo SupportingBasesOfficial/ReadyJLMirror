@@ -54,7 +54,30 @@ def tick(conn) -> int:
         except Exception:
             conn.rollback()
             logger.exception("%s tick failed", name)
+    _heartbeat(conn, total)
     return total
+
+
+def _heartbeat(conn, processed: int) -> None:
+    """Durable liveness: one upsert per tick so operators/readiness
+    can distinguish a live pipeline from a silently dead one."""
+    try:
+        conn.execute(
+            """
+            INSERT INTO monitoring.worker_heartbeat
+                (tenant_id, worker_id, last_seen_at, last_processed,
+                 tick_count)
+            VALUES ('system', 'all', transaction_timestamp(), %s, 1)
+            ON CONFLICT (tenant_id, worker_id) DO UPDATE
+              SET last_seen_at = transaction_timestamp(),
+                  last_processed = EXCLUDED.last_processed,
+                  tick_count = monitoring.worker_heartbeat.tick_count + 1
+            """,
+            (processed,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("heartbeat failed")
 
 
 def main() -> None:

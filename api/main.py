@@ -214,13 +214,48 @@ async def root() -> dict:
 
 @app.get("/health/ready", tags=["health"])
 async def health_readiness() -> JSONResponse:
+    """Readiness with declared failure modes (ADR-017).
+
+    - database: authoritative -> fail closed (not_ready / 503)
+    - worker pipeline: stale heartbeat -> degraded (200) — the API
+      still serves reads; fresh monitoring data is what lags.
+    """
+    deps: dict = {}
+    degraded = False
+
     db_ready = await check_db_ready()
-    status_code = status.HTTP_200_OK if db_ready else status.HTTP_503_SERVICE_UNAVAILABLE
+    deps["database"] = {
+        "state": "ok" if db_ready else "unavailable",
+        "mode": "fail_closed"}
+    if not db_ready:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"status": "not_ready", "dependencies": deps,
+                     "environment": settings.environment})
+
+    worker_dep = {"state": "ok", "mode": "degraded"}
+    try:
+        async with db_connection() as conn:
+            cur = await conn.execute(
+                "SELECT worker_id, seconds_stale, alive"
+                " FROM monitoring.worker_alive(%s)",
+                (settings.worker_poll_interval_seconds * 4,))
+            rows = await cur.fetchall()
+        if not rows or not all(r[2] for r in rows):
+            worker_dep["state"] = "stale"
+            degraded = True
+        else:
+            worker_dep["seconds_stale"] = max(r[1] for r in rows)
+    except Exception:
+        worker_dep["state"] = "unknown"
+        degraded = True
+    deps["workers"] = worker_dep
+
     return JSONResponse(
-        status_code=status_code,
+        status_code=status.HTTP_200_OK,
         content={
-            "status": "ready" if db_ready else "not_ready",
-            "database": db_ready,
+            "status": "degraded" if degraded else "ready",
+            "dependencies": deps,
             "environment": settings.environment,
         },
     )
