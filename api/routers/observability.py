@@ -61,6 +61,15 @@ async def get_profile(profile_id: str) -> ObservabilityJoinResponse:
     return _join_to_response(join)
 
 
+@router.get("/slo")
+async def slo_snapshot() -> dict:
+    """In-process SLO probe (ADR-017): latency distribution + error
+    rate per endpoint over the last N requests. SLO definitions
+    come later; the observation points are live now."""
+    from shared import slo
+    return slo.snapshot()
+
+
 @router.get("/audit-events")
 async def list_audit_events_endpoint(
         request: Request,

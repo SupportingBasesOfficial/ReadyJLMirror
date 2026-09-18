@@ -23,6 +23,7 @@ from typing import AsyncIterator, Optional
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
+from shared import slo as _slo
 from shared.config import settings
 from shared.db import check_db_ready, close_pool, db_connection, init_pool
 from shared import telemetry
@@ -187,6 +188,8 @@ async def whoami(request: Request) -> dict:
 # ---------------------------------------------------------------------------
 # Routers (dev sandbox — domain package exposure)
 # ---------------------------------------------------------------------------
+
+app.add_middleware(_slo.SloMiddleware)
 
 app.include_router(authority.router)
 app.include_router(monitoring.router)

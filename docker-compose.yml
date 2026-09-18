@@ -80,6 +80,13 @@ services:
       API_CA_FILE: ${API_CA_FILE:-}
     volumes:
       - ./secrets:/run/secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL",
+             "python -c \"import httpx,sys; sys.exit(0 if httpx.get('http://localhost:8000/health',timeout=3).status_code==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -120,7 +127,7 @@ services:
       migrate:
         condition: service_completed_successfully
       api:
-        condition: service_started
+        condition: service_healthy
       keycloak:
         condition: service_started
     command: python -m bff.main
