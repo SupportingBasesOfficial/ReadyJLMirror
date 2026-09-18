@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -42,3 +42,6 @@ docker-compose.override.yml
 secrets/*.token
 secrets/*
 !secrets/README.md
+
+# local backup artifacts (dumps are protected data)
+backups/
