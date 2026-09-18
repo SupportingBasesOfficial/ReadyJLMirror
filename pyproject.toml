@@ -40,6 +40,9 @@ include = ["shared*", "api*", "bff*", "workers*", "providers*", "scripts*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: requires a live PostgreSQL (skipped when unreachable)",
+]
 
 [tool.ruff]
 line-length = 100
