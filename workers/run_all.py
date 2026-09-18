@@ -1,47 +1,72 @@
-"""Worker entry point — runs all workers sequentially.
+"""Worker entry point — runs all responsibility loops on one process.
 
-In production, each worker would run as a separate process. In
-development, this runs them sequentially for quick verification.
+Dev consolidation: every pending-work processor runs on a shared
+connection in a single tick loop, so `docker compose up worker`
+keeps the whole pipeline alive. `--once` runs a single pass —
+the verification shape used by the dev E2E.
+
+In production each responsibility runs as its own service; only the
+scheduling differs.
 """
 
 from __future__ import annotations
 
 import logging
+import sys
+import time
 
-from workers.current_state import run_current_state_worker
-from workers.health import run_health_worker
-from workers.history import run_history_worker
-from workers.problem_state import run_problem_state_worker
-from workers.inventory import run_inventory_worker
-from workers.metrics import run_metrics_worker
-from workers.outbox_dispatcher import run_outbox_dispatcher
-from workers.reconciliation import run_reconciliation_worker
-from workers.validation import run_validation_worker
+import psycopg
 
-logger = logging.getLogger(__name__)
+from shared.config import settings
+from workers.current_state import _process_pending as current_state
+from workers.health import _process_pending as health
+from workers.history import _process_pending as history
+from workers.inventory import _process_pending as inventory
+from workers.metrics import _process_pending as metrics
+from workers.outbox_dispatcher import _publish_durable as outbox
+from workers.problem_state import _process_pending as problem_state
+from workers.validation import _process_pending as validation
+
+logger = logging.getLogger("workers.run_all")
 logging.basicConfig(level=logging.INFO)
+
+_PROCESSORS = (
+    ("validation", validation),
+    ("inventory", inventory),
+    ("metrics", metrics),
+    ("current_state", current_state),
+    ("history", history),
+    ("problem_state", problem_state),
+    ("health", health),
+    ("outbox", outbox),
+)
+
+
+def tick(conn) -> int:
+    """One full pipeline pass — every processor drains its pending work."""
+    total = 0
+    for name, fn in _PROCESSORS:
+        try:
+            n = fn(conn)
+            if n:
+                logger.info("%s processed %s", name, n)
+            total += n or 0
+        except Exception:
+            conn.rollback()
+            logger.exception("%s tick failed", name)
+    return total
 
 
 def main() -> None:
-    """Run all workers sequentially (dev mode)."""
-    logger.info("=== ReadyJLMirror workers starting (dev mode) ===")
-    run_outbox_dispatcher(poll_interval=2, batch_size=3, once=True)
-    # Validation + inventory workers need a live DB; run one pass each.
-    for name, runner in (
-        ("validation", run_validation_worker),
-        ("inventory", run_inventory_worker),
-        ("metrics", run_metrics_worker),
-        ("current_state", run_current_state_worker),
-        ("history", run_history_worker),
-        ("problem_state", run_problem_state_worker),
-        ("health", run_health_worker),
-    ):
-        try:
-            runner(poll_interval=2, once=True)
-        except Exception as exc:
-            logger.warning("%s worker skipped (DB unavailable): %s", name, exc)
-    run_reconciliation_worker(poll_interval=2, batch_size=2)
-    logger.info("=== All workers finished ===")
+    once = "--once" in sys.argv
+    interval = settings.worker_poll_interval_seconds
+    logger.info("workers starting (once=%s, poll=%ss)", once, interval)
+    with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
+        while True:
+            tick(conn)
+            if once:
+                return
+            time.sleep(interval)
 
 
 if __name__ == "__main__":
