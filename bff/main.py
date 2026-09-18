@@ -469,6 +469,48 @@ async def health() -> dict:
     return {"status": "ok", "service": "bff"}
 
 
+@app.get("/health/ready")
+async def readiness() -> JSONResponse:
+    """Readiness with declared failure modes (ADR-017).
+
+    - database: authoritative -> fail closed (not_ready / 503)
+    - api:      required for data, but shell/auth still serve ->
+      degraded (200 with explicit state)
+    """
+    deps: dict = {}
+    degraded = False
+
+    try:
+        async with db_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT 1")
+        deps["database"] = {"state": "ok", "mode": "fail_closed"}
+    except Exception:
+        deps["database"] = {"state": "unavailable", "mode": "fail_closed"}
+        return JSONResponse(
+            {"status": "not_ready", "service": "bff",
+             "dependencies": deps},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    api_dep = {"state": "ok", "mode": "degraded"}
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{settings.api_internal_url}/health")
+            if resp.status_code != 200:
+                raise RuntimeError("api health non-200")
+    except Exception:
+        api_dep["state"] = "unavailable"
+        degraded = True
+    deps["api"] = api_dep
+
+    return JSONResponse(
+        {"status": "degraded" if degraded else "ready",
+         "service": "bff", "dependencies": deps},
+        status_code=status.HTTP_200_OK,
+    )
+
+
 app.mount("/", StaticFiles(directory=SHELL_DIR, html=True), name="shell")
 
 
