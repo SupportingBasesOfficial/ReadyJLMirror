@@ -59,6 +59,9 @@ services:
       DB_USER: jlmirror_app
       DB_PASSWORD: jlmirror_dev
       BFF_INTERNAL_SECRET: dev-internal-secret-change-me
+      SECRETS_DIR: /run/secrets
+    volumes:
+      - ./secrets:/run/secrets:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -85,6 +88,9 @@ services:
       KEYCLOAK_CLIENT_SECRET: dev-bff-secret-change-me
       BFF_INTERNAL_SECRET: dev-internal-secret-change-me
       DEV_AUTH_BYPASS: "true"
+      SECRETS_DIR: /run/secrets
+    volumes:
+      - ./secrets:/run/secrets:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -104,6 +110,7 @@ services:
       DB_USER: jlmirror_worker
       DB_PASSWORD: jlmirror_dev
       CREDENTIALS_DIR: /run/secrets
+      SECRETS_DIR: /run/secrets
     volumes:
       - ./secrets:/run/secrets:ro
     depends_on:

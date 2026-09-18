@@ -3,17 +3,41 @@
 All values have safe development defaults so the application can start
 without a populated .env file. Production deployments must override
 the secrets and connection strings explicitly.
+
+Secrets (db_password, bff_internal_secret, keycloak_client_secret)
+resolve through `_secret`: mounted file > env var > dev default.
+`SECRETS_DIR` (default /run/secrets) follows the docker-secrets
+pattern — injectable by Vault/OpenBao agents without code changes.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 
 def _env(key: str, default: str) -> str:
     return os.environ.get(key, default)
+
+
+def _secret(*file_names: str, env_name: str, default: str) -> str:
+    """Resolve a secret: mounted file > env var > dev default.
+
+    Multiple file names are tried in order (e.g. a per-role
+    `db_password_jlmirror_app` before a generic `db_password`).
+    """
+    secrets_dir = os.environ.get("SECRETS_DIR", "/run/secrets")
+    for file_name in file_names:
+        try:
+            value = (Path(secrets_dir) / file_name).read_text(
+                encoding="utf-8").strip()
+            if value:
+                return value
+        except (OSError, ValueError):
+            pass
+    return _env(env_name, default)
 
 
 @dataclass(frozen=True)
@@ -28,7 +52,11 @@ class Settings:
     db_port: int = field(default_factory=lambda: int(_env("DB_PORT", "5432")))
     db_name: str = field(default_factory=lambda: _env("DB_NAME", "jlmirror"))
     db_user: str = field(default_factory=lambda: _env("DB_USER", "jlmirror_app"))
-    db_password: str = field(default_factory=lambda: _env("DB_PASSWORD", "jlmirror_dev"))
+    db_password: str = field(
+        default_factory=lambda: _secret(
+            f"db_password_{_env('DB_USER', 'jlmirror_app')}", "db_password",
+            env_name="DB_PASSWORD", default="jlmirror_dev")
+    )
     db_schema: str = field(default_factory=lambda: _env("DB_SCHEMA", "public"))
     db_pool_min: int = field(default_factory=lambda: int(_env("DB_POOL_MIN", "2")))
     db_pool_max: int = field(default_factory=lambda: int(_env("DB_POOL_MAX", "10")))
@@ -40,13 +68,16 @@ class Settings:
 
     # BFF (G1 identity + tenant + protected shell)
     bff_host: str = field(default_factory=lambda: _env("BFF_HOST", "0.0.0.0"))
-    bff_port: int = field(default_factory=lambda: int(_env("BFF_PORT", "8080")))
+    bff_port: int = field(default_factory=lambda: _env("BFF_PORT", "8080"))
     bff_public_url: str = field(default_factory=lambda: _env("BFF_PUBLIC_URL", "http://localhost:8080"))
     api_internal_url: str = field(default_factory=lambda: _env("API_INTERNAL_URL", "http://localhost:8000"))
 
     # Internal trust: BFF -> API signed context (dev HMAC; production = SPIRE/mTLS)
     bff_internal_secret: str = field(
-        default_factory=lambda: _env("BFF_INTERNAL_SECRET", "dev-internal-secret-change-me")
+        default_factory=lambda: _secret(
+            "bff_internal_secret",
+            env_name="BFF_INTERNAL_SECRET",
+            default="dev-internal-secret-change-me")
     )
 
     # Keycloak / OIDC (IR-D-001 candidate: Keycloak 26.7.x)
@@ -59,7 +90,10 @@ class Settings:
     keycloak_realm: str = field(default_factory=lambda: _env("KEYCLOAK_REALM", "jlmirror"))
     keycloak_client_id: str = field(default_factory=lambda: _env("KEYCLOAK_CLIENT_ID", "jlmirror-bff"))
     keycloak_client_secret: str = field(
-        default_factory=lambda: _env("KEYCLOAK_CLIENT_SECRET", "dev-bff-secret-change-me")
+        default_factory=lambda: _secret(
+            "keycloak_client_secret",
+            env_name="KEYCLOAK_CLIENT_SECRET",
+            default="dev-bff-secret-change-me")
     )
 
     # Session policy
