@@ -426,7 +426,18 @@ async def proxy_to_api(request: Request, path: str) -> Response:
     }
     body = await request.body()
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    # mTLS toward the internal API when configured — the BFF presents
+    # its service cert and verifies the API against the CA.
+    client_cert = os.environ.get("BFF_CLIENT_CERT_FILE")
+    client_key = os.environ.get("BFF_CLIENT_KEY_FILE")
+    ca_file = os.environ.get("API_CA_FILE")
+    httpx_kwargs: dict = {"timeout": 30.0}
+    if client_cert and client_key:
+        httpx_kwargs["cert"] = (client_cert, client_key)
+    if ca_file:
+        httpx_kwargs["verify"] = ca_file
+
+    async with httpx.AsyncClient(**httpx_kwargs) as client:
         try:
             resp = await client.request(
                 request.method, url, headers=headers,

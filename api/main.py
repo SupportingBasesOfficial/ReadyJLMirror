@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
@@ -203,6 +204,31 @@ async def health_readiness() -> JSONResponse:
     )
 
 
+def _mtls_kwargs() -> dict:
+    """mTLS on the internal API boundary — opt-in via env.
+
+    API_MTLS=1 + cert paths: the API requires and verifies a client
+    certificate against the CA — service identity, not just an
+    encrypted channel. No client cert -> TLS handshake fails.
+    """
+    if os.environ.get("API_MTLS", "").strip().lower() not in (
+            "1", "true", "yes"):
+        return {}
+    cert = os.environ.get("API_TLS_CERT_FILE")
+    key = os.environ.get("API_TLS_KEY_FILE")
+    ca = os.environ.get("API_CA_FILE")
+    if not (cert and key and ca):
+        raise RuntimeError(
+            "API_MTLS=1 requires API_TLS_CERT_FILE, API_TLS_KEY_FILE "
+            "and API_CA_FILE")
+    return {
+        "ssl_certfile": cert,
+        "ssl_keyfile": key,
+        "ssl_ca_certs": ca,
+        "ssl_cert_reqs": 2,  # ssl.CERT_REQUIRED
+    }
+
+
 def run() -> None:
     import uvicorn
 
@@ -211,4 +237,9 @@ def run() -> None:
         host=settings.api_host,
         port=settings.api_port,
         reload=settings.is_development,
+        **_mtls_kwargs(),
     )
+
+
+if __name__ == "__main__":
+    run()

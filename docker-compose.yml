@@ -60,12 +60,18 @@ services:
       DB_PASSWORD: jlmirror_dev
       BFF_INTERNAL_SECRET: dev-internal-secret-change-me
       SECRETS_DIR: /run/secrets
+      # Opt-in mTLS: python -m scripts.dev_tls, then set API_MTLS=1
+      # plus the cert paths in .env (see .env.example).
+      API_MTLS: ${API_MTLS:-}
+      API_TLS_CERT_FILE: ${API_TLS_CERT_FILE:-}
+      API_TLS_KEY_FILE: ${API_TLS_KEY_FILE:-}
+      API_CA_FILE: ${API_CA_FILE:-}
     volumes:
       - ./secrets:/run/secrets:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    command: python -m api.main
     # Internal only — the BFF is the public boundary.
 
   bff:
@@ -80,7 +86,10 @@ services:
       DB_USER: jlmirror_app
       DB_PASSWORD: jlmirror_dev
       BFF_PUBLIC_URL: http://localhost:8080
-      API_INTERNAL_URL: http://api:8000
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
+      BFF_CLIENT_CERT_FILE: ${BFF_CLIENT_CERT_FILE:-}
+      BFF_CLIENT_KEY_FILE: ${BFF_CLIENT_KEY_FILE:-}
+      API_CA_FILE: ${API_CA_FILE:-}
       KEYCLOAK_INTERNAL_URL: http://keycloak:8080
       KEYCLOAK_PUBLIC_URL: http://localhost:8180
       KEYCLOAK_REALM: jlmirror
