@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from shared import access
 from shared.audit import record_audit_event
-from shared.db import db_connection
+from shared.db import db_connection, db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/platform", tags=["platform"])
 
@@ -59,7 +59,7 @@ async def list_organizations(request: Request) -> list[dict]:
 async def create_organization(request: Request,
                               body: OrganizationCreate) -> dict:
     actor = await _require_platform_admin(request)
-    async with db_connection() as conn:
+    async with db_tenant_connection("platform") as conn:
         await conn.execute(
             "INSERT INTO g1.organizations (organization_id, "
             "display_name) VALUES (%s, %s) ON CONFLICT DO NOTHING",
@@ -103,7 +103,7 @@ async def create_relationship(request: Request,
                               body: RelationshipCreate) -> dict:
     actor = await _require_platform_admin(request)
     rel_id = f"rel_{secrets.token_urlsafe(12)}"
-    async with db_connection() as conn:
+    async with db_tenant_connection("platform") as conn:
         await conn.execute(
             """
             INSERT INTO g1.organization_relationships
@@ -162,7 +162,31 @@ async def create_grant(request: Request, body: GrantCreate) -> dict:
         raise HTTPException(status_code=422,
                             detail=f"unknown permissions: {invalid}")
     grant_id = f"grant_{secrets.token_urlsafe(12)}"
-    async with db_connection() as conn:
+    async with db_tenant_connection("platform") as conn:
+        # Fail-closed: a delegated grant must be backed by an ACTIVE
+        # relationship authorizing the source organization over the
+        # target tenant's organization (contract §7 — delegation is
+        # explicit, never emergent).
+        cur = await conn.execute(
+            """
+            SELECT r.relationship_id, r.family
+              FROM g1.organization_relationships r
+              JOIN g1.tenants t
+                ON t.organization_id = r.target_organization_id
+             WHERE r.source_organization_id = %s
+               AND t.tenant_id = %s
+               AND r.state = 'active'
+               AND r.family IN ('delegated_administration_for',
+                                'provides_monitoring_service_for')
+            """,
+            (body.source_organization_id, body.target_tenant_id))
+        relationship = await cur.fetchone()
+        if relationship is None:
+            raise HTTPException(
+                status_code=403,
+                detail="no active delegation relationship from the "
+                       "source organization to the target tenant's "
+                       "organization — grant refused")
         await conn.execute(
             """
             INSERT INTO g1.delegated_grants
@@ -188,7 +212,7 @@ async def create_grant(request: Request, body: GrantCreate) -> dict:
 @router.post("/delegated-grants/{grant_id}/revoke")
 async def revoke_grant(request: Request, grant_id: str) -> dict:
     actor = await _require_platform_admin(request)
-    async with db_connection() as conn:
+    async with db_tenant_connection("platform") as conn:
         cur = await conn.execute(
             """
             UPDATE g1.delegated_grants
@@ -206,6 +230,79 @@ async def revoke_grant(request: Request, grant_id: str) -> dict:
             subject_type="delegated_grant", subject_id=grant_id)
         await conn.commit()
     return {"grant_id": grant_id, "state": "revoked"}
+
+
+@router.get("/organizations/{organization_id}")
+async def organization_360(request: Request,
+                           organization_id: str) -> dict:
+    """Organization 360 (contract §15): what the org is, which
+    tenants it owns, its relationships, delegated grants, and
+    principals reachable through those grants."""
+    await _require_platform_admin(request)
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            "SELECT organization_id, display_name, state, created_at "
+            "FROM g1.organizations WHERE organization_id = %s",
+            (organization_id,))
+        org = await cur.fetchone()
+        if org is None:
+            raise HTTPException(status_code=404,
+                                detail="organization not found")
+
+        cur = await conn.execute(
+            "SELECT tenant_id, display_name, state FROM g1.tenants "
+            "WHERE organization_id = %s ORDER BY tenant_id",
+            (organization_id,))
+        tenants = [{"tenant_id": r[0], "display_name": r[1],
+                    "state": r[2]} for r in await cur.fetchall()]
+
+        cur = await conn.execute(
+            """
+            SELECT relationship_id, family, source_organization_id,
+                   target_organization_id, state
+              FROM g1.organization_relationships
+             WHERE source_organization_id = %s
+                OR target_organization_id = %s
+             ORDER BY family
+            """, (organization_id, organization_id))
+        relationships = [
+            {"relationship_id": r[0], "family": r[1],
+             "direction": ("outgoing" if r[2] == organization_id
+                           else "incoming"),
+             "other_organization_id":
+                 r[3] if r[2] == organization_id else r[2],
+             "state": r[4]}
+            for r in await cur.fetchall()]
+
+        cur = await conn.execute(
+            """
+            SELECT g.grant_id, g.target_tenant_id, g.principal_id,
+                   g.permissions, g.state
+              FROM g1.delegated_grants g
+             WHERE g.source_organization_id = %s
+             ORDER BY g.created_at DESC
+            """, (organization_id,))
+        grants = [{"grant_id": r[0], "target_tenant_id": r[1],
+                   "principal_id": r[2], "permissions": r[3],
+                   "state": r[4]} for r in await cur.fetchall()]
+
+        cur = await conn.execute(
+            """
+            SELECT m.principal_id, m.tenant_id, m.role, m.state
+              FROM g1.tenant_memberships m
+              JOIN g1.tenants t USING (tenant_id)
+             WHERE t.organization_id = %s
+            """, (organization_id,))
+        members = [{"principal_id": r[0], "tenant_id": r[1],
+                    "role": r[2], "state": r[3]}
+                   for r in await cur.fetchall()]
+
+    return {
+        "organization_id": org[0], "display_name": org[1],
+        "state": org[2], "created_at": org[3].isoformat(),
+        "tenants": tenants, "relationships": relationships,
+        "delegated_grants": grants, "members": members,
+    }
 
 
 @router.get("/tenants")

@@ -137,6 +137,48 @@ async def accessible_tenants(
              "via": r[3]} for r in await cur.fetchall()]
 
 
+async def allowed_source_ids(
+        conn: AsyncConnection, principal_id: str,
+        tenant_id: str) -> frozenset[str] | None:
+    """Resource-scope refinement for monitoring sources.
+
+    Returns None when authority is unrestricted (membership,
+    platform capability, or grants without scope). Returns the
+    union of active-grant `resource_scope.monitoring_source_ids`
+    when every authority the principal holds on the tenant is
+    scoped — a delegated operator restricted to named sources.
+    """
+    if await principal_is_platform_admin(conn, principal_id):
+        return None
+
+    cur = await conn.execute(
+        """
+        SELECT 1 FROM g1.tenant_memberships
+         WHERE tenant_id = %s AND principal_id = %s
+           AND state = 'active'
+        """, (tenant_id, principal_id))
+    if await cur.fetchone() is not None:
+        return None
+
+    cur = await conn.execute(
+        """
+        SELECT resource_scope FROM g1.delegated_grants
+         WHERE target_tenant_id = %s AND principal_id = %s
+           AND state = 'active'
+           AND effective_from <= now()
+           AND (effective_until IS NULL OR effective_until > now())
+        """, (tenant_id, principal_id))
+    scopes = [r[0] for r in await cur.fetchall()]
+    if not scopes or any(
+            not (s or {}).get("monitoring_source_ids") for s in scopes):
+        return None
+    ids: set[str] = set()
+    for s in scopes:
+        ids.update(str(v) for v in
+                   (s or {}).get("monitoring_source_ids") or [])
+    return frozenset(ids)
+
+
 async def tenant_authorized(
         conn: AsyncConnection, principal_id: str,
         tenant_id: str) -> bool:

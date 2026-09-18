@@ -17,6 +17,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
@@ -36,6 +37,7 @@ from api.routers import (
     observability,
     platform,
     release,
+    tenant,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,6 +136,7 @@ async def _session_current(ctx: dict) -> bool:
 
 # Path-prefix -> permission domain. GET/HEAD = read, anything else =
 # operate. Route-level vocabulary lives in shared/access.py.
+_SOURCE_PATH = re.compile(r"/api/v1/monitoring/sources/([^/]+)")
 _DOMAIN_PREFIXES = (
     ("/api/v1/monitoring/", "monitoring"),
     ("/api/v1/alerting/", "alerting"),
@@ -146,6 +149,9 @@ def _required_permission(path: str, method: str) -> str | None:
         if path.startswith(prefix):
             verb = "read" if method in ("GET", "HEAD", "OPTIONS") else "operate"
             return f"{domain}:{verb}"
+    if path.startswith("/api/v1/tenant/"):
+        return ("tenant:read" if method in ("GET", "HEAD", "OPTIONS")
+                else "tenant:admin")
     return None
 
 
@@ -184,6 +190,16 @@ async def verify_context(request: Request, call_next):
         async with db_connection() as conn:
             perms = await access.effective_permissions(
                 conn, ctx["principal_id"], ctx["tenant_id"])
+            # Resource-scope refinement: delegated grants may
+            # restrict authority to named monitoring sources.
+            source_match = _SOURCE_PATH.search(path)
+            if source_match:
+                allowed = await access.allowed_source_ids(
+                    conn, ctx["principal_id"], ctx["tenant_id"])
+                if allowed is not None and \
+                        source_match.group(1) not in allowed:
+                    return JSONResponse({"state": "forbidden"},
+                                        status_code=status.HTTP_403_FORBIDDEN)
         if required not in perms:
             return JSONResponse({"state": "forbidden"},
                                 status_code=status.HTTP_403_FORBIDDEN)
@@ -273,6 +289,7 @@ app.include_router(observability.router)
 app.include_router(release.router)
 app.include_router(alerting.router)
 app.include_router(platform.router)
+app.include_router(tenant.router)
 
 
 @app.get("/health", tags=["health"])
