@@ -7,7 +7,7 @@ canonical `InitialValidationWorker` from the domain package:
   -> fenced complete (source generation + revisions must be current)
 
 Adapters:
-  - EnvCredentialResolver (dev) — OpenBao in production
+  - ChainedCredentialResolver — mounted secrets dir, env fallback;
   - DevOutboundAdmission (dev) — governed egress policy in production
   - ZabbixClient — real JSON-RPC hostgroup.get
 
@@ -23,7 +23,7 @@ import time
 import psycopg
 
 from jlmirror_monitoring.validation_worker import InitialValidationWorker
-from providers.credentials import EnvCredentialResolver
+from providers.credentials import ChainedCredentialResolver
 from providers.egress import DevOutboundAdmission
 from providers.zabbix import ZabbixClient
 from shared.config import settings
@@ -43,7 +43,7 @@ def _process_pending(conn: psycopg.Connection) -> int:
         repo = PgValidationRepository(conn, tenant_id)
         worker = InitialValidationWorker(
             repository=repo,
-            credential_resolver=EnvCredentialResolver(),
+            credential_resolver=ChainedCredentialResolver(),
             outbound_admission=DevOutboundAdmission(),
             host_group_reader=ZabbixClient(),
         )

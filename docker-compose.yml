@@ -103,6 +103,9 @@ services:
       DB_NAME: jlmirror
       DB_USER: jlmirror_worker
       DB_PASSWORD: jlmirror_dev
+      CREDENTIALS_DIR: /run/secrets
+    volumes:
+      - ./secrets:/run/secrets:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

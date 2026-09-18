@@ -19,7 +19,7 @@ import time
 import psycopg
 
 from jlmirror_monitoring.host_inventory import HostInventoryWorker
-from providers.credentials import EnvCredentialResolver
+from providers.credentials import ChainedCredentialResolver
 from providers.egress import DevOutboundAdmission
 from providers.zabbix import ZabbixClient
 from shared.config import settings
@@ -38,7 +38,7 @@ def _process_pending(conn: psycopg.Connection) -> int:
         repo = PgHostInventoryRepository(conn, tenant_id)
         worker = HostInventoryWorker(
             repository=repo,
-            credential_resolver=EnvCredentialResolver(),
+            credential_resolver=ChainedCredentialResolver(),
             outbound_admission=DevOutboundAdmission(),
             host_reader=ZabbixClient(),
         )

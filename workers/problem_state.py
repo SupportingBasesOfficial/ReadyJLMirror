@@ -34,7 +34,7 @@ from jlmirror_monitoring.validation_worker import (
     AdmittedProviderEndpoint,
     ResolvedZabbixCredential,
 )
-from providers.credentials import EnvCredentialResolver
+from providers.credentials import ChainedCredentialResolver
 from providers.egress import DevOutboundAdmission
 from providers.zabbix import ZabbixClient
 from shared.config import settings
@@ -83,7 +83,7 @@ class _RecordingProblemReader:
 
 def _process_pending(conn: psycopg.Connection) -> int:
     processed = 0
-    resolver = EnvCredentialResolver()
+    resolver = ChainedCredentialResolver()
     admission = DevOutboundAdmission()
     client = ZabbixClient()
 

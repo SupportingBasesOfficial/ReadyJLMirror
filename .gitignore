@@ -37,3 +37,8 @@ htmlcov/
 
 # Docker
 docker-compose.override.yml
+
+# local mounted secrets
+secrets/*.token
+secrets/*
+!secrets/README.md
