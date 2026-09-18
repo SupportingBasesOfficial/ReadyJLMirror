@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import os
 import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -455,8 +456,26 @@ async def health() -> dict:
 app.mount("/", StaticFiles(directory=SHELL_DIR, html=True), name="shell")
 
 
+def _tls_paths() -> tuple[str | None, str | None]:
+    """TLS is explicit opt-in via TLS_CERT_FILE/TLS_KEY_FILE — kept
+    out of auto-detection so a bare clone still boots http dev."""
+    cert = os.environ.get("TLS_CERT_FILE")
+    key = os.environ.get("TLS_KEY_FILE")
+    if cert and key:
+        return cert, key
+    return None, None
+
+
 def run() -> None:
     import uvicorn
 
+    cert, key = _tls_paths()
+    kwargs: dict = {}
+    if cert and key:
+        kwargs = {"ssl_certfile": cert, "ssl_keyfile": key}
     uvicorn.run("bff.main:app", host=settings.bff_host, port=settings.bff_port,
-                reload=settings.is_development)
+                reload=settings.is_development, **kwargs)
+
+
+if __name__ == "__main__":
+    run()

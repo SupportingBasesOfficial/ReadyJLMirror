@@ -68,7 +68,7 @@ class Settings:
 
     # BFF (G1 identity + tenant + protected shell)
     bff_host: str = field(default_factory=lambda: _env("BFF_HOST", "0.0.0.0"))
-    bff_port: int = field(default_factory=lambda: _env("BFF_PORT", "8080"))
+    bff_port: int = field(default_factory=lambda: int(_env("BFF_PORT", "8080")))
     bff_public_url: str = field(default_factory=lambda: _env("BFF_PUBLIC_URL", "http://localhost:8080"))
     api_internal_url: str = field(default_factory=lambda: _env("API_INTERNAL_URL", "http://localhost:8000"))
 

@@ -89,6 +89,10 @@ services:
       BFF_INTERNAL_SECRET: dev-internal-secret-change-me
       DEV_AUTH_BYPASS: "true"
       SECRETS_DIR: /run/secrets
+      # Opt-in TLS: python -m scripts.dev_tls generates
+      # secrets/tls/{cert,key}.pem, then set these in .env or host env.
+      TLS_CERT_FILE: ${TLS_CERT_FILE:-}
+      TLS_KEY_FILE: ${TLS_KEY_FILE:-}
     volumes:
       - ./secrets:/run/secrets:ro
     depends_on:
@@ -98,7 +102,7 @@ services:
         condition: service_started
       keycloak:
         condition: service_started
-    command: uvicorn bff.main:app --host 0.0.0.0 --port 8080
+    command: python -m bff.main
 
   worker:
     build: .
