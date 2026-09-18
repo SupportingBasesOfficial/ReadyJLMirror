@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse
 
 from shared.config import settings
 from shared.db import check_db_ready, close_pool, db_connection, init_pool
+from shared import telemetry
 from api.routers import authority, async_ops, monitoring, observability, release
 
 logger = logging.getLogger(__name__)
@@ -57,8 +58,10 @@ app = FastAPI(title="ReadyJLMirror API", version="0.1.0", lifespan=lifespan)
 
 
 def _expected_signature(principal_id: str, tenant_id: str,
-                        session_digest: str, ts: str) -> str:
-    payload = f"{principal_id}|{tenant_id}|{session_digest}|{ts}"
+                        session_digest: str, ts: str,
+                        correlation_id: str = "") -> str:
+    payload = (f"{principal_id}|{tenant_id}|{session_digest}"
+               f"|{ts}|{correlation_id}")
     return hmac.new(
         settings.bff_internal_secret.encode(), payload.encode(), hashlib.sha256
     ).hexdigest()
@@ -71,6 +74,7 @@ def _verify_bff_context(request: Request) -> Optional[dict]:
     session_generation = request.headers.get("X-JLMirror-Session-Generation")
     tenant_id = request.headers.get("X-JLMirror-Tenant-Id", "")
     ts = request.headers.get("X-JLMirror-Context-Ts")
+    correlation_id = request.headers.get("X-JLMirror-Correlation-Id", "")
     sig = request.headers.get("X-JLMirror-Context-Sig")
 
     if not all([principal_id, session_digest, session_generation, ts, sig]):
@@ -80,7 +84,8 @@ def _verify_bff_context(request: Request) -> Optional[dict]:
             return None
     except ValueError:
         return None
-    expected = _expected_signature(principal_id, tenant_id, session_digest, ts)
+    expected = _expected_signature(
+        principal_id, tenant_id, session_digest, ts, correlation_id)
     if not hmac.compare_digest(expected, sig):
         return None
     return {
@@ -88,6 +93,7 @@ def _verify_bff_context(request: Request) -> Optional[dict]:
         "session_digest": session_digest,
         "session_generation": session_generation,
         "tenant_id": tenant_id or None,
+        "correlation_id": correlation_id or None,
     }
 
 
@@ -144,7 +150,15 @@ async def verify_context(request: Request, call_next):
                             status_code=status.HTTP_403_FORBIDDEN)
 
     request.state.jlmirror_context = ctx
-    return await call_next(request)
+    with telemetry.bind(
+            correlation_id=ctx.get("correlation_id")
+            or telemetry.new_correlation_id(),
+            tenant_id=ctx.get("tenant_id"),
+            principal_id=ctx.get("principal_id")):
+        response = await call_next(request)
+    response.headers["X-Correlation-Id"] = (
+        telemetry.current_correlation_id() or "")
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +246,7 @@ def _mtls_kwargs() -> dict:
 def run() -> None:
     import uvicorn
 
+    telemetry.configure_structured_logging(settings.log_level)
     uvicorn.run(
         "api.main:app",
         host=settings.api_host,

@@ -28,6 +28,7 @@ from fastapi.staticfiles import StaticFiles
 
 from shared.config import settings
 from shared.db import close_pool, db_connection, init_pool
+from shared import telemetry
 from bff import oidc
 from bff.identity import (
     check_membership,
@@ -128,12 +129,14 @@ def _csrf_ok(request: Request, session: dict) -> bool:
 
 
 def _sign_internal_context(principal_id: str, tenant_id: Optional[str],
-                           session_digest: str, ts: int) -> str:
+                           session_digest: str, ts: int,
+                           correlation_id: str = "") -> str:
     """HMAC signature for BFF->API internal context headers (dev trust model).
 
     Production: workload identity (SPIFFE/SPIRE) per D3 candidates.
     """
-    payload = f"{principal_id}|{tenant_id or ''}|{session_digest}|{ts}"
+    payload = (f"{principal_id}|{tenant_id or ''}|{session_digest}"
+               f"|{ts}|{correlation_id}")
     return hmac.new(
         settings.bff_internal_secret.encode(), payload.encode(), hashlib.sha256
     ).hexdigest()
@@ -411,8 +414,9 @@ async def proxy_to_api(request: Request, path: str) -> Response:
     ts = int(_utcnow().timestamp())
     digest = session["handle_digest"]
     tenant = session["bound_tenant_id"]
+    corr = telemetry.extract_correlation_id(request.headers)
     signature = _sign_internal_context(
-        session["principal_id"], tenant, digest, ts
+        session["principal_id"], tenant, digest, ts, corr
     )
 
     url = f"{settings.api_internal_url}/api/v1/{path}"
@@ -422,6 +426,7 @@ async def proxy_to_api(request: Request, path: str) -> Response:
         "X-JLMirror-Session-Generation": session["session_generation"],
         "X-JLMirror-Tenant-Id": tenant or "",
         "X-JLMirror-Context-Ts": str(ts),
+        "X-JLMirror-Correlation-Id": corr,
         "X-JLMirror-Context-Sig": signature,
     }
     body = await request.body()
@@ -480,6 +485,7 @@ def _tls_paths() -> tuple[str | None, str | None]:
 def run() -> None:
     import uvicorn
 
+    telemetry.configure_structured_logging(settings.log_level)
     cert, key = _tls_paths()
     kwargs: dict = {}
     if cert and key:

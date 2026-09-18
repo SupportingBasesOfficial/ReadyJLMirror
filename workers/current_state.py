@@ -21,6 +21,7 @@ from providers.credentials import ChainedCredentialResolver
 from providers.egress import DevOutboundAdmission
 from providers.zabbix import ZabbixClient
 from shared.config import settings
+from shared import telemetry
 from shared.monitoring_repo import (
     PgMetricCurrentStateRepository,
     list_all_pending_current_polls,
@@ -33,6 +34,8 @@ def _process_pending(conn: psycopg.Connection) -> int:
     pending = list_all_pending_current_polls(conn)
     processed = 0
     for tenant_id, op_id in pending:
+        telemetry.correlation_id_var.set(op_id)
+        telemetry.tenant_id_var.set(tenant_id)
         repo = PgMetricCurrentStateRepository(conn, tenant_id)
         worker = MetricCurrentStateWorker(
             repository=repo,

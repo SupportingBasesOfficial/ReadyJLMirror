@@ -35,6 +35,7 @@ from providers.credentials import ChainedCredentialResolver
 from providers.egress import DevOutboundAdmission
 from providers.zabbix import ZabbixClient
 from shared.config import settings
+from shared import telemetry
 from shared.monitoring_repo import (
     PgMetricHistoryRepository,
     list_all_pending_history_syncs,
@@ -83,6 +84,8 @@ def _process_pending(conn: psycopg.Connection) -> int:
     processed = 0
 
     for tenant_id, op_id in list_all_pending_history_syncs(conn):
+        telemetry.correlation_id_var.set(op_id)
+        telemetry.tenant_id_var.set(tenant_id)
         repo = PgMetricHistoryRepository(conn, tenant_id)
         reader = _RecordingHistoryReader(ZabbixClient())
         try:
@@ -116,6 +119,8 @@ def _process_pending(conn: psycopg.Connection) -> int:
 
     for tenant_id, source_id in list_source_ids_with_pending_projection(conn):
         repo = PgMetricHistoryRepository(conn, tenant_id)
+        telemetry.tenant_id_var.set(tenant_id)
+        telemetry.correlation_id_var.set(source_id)
         try:
             projected = repo.project_pending_observations(source_id)
             if projected:

@@ -52,7 +52,9 @@ def test_internal_context_signature_roundtrip():
     session_digest = "deadbeef" * 8
     ts = int(time.time())
 
-    payload = f"{principal_id}|{tenant_id}|{session_digest}|{ts}"
+    correlation_id = "corr_test123"
+    payload = (f"{principal_id}|{tenant_id}|{session_digest}"
+               f"|{ts}|{correlation_id}")
     expected = hmac.new(
         settings.bff_internal_secret.encode(), payload.encode(), hashlib.sha256
     ).hexdigest()
@@ -60,7 +62,9 @@ def test_internal_context_signature_roundtrip():
     # Reproduce api.main._expected_signature logic
     from api.main import _expected_signature
 
-    assert _expected_signature(principal_id, tenant_id, session_digest, str(ts)) == expected
+    assert _expected_signature(
+        principal_id, tenant_id, session_digest, str(ts),
+        correlation_id) == expected
 
 
 def test_internal_context_signature_rejects_tampering():

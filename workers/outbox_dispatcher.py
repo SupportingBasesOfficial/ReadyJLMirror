@@ -28,6 +28,7 @@ import psycopg
 
 from api.routers.async_ops import _outbox
 from jlmirror_async.outbox import BrokerPublicationReceipt
+from shared import telemetry
 from shared.config import settings
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,8 @@ def _publish_durable(conn: psycopg.Connection) -> int:
 
     for (record_id, tenant_id, message_id, contract, version,
          subject_type, subject_id, payload, attempts) in rows:
+        telemetry.correlation_id_var.set(message_id)
+        telemetry.tenant_id_var.set(tenant_id)
         conn.execute(
             """
             UPDATE monitoring.monitoring_outbox

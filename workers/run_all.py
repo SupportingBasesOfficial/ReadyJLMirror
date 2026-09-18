@@ -17,6 +17,7 @@ import time
 
 import psycopg
 
+from shared import telemetry
 from shared.config import settings
 from workers.current_state import _process_pending as current_state
 from workers.health import _process_pending as health
@@ -28,7 +29,6 @@ from workers.problem_state import _process_pending as problem_state
 from workers.validation import _process_pending as validation
 
 logger = logging.getLogger("workers.run_all")
-logging.basicConfig(level=logging.INFO)
 
 _PROCESSORS = (
     ("validation", validation),
@@ -58,6 +58,7 @@ def tick(conn) -> int:
 
 
 def main() -> None:
+    telemetry.configure_structured_logging(settings.log_level)
     once = "--once" in sys.argv
     interval = settings.worker_poll_interval_seconds
     logger.info("workers starting (once=%s, poll=%ss)", once, interval)

@@ -15,6 +15,7 @@ import time
 
 import psycopg
 
+from shared import telemetry
 from shared.config import settings
 from shared.monitoring_repo import (
     PgHealthProjectionRepository,
@@ -28,6 +29,8 @@ def _process_pending(conn: psycopg.Connection) -> int:
     projected = 0
     for tenant_id, source_id in list_all_monitoring_sources(conn):
         repo = PgHealthProjectionRepository(conn, tenant_id)
+        telemetry.tenant_id_var.set(tenant_id)
+        telemetry.correlation_id_var.set(source_id)
         try:
             n = repo.project_source_health(source_id)
             projected += n
