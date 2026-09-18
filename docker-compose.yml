@@ -36,6 +36,18 @@ services:
       timeout: 5s
       retries: 30
 
+  openbao:
+    image: openbao/openbao:latest
+    cap_add:
+      - IPC_LOCK
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: dev-root-token
+    ports:
+      - "8200:8200"
+    command: server -dev
+    profiles:
+      - secrets
+
   migrate:
     build: .
     environment:
