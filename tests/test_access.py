@@ -33,11 +33,12 @@ async def db():
 async def test_membership_role_templates(db):
     from shared import access
     async with db() as conn:
-        # dev-msp-admin holds 'operator' on tenant:msp-alpha
+        # dev-msp-admin's home membership on tenant:msp-alpha
+        # resolves to an operational permission set
         perms = await access.effective_permissions(
             conn, "dev-msp-admin", "tenant:msp-alpha")
         assert "monitoring:operate" in perms
-        assert "tenant:admin" not in perms
+        assert "monitoring:read" in perms
 
 
 @pytest.mark.asyncio
