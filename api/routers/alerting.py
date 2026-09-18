@@ -88,6 +88,39 @@ class TransitionRequest(BaseModel):
     policy_version: int
 
 
+@router.get("/inbox")
+async def list_inbox_endpoint(
+        request: Request,
+        tenant_id: str | None = None,
+        state: str | None = None,
+        limit: int = 100) -> list[dict]:
+    """G6 consumer diagnostics (bounded, tenant-scoped): the durable
+    inbox receipts that carry the invalidation resync responsibility.
+    These are transport state — NOT Alerts."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT message_id, contract_name, correlation_id,
+                       causation_id, state, resync_result_class,
+                       source_revision_current, last_error_class,
+                       received_at, completed_at
+                  FROM alerting.inbox_receipt
+                 WHERE (%s::text IS NULL OR state = %s)
+                 ORDER BY received_at DESC
+                 LIMIT %s
+                """,
+                (state, state, min(limit, 200)))
+            cols = [d.name for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in await cur.fetchall()]
+    for r in rows:
+        for k in ("received_at", "completed_at"):
+            if r.get(k) is not None:
+                r[k] = r[k].isoformat()
+    return rows
+
+
 @router.post("/alerts/transitions", status_code=status.HTTP_201_CREATED)
 async def commit_transition_endpoint(
         body: TransitionRequest, request: Request,
