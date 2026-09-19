@@ -38,6 +38,7 @@ from providers.credentials import ChainedCredentialResolver
 from providers.egress import DevOutboundAdmission
 from providers.zabbix import ZabbixClient
 from shared.config import settings
+from shared import alerting_eval
 from shared import telemetry
 from shared.monitoring_repo import (
     PgProblemStateRepository,
@@ -153,6 +154,14 @@ def _process_pending(conn: psycopg.Connection) -> int:
 
             persisted = repo.complete_problem_state(
                 claim, result, raw_rows=reader.rows, recoveries=recoveries)
+            if result.succeeded:
+                # G7: accepted resync -> reread current owner state ->
+                # evaluate effective enabled policy versions ->
+                # create/resolve alert occurrences.
+                alerting_eval.evaluate_problem_policies(
+                    conn, tenant_id=tenant_id,
+                    monitoring_source_id=claim.monitoring_source_id)
+                conn.commit()
             processed += 1
             logger.info(
                 "problem state %s/%s -> %s/%s problems=%s recoveries=%s",
