@@ -68,6 +68,7 @@ from jlmirror_monitoring.validation_worker import (
     InitialValidationClaim,
     InitialValidationResult,
 )
+from shared import usage
 
 logger = logging.getLogger(__name__)
 
@@ -467,6 +468,11 @@ class PgValidationRepository:
                 claim.monitoring_source_id,
             ),
         )
+        if result.succeeded:
+            usage.record_sync_usage(
+                self._conn, tenant_id=claim.tenant_id,
+                sync_operation_id=claim.monitoring_sync_operation_id,
+                operation_kind="initial_validation")
         self._conn.commit()
 
 
@@ -713,6 +719,10 @@ class PgHostInventoryRepository:
 
         if result.succeeded:
             self._persist_snapshot(claim, result, snapshot_evidence_id)
+            usage.record_sync_usage(
+                self._conn, tenant_id=claim.tenant_id,
+                sync_operation_id=claim.monitoring_sync_operation_id,
+                operation_kind="host_inventory")
         else:
             # Degraded — no removals, only evidence degradation
             self._conn.execute(
@@ -1163,6 +1173,10 @@ class PgMetricDefinitionRepository:
 
         if effective.succeeded:
             self._persist_item_snapshot(claim, effective, snapshot_evidence_id)
+            usage.record_sync_usage(
+                self._conn, tenant_id=claim.tenant_id,
+                sync_operation_id=claim.monitoring_sync_operation_id,
+                operation_kind="metric_definitions")
         else:
             self._conn.execute(
                 """
@@ -1636,6 +1650,10 @@ class PgMetricCurrentStateRepository:
 
         if result.succeeded:
             self._persist_observations(claim, result)
+            usage.record_sync_usage(
+                self._conn, tenant_id=claim.tenant_id,
+                sync_operation_id=claim.monitoring_sync_operation_id,
+                operation_kind="metric_current_state")
 
         # Consume the poll slot + update source evidence on any completion
         self._conn.execute(
@@ -2081,6 +2099,10 @@ class PgMetricHistoryRepository:
 
         if result.succeeded:
             self._persist_history_rows(claim, raw_rows)
+            usage.record_sync_usage(
+                self._conn, tenant_id=claim.tenant_id,
+                sync_operation_id=claim.monitoring_sync_operation_id,
+                operation_kind="metric_history")
 
         # Stream coverage outcome
         if result.succeeded:
@@ -2794,6 +2816,10 @@ class PgProblemStateRepository:
         seen_eventids: list[str] = []
         if result.succeeded:
             seen_eventids = self._persist_problems(claim, result, raw_rows)
+            usage.record_sync_usage(
+                self._conn, tenant_id=claim.tenant_id,
+                sync_operation_id=claim.monitoring_sync_operation_id,
+                operation_kind="problem_state")
             self._persist_recoveries(claim, recoveries)
             self._apply_omission(claim, result, seen_eventids)
             self._conn.execute(

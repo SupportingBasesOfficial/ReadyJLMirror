@@ -191,3 +191,25 @@ async def retire_role(request: Request, role_name: str) -> dict:
             subject_type="tenant_role", subject_id=role_name)
         await conn.commit()
     return {"role_name": role_name, "state": "retired"}
+
+
+@router.get("/usage")
+async def tenant_usage(request: Request) -> list[dict]:
+    """Tenant-facing usage records — the tenant sees its own
+    consumption attribution (contract §12)."""
+    tenant, _ = _tenant_ctx(request)
+    async with db_tenant_connection(tenant) as conn:
+        cur = await conn.execute(
+            """
+            SELECT usage_id, meter, quantity, window_start,
+                   window_end, contract_id
+              FROM g1.usage_meters
+             WHERE tenant_id = %s
+             ORDER BY window_start DESC LIMIT 200
+            """, (tenant,))
+        return [{"usage_id": r[0], "meter": r[1],
+                 "quantity": float(r[2]),
+                 "window_start": r[3].isoformat(),
+                 "window_end": r[4].isoformat(),
+                 "contract_id": r[5]}
+                for r in await cur.fetchall()]
