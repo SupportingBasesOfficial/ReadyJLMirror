@@ -1,4 +1,4 @@
-"""G7 alert policy lifecycle tests — self-contained fixtures."""
+﻿"""G7 alert policy lifecycle tests — self-contained fixtures."""
 
 from __future__ import annotations
 
@@ -30,6 +30,20 @@ def fx():
     with _conn() as conn:
         conn.execute(
             "SELECT set_config('jlmirror.tenant_id','tenant:dev',false)")
+        # Isolate: wipe ALL tenant alerting state — evaluation runs
+        # over every enabled policy of the tenant, so live/demo
+        # policies would otherwise count.
+        for t in ("human_operations.alert_action_assignment",
+                  "human_operations.alert_acknowledgement",
+                  "human_operations.visibility_receipt",
+                  "human_operations.visibility_requirement",
+                  "human_operations.current_action_projection",
+                  "alerting.alert_decision", "alerting.alert_transition",
+                  "alerting.alert",
+                  "alerting.alert_policy_effective_version",
+                  "alerting.alert_policy_version",
+                  "alerting.alert_policy"):
+            conn.execute(f"DELETE FROM {t} WHERE tenant_id='tenant:dev'")
         conn.execute(
             """
             INSERT INTO monitoring.monitoring_source_generation
