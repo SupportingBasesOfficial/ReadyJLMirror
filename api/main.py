@@ -35,6 +35,7 @@ from api.routers import (
     async_ops,
     human_ops,
     monitoring,
+    notifications,
     observability,
     platform,
     release,
@@ -201,6 +202,12 @@ async def verify_context(request: Request, call_next):
     if not path.startswith("/api/v1/"):
         return await call_next(request)
 
+    # G9 provider callback boundary — external callers have no
+    # session; authenticity is HMAC-verified inside the endpoint.
+    # It can never gain alert/ack/responsibility mutation authority.
+    if path == "/api/v1/alerting/notifications/callback":
+        return await call_next(request)
+
     # Dev sandbox routes stay open for local exploration in development
     sandbox_prefixes = (
         "/api/v1/auth/", "/api/v1/fence/", "/api/v1/monitoring/",
@@ -336,6 +343,7 @@ app.include_router(observability.router)
 app.include_router(release.router)
 app.include_router(alerting.router)
 app.include_router(human_ops.router)
+app.include_router(notifications.router)
 app.include_router(platform.router)
 app.include_router(tenant.router)
 

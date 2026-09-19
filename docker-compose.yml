@@ -64,6 +64,7 @@ services:
   api:
     build: .
     environment:
+      NOTIFICATION_CALLBACK_SECRET: ${NOTIFICATION_CALLBACK_SECRET:-dev-callback-secret}
       APP_ENVIRONMENT: development
       DB_HOST: db
       DB_PORT: "5432"
@@ -146,6 +147,12 @@ services:
       # Dev webhook: real HTTP delivery to the API sink — leave
       # empty for dev-log simulated receipts.
       ALERTING_WEBHOOK_URL: ${ALERTING_WEBHOOK_URL:-http://api:8000/dev/outbox-sink}
+      # G9 WhatsApp adapter — dev points at the API's dev sink
+      # (returns provider-shaped wamid). Prod: Meta Graph URL +
+      # token via credential binding.
+      WHATSAPP_API_URL: ${WHATSAPP_API_URL:-http://bff:8080/dev/whatsapp}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      NOTIFICATION_CALLBACK_SECRET: ${NOTIFICATION_CALLBACK_SECRET:-dev-callback-secret}
       # Provider egress (dev Zabbix profile / intranet deployments)
       EGRESS_ALLOW_HOSTS: ${EGRESS_ALLOW_HOSTS:-}
       EGRESS_ALLOW_PRIVATE_IPS: ${EGRESS_ALLOW_PRIVATE_IPS:-}

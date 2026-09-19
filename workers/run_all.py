@@ -26,6 +26,8 @@ from workers.inventory import _process_pending as inventory
 from workers.metrics import _process_pending as metrics
 from workers.alerting_transport import _process_pending as alerting_inbox
 from workers.outbox_dispatcher import _publish_durable as outbox
+from workers.notification_dispatch import (
+    _process_pending as notification_dispatch)
 from workers.problem_state import _process_pending as problem_state
 from workers.validation import _process_pending as validation
 
@@ -41,6 +43,7 @@ _PROCESSORS = (
     ("health", health),
     ("outbox", outbox),
     ("alerting_inbox", alerting_inbox),
+    ("notification_dispatch", notification_dispatch),
 )
 
 

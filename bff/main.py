@@ -442,6 +442,35 @@ async def proxy_to_api(request: Request, path: str) -> Response:
     resolves the durable session, attaches signed context headers, and
     forwards. The API verifies the signature and timestamp freshness.
     """
+    # G9 provider callback boundary — external providers carry no
+    # session. Forward raw; the API authenticates via HMAC and the
+    # endpoint can never mutate alert/ack/responsibility state.
+    if path == "alerting/notifications/callback":
+        url = f"{settings.api_internal_url}/api/v1/{path}"
+        body = await request.body()
+        fwd = {k: v for k, v in request.headers.items()
+               if k.lower() in ("x-provider-signature",
+                                "content-type")}
+        hk: dict = {"timeout": 30.0}
+        cert = os.environ.get("BFF_CLIENT_CERT_FILE")
+        key = os.environ.get("BFF_CLIENT_KEY_FILE")
+        ca = os.environ.get("API_CA_FILE")
+        if cert and key:
+            hk["cert"] = (cert, key)
+        if ca:
+            hk["verify"] = ca
+        async with httpx.AsyncClient(**hk) as client:
+            try:
+                resp = await client.post(url, content=body,
+                                         headers=fwd)
+            except httpx.HTTPError:
+                return JSONResponse(
+                    {"state": "unavailable"},
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(content=resp.content,
+                        status_code=resp.status_code,
+                        media_type=resp.headers.get("content-type"))
+
     session = await _resolve_session(request)
     if session is None:
         return JSONResponse({"state": "unauthenticated"},
@@ -507,6 +536,19 @@ async def proxy_to_api(request: Request, path: str) -> Response:
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "service": "bff"}
+
+
+@app.post("/dev/whatsapp/{phone_ref}/messages", tags=["dev"])
+async def dev_whatsapp_sink(phone_ref: str) -> dict:
+    """Dev stand-in for the WhatsApp Cloud API — plain HTTP target
+    for the G9 adapter (the api itself is mTLS). Returns a
+    provider-shaped wamid; 2xx = provider accepted, NOT delivered."""
+    if os.environ.get("APP_ENVIRONMENT", "") != "development":
+        return JSONResponse({"state": "forbidden"}, status_code=403)
+    import secrets as _s
+    return {"messaging_product": "whatsapp",
+            "contacts": [{"input": phone_ref, "wa_id": phone_ref}],
+            "messages": [{"id": f"wamid.dev-{_s.token_hex(8)}"}]}
 
 
 @app.get("/health/ready")

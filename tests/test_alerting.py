@@ -33,7 +33,13 @@ def fx():
         # Isolate: wipe ALL tenant alerting state — evaluation runs
         # over every enabled policy of the tenant, so live/demo
         # policies would otherwise count.
-        for t in ("human_operations.alert_action_assignment",
+        for t in ("notification.notification_dispatch_outbox",
+                  "notification.notification_provider_evidence",
+                  "notification.notification_attempt",
+                  "notification.notification_callback_inbox",
+                  "notification.notification_projection",
+                  "notification.notification_intent",
+                  "human_operations.alert_action_assignment",
                   "human_operations.alert_acknowledgement",
                   "human_operations.visibility_receipt",
                   "human_operations.visibility_requirement",
