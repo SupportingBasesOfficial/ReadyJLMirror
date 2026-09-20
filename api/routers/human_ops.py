@@ -312,6 +312,154 @@ async def end_responsibility(request: Request, assignment_id: str,
 
 
 # ---------------------------------------------------------------------------
+# Native visibility — platform_native_authenticated_view@1 only.
+# Requirement needs an ACTIVE alert; receipt must come from the
+# exact required viewer and may be late (post-resolution is late
+# evidence — it never mutates alert/action state).
+# ---------------------------------------------------------------------------
+
+
+class VisibilityRequirementCreate(BaseModel):
+    required_viewer_principal_id: str
+    viewer_side: str = "internal"
+    presentation_ref: str = "alert_detail_view"
+    logical_action_id: str | None = None
+
+
+@router.post("/alerts/{alert_id}/visibility-requirements",
+             status_code=status.HTTP_201_CREATED)
+async def create_visibility_requirement(
+        alert_id: str, request: Request,
+        body: VisibilityRequirementCreate,
+        tenant_id: str | None = None) -> dict:
+    tenant = _authoritative_tenant(request, tenant_id)
+    ctx = request.state.jlmirror_context or {}
+    actor = ctx.get("principal_id", "dev-operator")
+    if body.viewer_side not in ("internal", "customer"):
+        raise HTTPException(status_code=422,
+                            detail="viewer_side internal|customer")
+    logical_id = (body.logical_action_id
+                  or f"vreq_{secrets.token_urlsafe(12)}")
+    req_id = f"vreq_{secrets.token_urlsafe(12)}"
+    content = {"alert_id": alert_id,
+               "required_viewer_principal_id":
+                   body.required_viewer_principal_id,
+               "viewer_side": body.viewer_side,
+               "presentation_ref": body.presentation_ref}
+    async with db_tenant_connection(tenant) as conn:
+        lifecycle = await _alert_or_404(conn, tenant, alert_id)
+        if lifecycle != "active":
+            raise HTTPException(
+                status_code=409,
+                detail="visibility requirement requires an "
+                       "ACTIVE alert")
+        snapshot = await _authority_snapshot(conn, tenant, actor)
+        cur = await conn.execute(
+            """
+            SELECT visibility_requirement_id
+              FROM human_operations.visibility_requirement
+             WHERE tenant_id=%s AND logical_action_id=%s
+            """, (tenant, logical_id))
+        prior = await cur.fetchone()
+        if prior:
+            return {"visibility_requirement_id": prior[0],
+                    "replayed": True}
+        await conn.execute(
+            """
+            INSERT INTO human_operations.visibility_requirement
+                (tenant_id, visibility_requirement_id, alert_id,
+                 required_viewer_principal_id, viewer_side,
+                 capability_class, presentation_ref,
+                 logical_action_id, content_hash,
+                 created_by_principal_id, authority_snapshot)
+            VALUES (%s,%s,%s,%s,%s,
+                    'platform_native_authenticated_view@1',
+                    %s,%s,%s,%s,%s::jsonb)
+            """,
+            (tenant, req_id, alert_id,
+             body.required_viewer_principal_id, body.viewer_side,
+             body.presentation_ref, logical_id, _hash(content),
+             actor, json.dumps(snapshot)))
+        await record_audit_event(
+            conn, tenant,
+            action="ops.visibility_requirement.created",
+            actor_kind="principal", actor_id=actor,
+            subject_type="alert", subject_id=alert_id,
+            detail={"viewer": body.required_viewer_principal_id,
+                    "side": body.viewer_side})
+        await conn.commit()
+    return {"visibility_requirement_id": req_id,
+            "logical_action_id": logical_id}
+
+
+@router.post("/visibility-requirements/{requirement_id}/receipts",
+             status_code=status.HTTP_201_CREATED)
+async def record_visibility_receipt(
+        requirement_id: str, request: Request,
+        tenant_id: str | None = None) -> dict:
+    """The exact required viewer records their native view. May be
+    late (alert already resolved) — it is evidence, never a
+    mutation of alert/action state."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    ctx = request.state.jlmirror_context or {}
+    actor = ctx.get("principal_id", "dev-operator")
+    session_evidence = {
+        "session_generation":
+            ctx.get("session_generation"),
+        "authenticated_at": ctx.get("ts")}
+    receipt_id = f"vrcpt_{secrets.token_urlsafe(12)}"
+    logical_id = f"vrcpt:{requirement_id}:{actor}"
+    content = {"visibility_requirement_id": requirement_id,
+               "viewer_principal_id": actor}
+    async with db_tenant_connection(tenant) as conn:
+        cur = await conn.execute(
+            """
+            SELECT required_viewer_principal_id, alert_id
+              FROM human_operations.visibility_requirement
+             WHERE tenant_id=%s AND visibility_requirement_id=%s
+            """, (tenant, requirement_id))
+        row = await cur.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404,
+                                detail="requirement not found")
+        if row[0] != actor:
+            raise HTTPException(
+                status_code=403,
+                detail="receipt requires the exact required viewer")
+        snapshot = await _authority_snapshot(conn, tenant, actor)
+        cur = await conn.execute(
+            """
+            SELECT visibility_receipt_id
+              FROM human_operations.visibility_receipt
+             WHERE tenant_id=%s AND logical_action_id=%s
+            """, (tenant, logical_id))
+        prior = await cur.fetchone()
+        if prior:
+            return {"visibility_receipt_id": prior[0],
+                    "replayed": True}
+        await conn.execute(
+            """
+            INSERT INTO human_operations.visibility_receipt
+                (tenant_id, visibility_receipt_id,
+                 visibility_requirement_id, viewer_principal_id,
+                 logical_action_id, content_hash,
+                 authority_snapshot, session_evidence)
+            VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb)
+            """,
+            (tenant, receipt_id, requirement_id, actor,
+             logical_id, _hash(content), json.dumps(snapshot),
+             json.dumps(session_evidence)))
+        await record_audit_event(
+            conn, tenant, action="ops.visibility_receipt.recorded",
+            actor_kind="principal", actor_id=actor,
+            subject_type="visibility_requirement",
+            subject_id=requirement_id)
+        await conn.commit()
+    return {"visibility_receipt_id": receipt_id,
+            "logical_action_id": logical_id}
+
+
+# ---------------------------------------------------------------------------
 # Reads — timeline + current projection
 # ---------------------------------------------------------------------------
 
