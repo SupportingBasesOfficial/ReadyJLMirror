@@ -139,7 +139,7 @@ def test_monitoring_health_derive_healthy():
     response = client.post(
         "/api/v1/monitoring/health/derive",
         json={
-            "tenant_id": "tenant:dev",
+            "tenant_id": "tenant:test",
             "monitoring_source_id": "mon-src-1",
             "source_instance_generation": "gen-1",
             "monitoring_resource_id": "res-1",
@@ -163,7 +163,7 @@ def test_monitoring_source_plan():
     response = client.post(
         "/api/v1/monitoring/sources/plan",
         json={
-            "tenant_id": "tenant:dev",
+            "tenant_id": "tenant:test",
             "display_name": "Test Zabbix Source",
             "provider_instance_ref": "provider:zabbix-dev-1",
             "base_url": "https://zabbix.example.com",
@@ -184,7 +184,7 @@ def test_outbox_append_and_pending():
     response = client.post(
         "/api/v1/async/outbox/append",
         json={
-            "tenant_id": "tenant:dev",
+            "tenant_id": "tenant:test",
             "principal_id": "dev-test-user",
             "credential_generation": "credential-gen-dev-1",
             "message_class": "domain_event",

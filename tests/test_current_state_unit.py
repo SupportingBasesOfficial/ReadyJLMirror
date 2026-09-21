@@ -139,7 +139,7 @@ class _FakeRepo:
 def _claim() -> MetricCurrentStateClaim:
     return MetricCurrentStateClaim(
         claim_token="",
-        tenant_id="tenant:dev",
+        tenant_id="tenant:test",
         monitoring_sync_operation_id="op-1",
         monitoring_source_id="src-1",
         source_instance_generation="gen-1",

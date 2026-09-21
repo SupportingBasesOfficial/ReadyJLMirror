@@ -48,7 +48,7 @@ def test_internal_context_signature_roundtrip():
     from shared.config import settings
 
     principal_id = "principal.abc"
-    tenant_id = "tenant:dev"
+    tenant_id = "tenant:test"
     session_digest = "deadbeef" * 8
     ts = int(time.time())
 

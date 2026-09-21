@@ -23,12 +23,12 @@ def _mk_alert(f):
     conn = f["conn"]
     _make_policy(conn, f["policy"])
     alerting_eval.evaluate_problem_policies(
-        conn, tenant_id="tenant:dev",
+        conn, tenant_id="tenant:test",
         monitoring_source_id=f["source"])
     conn.commit()
     cur = conn.execute(
         "SELECT alert_id FROM alerting.alert "
-        "WHERE tenant_id='tenant:dev' AND policy_id=%s",
+        "WHERE tenant_id='tenant:test' AND policy_id=%s",
         (f["policy"],))
     return cur.fetchone()[0]
 
@@ -46,7 +46,7 @@ def intent(fx):  # noqa: F811
              destination_ref, channel_class, reason, payload_ref,
              content_hash, authority_snapshot, logical_action_id,
              created_by_principal_id)
-        VALUES ('tenant:dev',%s,%s,'5511999990000',
+        VALUES ('tenant:test',%s,%s,'5511999990000',
                 'whatsapp_business@1','alert_requires_attention',
                 'alert_notification',%s,'{}'::jsonb,%s,'test')
         """,
@@ -56,13 +56,13 @@ def intent(fx):  # noqa: F811
         INSERT INTO notification.notification_dispatch_outbox
             (tenant_id, dispatch_id, notification_intent_id,
              logical_dispatch_id, attempt_number)
-        VALUES ('tenant:dev',%s,%s,%s,1)
+        VALUES ('tenant:test',%s,%s,%s,1)
         """,
         (f"dsp_{secrets.token_hex(6)}", iid, f"dispatch:{iid}:1"))
     conn.commit()
     yield {"conn": conn, "intent": iid, "alert": alert_id}
     conn.execute(
-        "SELECT set_config('jlmirror.tenant_id','tenant:dev',false)")
+        "SELECT set_config('jlmirror.tenant_id','tenant:test',false)")
     for t in ("notification.notification_projection",
               "notification.notification_provider_evidence",
               "notification.notification_callback_inbox",
@@ -131,7 +131,7 @@ def test_failed_attempt_schedules_bounded_retry(intent):
     conn = _conn()
     try:
         conn.execute(
-            "SELECT set_config('jlmirror.tenant_id','tenant:dev',false)")
+            "SELECT set_config('jlmirror.tenant_id','tenant:test',false)")
         # run_all claims with its own conn; use the same DB
         _dispatch_once(conn, "failed", intent["intent"])
         conn.commit()
@@ -157,7 +157,7 @@ def test_retry_exhaustion_sets_fallback(intent):
     conn = _conn()
     try:
         conn.execute(
-            "SELECT set_config('jlmirror.tenant_id','tenant:dev',false)")
+            "SELECT set_config('jlmirror.tenant_id','tenant:test',false)")
         from shared import notification
         for _ in range(notification.MAX_ATTEMPTS):
             _dispatch_once(conn, "failed", intent["intent"])
@@ -182,24 +182,24 @@ def test_evidence_dedup_and_monotonic(intent):
     conn = _conn()
     try:
         conn.execute(
-            "SELECT set_config('jlmirror.tenant_id','tenant:dev',false)")
+            "SELECT set_config('jlmirror.tenant_id','tenant:test',false)")
         from shared import notification
         _dispatch_once(conn, "provider_accepted", intent["intent"])
         notification.record_evidence(
-            conn, tenant_id="tenant:dev", intent_id=intent["intent"],
+            conn, tenant_id="tenant:test", intent_id=intent["intent"],
             normalized_state="delivered",
             provider_callback_id="cb-dup",
             provider_message_ref="wamid.test")
         conn.commit()
         # weaker evidence must not downgrade the projection
         notification.record_evidence(
-            conn, tenant_id="tenant:dev", intent_id=intent["intent"],
+            conn, tenant_id="tenant:test", intent_id=intent["intent"],
             normalized_state="provider_accepted",
             provider_callback_id="cb-weaker",
             provider_message_ref="wamid.test")
         # replayed callback_id dedups durably
         dup = notification.record_evidence(
-            conn, tenant_id="tenant:dev", intent_id=intent["intent"],
+            conn, tenant_id="tenant:test", intent_id=intent["intent"],
             normalized_state="failed",
             provider_callback_id="cb-dup",
             provider_message_ref="wamid.test")
@@ -219,16 +219,16 @@ def test_out_of_order_evidence_reconciles(intent):
     conn = _conn()
     try:
         conn.execute(
-            "SELECT set_config('jlmirror.tenant_id','tenant:dev',false)")
+            "SELECT set_config('jlmirror.tenant_id','tenant:test',false)")
         from shared import notification
         _dispatch_once(conn, "provider_accepted", intent["intent"])
         notification.record_evidence(
-            conn, tenant_id="tenant:dev", intent_id=intent["intent"],
+            conn, tenant_id="tenant:test", intent_id=intent["intent"],
             normalized_state="delivered",
             provider_callback_id="cb-a",
             provider_message_ref="wamid.test")
         notification.record_evidence(
-            conn, tenant_id="tenant:dev", intent_id=intent["intent"],
+            conn, tenant_id="tenant:test", intent_id=intent["intent"],
             normalized_state="provider_accepted",
             provider_callback_id="cb-b",
             provider_message_ref="wamid.test")
@@ -248,7 +248,7 @@ def test_provider_ref_binding_routes_callback(intent):
     conn = _conn()
     try:
         conn.execute(
-            "SELECT set_config('jlmirror.tenant_id','tenant:dev',false)")
+            "SELECT set_config('jlmirror.tenant_id','tenant:test',false)")
         _dispatch_once(conn, "provider_accepted", intent["intent"])
         conn.commit()
         # the routing index is tenant-independent — query it under a
@@ -263,7 +263,7 @@ def test_provider_ref_binding_routes_callback(intent):
              WHERE provider_message_ref='wamid.test'
             """)
         row = cur.fetchone()
-        assert row == ("tenant:dev", intent["intent"])
+        assert row == ("tenant:test", intent["intent"])
         conn.commit()
     finally:
         conn.rollback()
@@ -291,7 +291,7 @@ def test_unknown_never_becomes_failed(intent):
     conn = _conn()
     try:
         conn.execute(
-            "SELECT set_config('jlmirror.tenant_id','tenant:dev',false)")
+            "SELECT set_config('jlmirror.tenant_id','tenant:test',false)")
         _dispatch_once(conn, "unknown", intent["intent"])
         conn.commit()
         state = _projection(conn, intent["intent"])[0]
@@ -308,7 +308,7 @@ def test_intent_channel_check(intent):
     conn = _conn()
     try:
         conn.execute(
-            "SELECT set_config('jlmirror.tenant_id','tenant:dev',false)")
+            "SELECT set_config('jlmirror.tenant_id','tenant:test',false)")
         import psycopg
         with pytest.raises(psycopg.errors.CheckViolation):
             conn.execute(
@@ -318,7 +318,7 @@ def test_intent_channel_check(intent):
                      destination_ref, channel_class, reason,
                      payload_ref, content_hash, authority_snapshot,
                      logical_action_id, created_by_principal_id)
-                VALUES ('tenant:dev',%s,%s,'x','email@1',
+                VALUES ('tenant:test',%s,%s,'x','email@1',
                         'alert_requires_attention','p','h',
                         '{}'::jsonb,%s,'test')
                 """,
@@ -334,7 +334,7 @@ def test_attempt_dispatch_identity_dedup(intent):
     conn = _conn()
     try:
         conn.execute(
-            "SELECT set_config('jlmirror.tenant_id','tenant:dev',false)")
+            "SELECT set_config('jlmirror.tenant_id','tenant:test',false)")
         import psycopg
         with pytest.raises(psycopg.errors.UniqueViolation):
             conn.execute(
@@ -344,9 +344,9 @@ def test_attempt_dispatch_identity_dedup(intent):
                      notification_intent_id, attempt_number,
                      dispatch_evidence, adapter_version, outcome,
                      dispatch_identity)
-                VALUES ('tenant:dev','att_a',%s,1,'{}'::jsonb,
+                VALUES ('tenant:test','att_a',%s,1,'{}'::jsonb,
                         'whatsapp_business@1','sent',%s),
-                       ('tenant:dev','att_b',%s,2,'{}'::jsonb,
+                       ('tenant:test','att_b',%s,2,'{}'::jsonb,
                         'whatsapp_business@1','sent',%s)
                 """,
                 (intent["intent"], f"dup_{intent['intent']}",

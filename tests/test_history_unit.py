@@ -150,7 +150,7 @@ def test_target_history_value_type_bounded():
 def _claim(targets, window=(1000, 2000)) -> MetricHistoryClaim:
     return MetricHistoryClaim(
         claim_token="ct",
-        tenant_id="tenant:dev",
+        tenant_id="tenant:test",
         monitoring_sync_operation_id="op-h1",
         monitoring_source_id="src-1",
         source_instance_generation="gen-1",

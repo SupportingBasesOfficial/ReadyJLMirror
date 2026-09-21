@@ -47,7 +47,7 @@ class _FakeConn:
 
 def _row(record_id=1, attempts=0):
     return (
-        record_id, "tenant:dev", f"msg-{record_id}",
+        record_id, "tenant:test", f"msg-{record_id}",
         "monitoring.problem.state-change", "1",
         "monitoring_problem", "prob-1", b"{}", attempts,
     )

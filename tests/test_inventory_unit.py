@@ -138,7 +138,7 @@ class _FakeRepo:
 def _claim() -> HostInventoryClaim:
     return HostInventoryClaim(
         claim_token="",
-        tenant_id="tenant:dev",
+        tenant_id="tenant:test",
         monitoring_sync_operation_id="op-1",
         monitoring_source_id="src-1",
         provider_scope_tenant_binding_id="bind-1",

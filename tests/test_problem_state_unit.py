@@ -148,7 +148,7 @@ def test_read_trigger_associations_first_host():
 def _claim(associations) -> ProblemStateClaim:
     return ProblemStateClaim(
         claim_token="ct",
-        tenant_id="tenant:dev",
+        tenant_id="tenant:test",
         monitoring_sync_operation_id="op-p1",
         monitoring_source_id="src-1",
         source_instance_generation="gen-1",

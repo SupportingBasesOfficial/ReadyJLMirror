@@ -33,11 +33,11 @@ def conn():
     except Exception:
         pytest.skip("PostgreSQL app role is not reachable")
     # Self-seeding: a fresh database (CI) has no monitoring rows —
-    # the battery needs at least one tenant:dev source to compare
+    # the battery needs at least one tenant:test source to compare
     # isolation against. Insert via the same app role path the real
     # create flow uses.
     c.execute(
-        "SELECT set_config('jlmirror.tenant_id', 'tenant:dev', false)")
+        "SELECT set_config('jlmirror.tenant_id', 'tenant:test', false)")
     with c.transaction():
         c.execute("SET CONSTRAINTS ALL DEFERRED")
         c.execute(
@@ -46,7 +46,7 @@ def conn():
             (tenant_id, monitoring_source_id, source_instance_generation,
              provider_profile, provider_instance_ref, provider_base_url,
              created_at)
-        SELECT 'tenant:dev', 'mon-src_rls-battery', 'mon-gen_rls',
+        SELECT 'tenant:test', 'mon-src_rls-battery', 'mon-gen_rls',
                'zabbix', 'zbx-rls', 'https://zabbix.example.com', now()
          WHERE NOT EXISTS (
             SELECT 1 FROM monitoring.monitoring_source_generation
@@ -59,7 +59,7 @@ def conn():
                  monitoring_source_id, source_instance_generation,
                  responsibility_kind, state, configuration_revision,
                  scope_revision)
-            SELECT 'tenant:dev', 'op-rls', 'mon-src_rls-battery',
+            SELECT 'tenant:test', 'op-rls', 'mon-src_rls-battery',
                    'mon-gen_rls', 'validation_and_initial_sync',
                    'pending', 1, 1
              WHERE NOT EXISTS (
@@ -75,7 +75,7 @@ def conn():
              scope_revision, display_name, credential_binding_ref,
              configured_provider_scope, operational_evidence_state,
              last_sync_operation_id)
-        SELECT 'tenant:dev', 'mon-src_rls-battery', 'binding-rls',
+        SELECT 'tenant:test', 'mon-src_rls-battery', 'binding-rls',
                'zabbix', 'mon-gen_rls', 1, 1, 'rls-battery',
                'cred-binding-1', '{"host_group_refs": ["5"]}',
                'unavailable', 'op-rls'
@@ -104,11 +104,11 @@ def test_no_guc_sees_nothing(conn):
 
 
 def test_tenant_guc_scopes_rows(conn):
-    assert _count(conn, "tenant:dev") > 0
+    assert _count(conn, "tenant:test") > 0
 
 
 def test_other_tenant_guc_is_isolated(conn):
-    n_dev = _count(conn, "tenant:dev")
+    n_dev = _count(conn, "tenant:test")
     n_other = _count(conn, "tenant:other")
     assert n_dev > 0
     assert n_other < n_dev  # different tenant, different view
@@ -129,7 +129,7 @@ def test_tenant_guc_is_transaction_scoped_not_sticky(conn):
     """set_config(false) is session-local — a pooled connection
     returned and re-borrowed must not leak tenant context."""
     conn.execute(
-        "SELECT set_config('jlmirror.tenant_id', 'tenant:dev', false)")
+        "SELECT set_config('jlmirror.tenant_id', 'tenant:test', false)")
     # RESET simulates pool-return hygiene — after reset, zero rows.
     conn.execute("RESET jlmirror.tenant_id")
     assert _count(conn, None) == 0
@@ -138,7 +138,7 @@ def test_tenant_guc_is_transaction_scoped_not_sticky(conn):
 def test_app_cannot_bypass_rls_via_table_owner(conn):
     """App role is not owner and cannot disable RLS."""
     conn.execute(
-        "SELECT set_config('jlmirror.tenant_id', 'tenant:dev', false)")
+        "SELECT set_config('jlmirror.tenant_id', 'tenant:test', false)")
     with pytest.raises(psycopg.Error):
         conn.execute(
             "ALTER TABLE monitoring.monitoring_source "
@@ -149,7 +149,7 @@ def test_update_blocked_on_monitoring(conn):
     """Least privilege: app cannot UPDATE monitoring.* even with
     a tenant context set."""
     conn.execute(
-        "SELECT set_config('jlmirror.tenant_id', 'tenant:dev', false)")
+        "SELECT set_config('jlmirror.tenant_id', 'tenant:test', false)")
     with pytest.raises(psycopg.Error):
         conn.execute(
             "UPDATE monitoring.monitoring_source "
@@ -160,7 +160,7 @@ def test_alert_transition_history_immutable(conn):
     """Append-only evidence: UPDATE and DELETE on transition history
     must be rejected regardless of rows present."""
     conn.execute(
-        "SELECT set_config('jlmirror.tenant_id', 'tenant:dev', false)")
+        "SELECT set_config('jlmirror.tenant_id', 'tenant:test', false)")
     with pytest.raises(psycopg.Error):
         conn.execute(
             "UPDATE alerting.alert_transition SET to_state='resolved'")
@@ -172,7 +172,7 @@ def test_audit_events_immutable(conn):
     """SEC-AUD: audit evidence is append-only — never updateable or
     deletable by application roles."""
     conn.execute(
-        "SELECT set_config('jlmirror.tenant_id', 'tenant:dev', false)")
+        "SELECT set_config('jlmirror.tenant_id', 'tenant:test', false)")
     with pytest.raises(psycopg.Error):
         conn.execute(
             "UPDATE audit.audit_event SET action='tampered'")
@@ -192,7 +192,7 @@ def test_worker_cannot_mutate_alert_history():
         pytest.skip("PostgreSQL worker role is not reachable")
     try:
         c.execute(
-            "SELECT set_config('jlmirror.tenant_id', 'tenant:dev', false)")
+            "SELECT set_config('jlmirror.tenant_id', 'tenant:test', false)")
         with pytest.raises(psycopg.Error):
             c.execute(
                 "UPDATE alerting.alert_transition SET to_state='resolved'")

@@ -43,13 +43,13 @@ async def test_membership_role_templates(db):
             ON CONFLICT DO NOTHING;
             INSERT INTO g1.tenant_memberships
                 (membership_id, tenant_id, principal_id, role)
-            VALUES ('mem-test-roles', 'tenant:dev',
+            VALUES ('mem-test-roles', 'tenant:test',
                     'p-test-roles', 'operator')
             ON CONFLICT (tenant_id, principal_id)
             DO UPDATE SET role = 'operator', state = 'active';
             INSERT INTO g1.tenant_roles
                 (tenant_id, role_name, permissions)
-            VALUES ('tenant:dev', 'noc-test',
+            VALUES ('tenant:test', 'noc-test',
                     ARRAY['monitoring:read', 'observability:read'])
             ON CONFLICT (tenant_id, role_name)
             DO UPDATE SET permissions = EXCLUDED.permissions,
@@ -58,7 +58,7 @@ async def test_membership_role_templates(db):
         await conn.commit()
 
         perms = await access.effective_permissions(
-            conn, "p-test-roles", "tenant:dev")
+            conn, "p-test-roles", "tenant:test")
         assert "monitoring:operate" in perms
         assert "tenant:admin" not in perms
 
@@ -68,7 +68,7 @@ async def test_membership_role_templates(db):
             " WHERE membership_id = 'mem-test-roles'")
         await conn.commit()
         perms = await access.effective_permissions(
-            conn, "p-test-roles", "tenant:dev")
+            conn, "p-test-roles", "tenant:test")
         assert perms == frozenset(
             {"monitoring:read", "observability:read"})
 
@@ -106,13 +106,13 @@ async def test_delegated_grant_scoped_authority(db):
         assert "monitoring:operate" in perms_a
 
         perms_dev = await access.effective_permissions(
-            conn, "dev-msp-admin", "tenant:dev")
+            conn, "dev-msp-admin", "tenant:test")
         assert perms_dev == frozenset()
 
         assert await access.tenant_authorized(
             conn, "dev-msp-admin", "tenant:a")
         assert not await access.tenant_authorized(
-            conn, "dev-msp-admin", "tenant:dev")
+            conn, "dev-msp-admin", "tenant:test")
 
         await conn.execute(
             "DELETE FROM g1.delegated_grants "
@@ -126,7 +126,7 @@ async def test_platform_admin_cross_tenant(db):
     async with db() as conn:
         assert await access.principal_is_platform_admin(
             conn, "dev-platform-admin")
-        for tenant in ("tenant:dev", "tenant:a", "tenant:msp-alpha"):
+        for tenant in ("tenant:test", "tenant:a", "tenant:msp-alpha"):
             perms = await access.effective_permissions(
                 conn, "dev-platform-admin", tenant)
             assert perms == access.TENANT_ALL
@@ -142,7 +142,7 @@ async def test_platform_admin_cross_tenant(db):
 async def test_grant_revocation_removes_authority(db):
     from shared import access
     async with db() as conn:
-        # dev-msp-admin has NO membership on tenant:dev — a temporary
+        # dev-msp-admin has NO membership on tenant:test — a temporary
         # grant is the only authority; revoking must remove it.
         await conn.execute(
             """
@@ -150,7 +150,7 @@ async def test_grant_revocation_removes_authority(db):
                 (grant_id, source_organization_id, target_tenant_id,
                  principal_id, permissions)
             VALUES ('grant-test-revoke', 'org:msp-alpha',
-                    'tenant:dev', 'dev-msp-admin',
+                    'tenant:test', 'dev-msp-admin',
                     ARRAY['monitoring:read'])
             ON CONFLICT (grant_id) DO UPDATE
                 SET state = 'active', revoked_at = NULL
@@ -158,9 +158,9 @@ async def test_grant_revocation_removes_authority(db):
         await conn.commit()
 
         assert await access.tenant_authorized(
-            conn, "dev-msp-admin", "tenant:dev")
+            conn, "dev-msp-admin", "tenant:test")
         perms = await access.effective_permissions(
-            conn, "dev-msp-admin", "tenant:dev")
+            conn, "dev-msp-admin", "tenant:test")
         assert "monitoring:read" in perms
 
         await conn.execute(
@@ -169,9 +169,9 @@ async def test_grant_revocation_removes_authority(db):
         await conn.commit()
 
         assert not await access.tenant_authorized(
-            conn, "dev-msp-admin", "tenant:dev")
+            conn, "dev-msp-admin", "tenant:test")
         perms = await access.effective_permissions(
-            conn, "dev-msp-admin", "tenant:dev")
+            conn, "dev-msp-admin", "tenant:test")
         assert perms == frozenset()
         await conn.execute(
             "DELETE FROM g1.delegated_grants "
@@ -204,7 +204,7 @@ async def test_accessible_tenants_union(db):
         all_tenants = {t["tenant_id"] for t in
                        await access.accessible_tenants(
                            conn, "dev-platform-admin")}
-        assert {"tenant:dev", "tenant:a",
+        assert {"tenant:test", "tenant:a",
                 "tenant:msp-alpha"} <= all_tenants
 
         await conn.execute(

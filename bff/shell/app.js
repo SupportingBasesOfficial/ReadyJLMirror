@@ -32,6 +32,25 @@ function fail(msg) {
   err.classList.remove("hidden");
 }
 
+let sessionState = null;
+let currentView = "alerts";
+let alertFilter = "active";
+let lastAlerts = [];
+
+function renderCenter(html) {
+  render(`<div class="centerwrap"><div class="card">${html}</div></div>`);
+}
+
+function showView(v) {
+  if (!sessionState) return;
+  currentView = v;
+  document.querySelectorAll(".navbtn").forEach(b =>
+    b.classList.toggle("active", b.dataset.view === v));
+  if (v === "monitoring") loadMonitoring(sessionState);
+  else if (v === "admin") loadAdmin(sessionState);
+  else loadAlerts(sessionState);
+}
+
 async function refresh() {
   err.classList.add("hidden");
   let r;
@@ -42,15 +61,18 @@ async function refresh() {
     return;
   }
   const s = await r.json();
+  document.getElementById("topbar").classList.add("hidden");
+  document.getElementById("sidenav").classList.add("hidden");
+  sessionState = null;
 
   switch (s.state) {
     case "unauthenticated": {
-      render('<a class="btn" href="/auth/login">Sign in</a>');
+      renderCenter('<a class="btn" href="/auth/login">Sign in</a>');
       meta.innerHTML = "";
       break;
     }
     case "forbidden": {
-      render('<p style="color:#f08080">Access denied.</p>' +
+      renderCenter('<p style="color:#f08080">Access denied.</p>' +
              '<form method="post" action="/auth/logout" style="margin-top:1rem">' +
              '<button class="secondary" type="submit">Sign out</button></form>');
       meta.innerHTML = "";
@@ -60,37 +82,30 @@ async function refresh() {
       const items = s.memberships.map(m =>
         `<div class="tenant"><span>${esc(m.display_name)}</span>` +
         `<button data-t="${esc(m.tenant_id)}" class="pick">Select</button></div>`).join("");
-      render(`<p style="margin-bottom:.75rem">Select a tenant:</p>${items}`);
+      renderCenter(`<p style="margin-bottom:.75rem">Select a tenant:</p>${items}`);
       document.querySelectorAll(".pick").forEach(b =>
         b.addEventListener("click", () => selectTenant(b.dataset.t)));
       meta.innerHTML = `<code>${esc(s.principal_id)}</code>`;
       break;
     }
     case "ready": {
-      document.querySelector(".card").classList.add("wide");
-      render(
-        `<p>Signed in to <strong>${esc(s.tenant.display_name)}</strong></p>` +
-        `<div class="meta" style="margin:1rem 0 1.25rem">` +
-        `principal <code>${esc(s.principal_id)}</code> · role <code>${esc(s.tenant.role)}</code></div>` +
-        `<div style="display:flex;gap:.5rem">` +
-        `<button class="secondary" id="changeTenant">Change tenant</button>` +
-        `<form method="post" action="/auth/logout"><button class="secondary">Sign out</button></form>` +
-        `</div>` +
-        `<div class="section"><h2>Monitoring</h2><div id="mon">` +
-        `<div class="spinner"></div></div></div>` +
-        `<div class="section"><h2>Administration</h2><div id="admin">` +
-        `<div class="spinner"></div></div></div>`);
-      document.getElementById("changeTenant").addEventListener("click", async () => {
+      sessionState = s;
+      document.getElementById("topbar").classList.remove("hidden");
+      document.getElementById("sidenav").classList.remove("hidden");
+      document.getElementById("topTenant").textContent =
+        s.tenant.display_name;
+      document.getElementById("topWho").textContent =
+        `${s.principal_id} · ${s.tenant.role}`;
+      document.getElementById("changeTenant").onclick = () => {
         render(`<p style="margin-bottom:.75rem">Select a tenant:</p>` +
           s.memberships.map(m =>
             `<div class="tenant"><span>${esc(m.display_name)}</span>` +
             `<button data-t="${esc(m.tenant_id)}" class="pick">Select</button></div>`).join(""));
         document.querySelectorAll(".pick").forEach(b =>
           b.addEventListener("click", () => selectTenant(b.dataset.t)));
-      });
+      };
       meta.innerHTML = `authenticated at <code>${esc(s.authenticated_at)}</code>`;
-      loadMonitoring(s);
-      loadAdmin(s);
+      showView(currentView);
       break;
     }
     default: {
@@ -130,20 +145,23 @@ async function poll(sourceId, kind, tenantId) {
 }
 
 async function loadMonitoring(s) {
-  const mon = document.getElementById("mon");
   const tid = s.tenant.tenant_id;
-  let sources, alerts;
+  render(
+    `<div class="viewhead"><h2>Monitoring sources</h2>` +
+    `<span class="spacer"></span>` +
+    `<button class="secondary small" id="addSource">+ add source</button>` +
+    `</div><div id="monBody"><div class="spinner"></div></div>`);
+  document.getElementById("addSource").addEventListener(
+    "click", () => renderOnboardForm(tid));
+  const mon = document.getElementById("monBody");
+  let sources;
   try {
-    [sources, alerts] = await Promise.all([
-      api(`/sources?tenant_id=${tid}`),
-      fetch(`/api/v1/alerting/alerts?tenant_id=${tid}`,
-            { credentials: "same-origin" }).then(r => r.ok ? r.json() : []),
-    ]);
+    sources = await api(`/sources?tenant_id=${tid}`);
   } catch {
     mon.innerHTML = '<p class="empty">Monitoring unavailable.</p>';
     return;
   }
-  const listHtml = (!Array.isArray(sources) || sources.length === 0)
+  mon.innerHTML = (!Array.isArray(sources) || sources.length === 0)
     ? '<p class="empty">No monitoring sources configured.</p>'
     : `<table><thead><tr><th>Source</th><th>Provider</th>` +
       `<th>Evidence</th></tr></thead><tbody>` +
@@ -153,12 +171,51 @@ async function loadMonitoring(s) {
         `<td><code>${esc(src.provider_instance_ref)}</code></td>` +
         `<td>${esc(src.operational_evidence_state)}</td></tr>`).join("") +
       `</tbody></table>`;
+  mon.querySelectorAll("[data-src]").forEach(row =>
+    row.addEventListener("click", () =>
+      loadSourceDetail(row.dataset.src, tid)));
+}
 
-  const alertsHtml = (!Array.isArray(alerts) || alerts.length === 0)
-    ? '<p class="empty">No alerts.</p>'
+// ---------------------------------------------------------------------------
+// Alerts view — the operational landing page. Active first.
+// ---------------------------------------------------------------------------
+
+async function loadAlerts(s) {
+  const tid = s.tenant.tenant_id;
+  render(
+    `<div class="viewhead"><h2>Alerts</h2><span class="spacer"></span>` +
+    `<button class="chip" data-f="active">active</button>` +
+    `<button class="chip" data-f="resolved">resolved</button>` +
+    `<button class="chip" data-f="all">all</button></div>` +
+    `<div id="alertBody"><div class="spinner"></div></div>`);
+  document.querySelectorAll("[data-f]").forEach(b =>
+    b.addEventListener("click", () => {
+      alertFilter = b.dataset.f;
+      renderAlertList(tid);
+    }));
+  let alerts;
+  try {
+    const r = await fetch(`/api/v1/alerting/alerts?tenant_id=${tid}`,
+                          { credentials: "same-origin" });
+    alerts = r.ok ? await r.json() : [];
+  } catch { alerts = []; }
+  lastAlerts = Array.isArray(alerts) ? alerts : [];
+  renderAlertList(tid);
+}
+
+function renderAlertList(tid) {
+  document.querySelectorAll("[data-f]").forEach(b =>
+    b.classList.toggle("active", b.dataset.f === alertFilter));
+  const rows = lastAlerts
+    .filter(a => alertFilter === "all" || a.lifecycle_state === alertFilter)
+    .sort((a, b) => (a.lifecycle_state === "active" ? 0 : 1) -
+                    (b.lifecycle_state === "active" ? 0 : 1) ||
+                    (b.opened_at || "").localeCompare(a.opened_at || ""));
+  document.getElementById("alertBody").innerHTML = rows.length === 0
+    ? `<p class="empty">No ${alertFilter} alerts.</p>`
     : `<table><thead><tr><th>State</th><th>Alert</th>` +
-      `<th>Policy</th><th>Source kind</th><th>Opened</th></tr></thead><tbody>` +
-      alerts.map(a =>
+      `<th>Policy</th><th>Source kind</th><th>Opened</th></tr></thead>` +
+      `<tbody>` + rows.map(a =>
         `<tr class="clickable" data-alert="${esc(a.alert_id)}">` +
         `<td class="a-${esc(a.lifecycle_state)}">${esc(a.lifecycle_state)}</td>` +
         `<td><code>${esc((a.alert_id || "").slice(0, 18))}</code></td>` +
@@ -166,20 +223,7 @@ async function loadMonitoring(s) {
         `<td>${esc(a.source_kind)}</td>` +
         `<td>${esc((a.opened_at || "").slice(0, 19))}</td></tr>`).join("") +
       `</tbody></table>`;
-
-  mon.innerHTML =
-    `<div class="actions"><button class="secondary" id="addSource">` +
-    `+ add source</button></div>` + listHtml +
-    `<div class="section"><h2>Alerts</h2>${alertsHtml}</div>` +
-    `<div id="monDetail"></div>`;
-
-  document.getElementById("addSource").addEventListener(
-    "click", () => renderOnboardForm(tid));
-
-  mon.querySelectorAll("[data-src]").forEach(row =>
-    row.addEventListener("click", () =>
-      loadSourceDetail(row.dataset.src, tid)));
-  mon.querySelectorAll("[data-alert]").forEach(row =>
+  document.querySelectorAll("[data-alert]").forEach(row =>
     row.addEventListener("click", () =>
       loadAlertDetail(row.dataset.alert, tid)));
 }
@@ -192,9 +236,11 @@ async function loadMonitoring(s) {
 // ---------------------------------------------------------------------------
 
 function renderOnboardForm(tid) {
-  const det = document.getElementById("monDetail");
+  const det = root;
   det.innerHTML =
-    `<div class="section"><h2>Add Zabbix source</h2>` +
+    `<div class="viewhead"><button class="backbtn" id="backMon">` +
+    `&#8592; monitoring</button><h2>Add Zabbix source</h2></div>` +
+    `<div class="panel">` +
     `<form id="onboardForm">` +
     `<label>Display name<input name="display_name" required` +
     ` placeholder="prod-zabbix"></label>` +
@@ -209,6 +255,8 @@ function renderOnboardForm(tid) {
     `<button type="submit">Create source</button>` +
     `<div class="error hidden" id="onboardErr"></div></form></div>`;
 
+  document.getElementById("backMon").addEventListener(
+    "click", () => showView("monitoring"));
   document.getElementById("onboardForm").addEventListener(
     "submit", async (ev) => {
       ev.preventDefault();
@@ -236,12 +284,12 @@ function renderOnboardForm(tid) {
         e.classList.remove("hidden");
         return;
       }
-      refresh();  // validation op enqueued automatically with the source
+      showView("monitoring");  // validation op enqueued with the source
     });
 }
 
 async function loadSourceDetail(sourceId, tid) {
-  const det = document.getElementById("monDetail");
+  const det = root;
   det.innerHTML = '<div class="spinner"></div>';
   const [health, problems, current, ops, alerts] = await Promise.all([
     api(`/sources/${sourceId}/health?tenant_id=${tid}`),
@@ -301,6 +349,9 @@ async function loadSourceDetail(sourceId, tid) {
     : `<tr><td colspan="6" class="empty">No operations</td></tr>`;
 
   det.innerHTML =
+    `<div class="viewhead"><button class="backbtn" id="backMon">` +
+    `&#8592; monitoring</button>` +
+    `<h2>Source ${esc(sourceId.slice(0, 24))}</h2></div>` +
     `<div class="actions">` +
     `<button class="secondary" data-p="inventory">inventory</button>` +
     `<button class="secondary" data-p="metrics/poll">metrics</button>` +
@@ -347,6 +398,8 @@ async function loadSourceDetail(sourceId, tid) {
       loadAlertDetail(row.dataset.alert, tid)));
   document.getElementById("monRefresh").addEventListener("click", () =>
     loadSourceDetail(sourceId, tid));
+  document.getElementById("backMon").addEventListener("click", () =>
+    showView("monitoring"));
 }
 
 // ---------------------------------------------------------------------------
@@ -371,7 +424,7 @@ function post(path, tid, body) {
 }
 
 async function loadAlertDetail(alertId, tid) {
-  const det = document.getElementById("monDetail");
+  const det = root;
   det.innerHTML = '<div class="spinner"></div>';
   const [detail, timeline, notifications, incidents] =
     await Promise.all([
@@ -433,14 +486,18 @@ async function loadAlertDetail(alertId, tid) {
     : `<tr><td colspan="3" class="empty">No incidents</td></tr>`;
 
   det.innerHTML =
-    `<div class="section"><h2>Alert ${esc(alertId.slice(0, 18))}</h2>` +
+    `<div class="viewhead"><button class="backbtn" id="backAlerts">` +
+    `&#8592; alerts</button><h2>Alert</h2>` +
+    `<code>${esc(alertId.slice(0, 18))}</code></div>` +
+    `<div class="panel"><div class="section" style="margin-top:0;border:0;padding:0">` +
+    `<p class="a-${esc(a.lifecycle_state)}">${esc(a.lifecycle_state)}</p>` +
     `<p class="a-${esc(a.lifecycle_state)}">${esc(a.lifecycle_state)}</p>` +
     `<div class="meta">policy <code>${esc(a.policy_id)}</code> ` +
     `v${esc(a.policy_version)} (pinned) · subject ` +
     `<code>${esc((a.source_subject_id || "").slice(0, 28))}</code> · ` +
     `occurrence r${esc(a.source_occurrence_revision)} · ` +
     `current r${esc(a.current_source_revision)}</div>` +
-    `<ul class="timeline">${transitions}</ul></div>` +
+    `<ul class="timeline">${transitions}</ul></div></div>` +
 
     `<div class="section"><h2>Human operations</h2>${curHtml}` +
     `<ul class="timeline">${events}</ul>` +
@@ -473,6 +530,8 @@ async function loadAlertDetail(alertId, tid) {
     `create incident</button></div>` +
     `<div id="incidentDetail"></div></div>`;
 
+  document.getElementById("backAlerts").addEventListener(
+    "click", () => showView("alerts"));
   const reload = () => loadAlertDetail(alertId, tid);
   document.getElementById("btnAlertRefresh")
     .addEventListener("click", reload);
@@ -681,7 +740,10 @@ function tapi(path, method, body) {
 }
 
 async function loadAdmin(s) {
-  const el = document.getElementById("admin");
+  const el = root;
+  el.innerHTML = `<div class="viewhead"><h2>Administration</h2></div>` +
+    `<div id="adminBody"><div class="spinner"></div></div>`;
+  const body = document.getElementById("adminBody");
   const [mRes, rRes, oRes, gRes] = await Promise.all([
     tapi("/tenant/members"), tapi("/tenant/roles"),
     tapi("/platform/organizations"),
@@ -694,7 +756,7 @@ async function loadAdmin(s) {
   const grants = gRes.ok ? await gRes.json() : [];
 
   if (members === null) {
-    el.innerHTML = '<p class="empty">tenant:read required ' +
+    body.innerHTML = '<p class="empty">tenant:read required ' +
       'for administration.</p>';
     return;
   }
@@ -751,8 +813,8 @@ async function loadAdmin(s) {
       `</table>`;
   }
 
-  el.innerHTML =
-    `<h4>Members</h4>` +
+  body.innerHTML =
+    `<div class="panel"><h4>Members</h4>` +
     `<table><thead><tr><th>Principal</th><th>Role</th><th>State</th>` +
     `<th></th></tr></thead><tbody>${memberRows}</tbody></table>` +
     `<form id="memberForm"><div style="display:flex;gap:.5rem">` +
@@ -769,15 +831,15 @@ async function loadAdmin(s) {
     `placeholder="role name"><div>${permBoxes}</div>` +
     `<button type="submit">create role</button></form>` +
 
-    `<h4>Platform</h4>${platformHtml}`;
+    `</div><div class="panel"><h4>Platform</h4>${platformHtml}</div>`;
 
-  el.querySelectorAll("[data-revoke]").forEach(b =>
+  body.querySelectorAll("[data-revoke]").forEach(b =>
     b.addEventListener("click", async () => {
       const r = await tapi(`/tenant/members/${b.dataset.revoke}/revoke`,
                            "POST");
       if (!r.ok) fail("Revoke denied."); else loadAdmin(s);
     }));
-  el.querySelectorAll("[data-retire]").forEach(b =>
+  body.querySelectorAll("[data-retire]").forEach(b =>
     b.addEventListener("click", async () => {
       const r = await tapi(`/tenant/roles/${b.dataset.retire}/retire`,
                            "POST");
@@ -806,6 +868,9 @@ async function loadAdmin(s) {
       else loadAdmin(s);
     });
 }
+
+document.querySelectorAll(".navbtn").forEach(b =>
+  b.addEventListener("click", () => showView(b.dataset.view)));
 
 // Surface auth errors from the callback redirect (e.g. /?error=forbidden)
 const params = new URLSearchParams(location.search);

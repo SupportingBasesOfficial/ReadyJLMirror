@@ -36,7 +36,7 @@ def _input(
     reasons=(),
 ) -> HealthInput:
     return HealthInput(
-        tenant_id="tenant:dev",
+        tenant_id="tenant:test",
         monitoring_source_id="src-1",
         source_instance_generation="gen-1",
         monitoring_resource_id="res-1",

@@ -61,25 +61,25 @@ def test_dev_login_sets_session_and_needs_tenant(client):
 
     s = client.get("/api/session").json()
     assert s["state"] == "needs_tenant"
-    assert any(m["tenant_id"] == "tenant:dev" for m in s["memberships"])
+    assert any(m["tenant_id"] == "tenant:test" for m in s["memberships"])
 
 
 def test_tenant_select_requires_csrf(client):
     client.get("/auth/dev-login?subject=test-subject-2")
-    r = client.post("/api/tenant/select", json={"tenant_id": "tenant:dev"})
+    r = client.post("/api/tenant/select", json={"tenant_id": "tenant:test"})
     assert r.status_code == 403
 
 
 def test_tenant_select_happy_path(client):
     client.get("/auth/dev-login?subject=test-subject-3")
     r = client.post("/api/tenant/select",
-                    json={"tenant_id": "tenant:dev"}, headers=_csrf(client))
+                    json={"tenant_id": "tenant:test"}, headers=_csrf(client))
     assert r.status_code == 200
     assert r.json()["state"] == "ready"
 
     s = client.get("/api/session").json()
     assert s["state"] == "ready"
-    assert s["tenant"]["tenant_id"] == "tenant:dev"
+    assert s["tenant"]["tenant_id"] == "tenant:test"
 
 
 def test_cross_tenant_denied_without_leakage(client):
@@ -95,7 +95,7 @@ def test_cross_tenant_denied_without_leakage(client):
 def test_logout_retires_session(client):
     client.get("/auth/dev-login?subject=test-subject-5")
     client.post("/api/tenant/select",
-                json={"tenant_id": "tenant:dev"}, headers=_csrf(client))
+                json={"tenant_id": "tenant:test"}, headers=_csrf(client))
 
     r = client.post("/auth/logout", follow_redirects=False)
     assert r.status_code == 302

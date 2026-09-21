@@ -10,14 +10,37 @@
   body {
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     background: #0f1115; color: #e6e8ec; min-height: 100vh;
-    display: flex; align-items: center; justify-content: center;
   }
+  /* ---------- app frame ---------- */
+  .topbar { display: flex; justify-content: space-between; align-items:
+    center; padding: .7rem 1.2rem; background: #161a22;
+    border-bottom: 1px solid #262c3a; position: sticky; top: 0;
+    z-index: 10; }
+  .topbar .brand { font-size: 1.05rem; font-weight: 600; }
+  .topbar .brand b { color: #6ea8fe; font-weight: 600; }
+  .topbar .right { display: flex; align-items: center; gap: .6rem; }
+  .topbar .who { font-size: .75rem; color: #8b93a5; }
+  .layout { display: flex; min-height: calc(100vh - 47px); }
+  .sidenav { width: 180px; flex-shrink: 0; background: #12151c;
+    border-right: 1px solid #262c3a; padding: .8rem .5rem; }
+  .navbtn { display: block; width: 100%; text-align: left;
+    background: none; border: none; color: #c3c8d4; font-size: .85rem;
+    padding: .55rem .8rem; border-radius: 6px; cursor: pointer; }
+  .navbtn:hover { background: #1c2130; }
+  .navbtn.active { background: #1c2130; color: #6ea8fe; }
+  main { flex: 1; padding: 1.2rem 1.5rem; min-width: 0; }
+  .hidden { display: none !important; }
+  /* ---------- centered panel (auth states) ---------- */
+  .centerwrap { display: flex; align-items: center; justify-content:
+    center; min-height: calc(100vh - 100px); }
   .card {
     background: #161a22; border: 1px solid #262c3a; border-radius: 10px;
     padding: 2.5rem 3rem; min-width: 340px; max-width: 480px;
     box-shadow: 0 8px 30px rgba(0,0,0,.4);
   }
-  .card.wide { max-width: 980px; min-width: 720px; }
+  .panel { background: #161a22; border: 1px solid #262c3a;
+    border-radius: 10px; padding: 1.2rem 1.4rem; margin-bottom: 1rem; }
+  /* ---------- tables ---------- */
   table { width: 100%; border-collapse: collapse; font-size: .82rem;
     margin: .5rem 0 1rem; }
   th, td { text-align: left; padding: .45rem .6rem;
@@ -52,8 +75,7 @@
   .section h3 { font-size: .85rem; margin: .6rem 0 .2rem; }
   .section h4 { font-size: .72rem; color: #8b93a5; margin: .7rem 0 .15rem;
     text-transform: uppercase; letter-spacing: .04em; }
-  /* G9 delivery states — sent != accepted != delivered != read,
-     and none of them is the G8 authoritative native view. */
+  /* G9 delivery states */
   .d-dispatching, .d-sent { color: #6ea8fe; }
   .d-provider_accepted { color: #9d8cf5; }
   .d-delivered { color: #6fdc8c; }
@@ -76,8 +98,6 @@
     color: #e6e8ec; padding: .5rem .7rem; font-size: .85rem; }
   .section { margin-top: 1.5rem; padding-top: 1rem;
     border-top: 1px solid #262c3a; }
-  .section h2 { font-size: .72rem; font-weight: 500; text-transform: uppercase;
-    letter-spacing: .05em; margin-bottom: .5rem; color: #8b93a5; }
   .actions { display: flex; gap: .4rem; flex-wrap: wrap;
     margin: .75rem 0 1rem; }
   .actions button { font-size: .75rem; padding: .35rem .7rem; }
@@ -89,7 +109,6 @@
     color: #e6e8ec; padding: .5rem .7rem; font-size: .85rem; }
   form input:focus { outline: none; border-color: #2f6fed; }
   h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: .25rem; }
-  h1 .brand { color: #6ea8fe; }
   .sub { color: #8b93a5; font-size: .85rem; margin-bottom: 1.5rem; }
   button, .btn {
     display: inline-block; background: #2f6fed; color: #fff; border: 0;
@@ -99,13 +118,12 @@
   button:hover, .btn:hover { background: #265cd6; }
   button.secondary { background: #262c3a; }
   button.secondary:hover { background: #313950; }
+  button.small { padding: .3rem .7rem; font-size: .75rem; }
   .tenant { margin: .5rem 0; padding: .75rem 1rem; background: #1c2130;
     border: 1px solid #262c3a; border-radius: 8px; display: flex;
     justify-content: space-between; align-items: center; }
   .meta { font-size: .8rem; color: #8b93a5; margin-top: 1.5rem; }
   .meta code { color: #b6bfce; }
-  .header { display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 1.5rem; }
   .badge { font-size: .7rem; background: #1c2130; border: 1px solid #262c3a;
     padding: .2rem .6rem; border-radius: 999px; color: #8b93a5; }
   .error { color: #f08080; font-size: .85rem; margin-bottom: 1rem; }
@@ -113,19 +131,43 @@
     border-top-color: #6ea8fe; border-radius: 50%; margin: 0 auto 1rem;
     animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .hidden { display: none; }
+  /* ---------- view header ---------- */
+  .viewhead { display: flex; align-items: center; gap: .8rem;
+    margin-bottom: 1rem; }
+  .viewhead h2 { font-size: 1rem; font-weight: 600; }
+  .viewhead .spacer { flex: 1; }
+  .backbtn { background: none; border: none; color: #6ea8fe;
+    font-size: .82rem; cursor: pointer; padding: 0; }
+  .backbtn:hover { text-decoration: underline; }
+  .chip { background: #1c2130; border: 1px solid #262c3a; color: #c3c8d4;
+    font-size: .75rem; padding: .25rem .7rem; border-radius: 999px;
+    cursor: pointer; }
+  .chip.active { border-color: #6ea8fe; color: #6ea8fe; }
 </style>
 </head>
 <body>
-<div class="card">
-  <div class="header">
-    <h1><span class="brand">JL</span>Mirror</h1>
-    <span class="badge" id="envBadge">shell</span>
-  </div>
-  <div class="sub">Enterprise operations platform</div>
-  <div class="error hidden" id="err"></div>
-  <div id="root"><div class="spinner"></div></div>
-  <div class="meta" id="meta"></div>
+<div class="topbar hidden" id="topbar">
+  <span class="brand"><b>JL</b>Mirror</span>
+  <span class="right">
+    <span class="who" id="topWho"></span>
+    <span class="badge" id="topTenant"></span>
+    <button class="secondary small" id="changeTenant">tenant</button>
+    <form method="post" action="/auth/logout" style="display:inline">
+      <button class="secondary small">sign out</button>
+    </form>
+  </span>
+</div>
+<div class="layout">
+  <nav class="sidenav hidden" id="sidenav">
+    <button class="navbtn" data-view="alerts">Alerts</button>
+    <button class="navbtn" data-view="monitoring">Monitoring</button>
+    <button class="navbtn" data-view="admin">Administration</button>
+  </nav>
+  <main>
+    <div class="error hidden" id="err"></div>
+    <div id="root"><div class="spinner"></div></div>
+    <div class="meta" id="meta"></div>
+  </main>
 </div>
 <script src="/app.js"></script>
 </body>

@@ -16,9 +16,9 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from tests.test_alerting import _conn, _make_policy  # noqa: F401
-from tests.test_alerting import REAL_SOURCE
+from tests.test_alerting import _seed_monitoring
 
-TENANT = "tenant:dev"
+TENANT = "tenant:test"
 ACTOR = "principal.test-actor"
 
 
@@ -41,91 +41,7 @@ def g10fx():
             " WHERE tenant_id=%s AND enabled RETURNING policy_id",
             (TENANT,))
         suspended = [r[0] for r in cur.fetchall()]
-        conn.execute(
-            """
-            INSERT INTO monitoring.monitoring_source_generation
-                (tenant_id, monitoring_source_id,
-                 source_instance_generation, provider_profile,
-                 provider_instance_ref, provider_base_url)
-            SELECT %s, %s, source_instance_generation,
-                   provider_profile, provider_instance_ref,
-                   provider_base_url
-              FROM monitoring.monitoring_source_generation
-             WHERE monitoring_source_id = %s LIMIT 1
-            """, (TENANT, src, REAL_SOURCE))
-        conn.execute(
-            """
-            INSERT INTO monitoring.monitoring_source
-                (tenant_id, monitoring_source_id,
-                 provider_scope_tenant_binding_id, provider_profile,
-                 active_source_instance_generation,
-                 configuration_revision, scope_revision, display_name,
-                 credential_binding_ref, configured_provider_scope,
-                 operational_evidence_state, last_sync_operation_id,
-                 item_definition_poll_epoch,
-                 item_definition_poll_generation,
-                 current_state_poll_epoch, current_state_poll_generation,
-                 problem_poll_epoch, problem_poll_generation)
-            SELECT %s, %s, %s || '_bnd', provider_profile,
-                   active_source_instance_generation,
-                   configuration_revision, scope_revision, 'g10-test',
-                   credential_binding_ref, configured_provider_scope,
-                   'current', last_sync_operation_id,
-                   item_definition_poll_epoch,
-                   item_definition_poll_generation,
-                   current_state_poll_epoch, current_state_poll_generation,
-                   problem_poll_epoch, problem_poll_generation
-              FROM monitoring.monitoring_source
-             WHERE monitoring_source_id = %s
-            """, (TENANT, src, src, REAL_SOURCE))
-        conn.execute(
-            """
-            INSERT INTO monitoring.monitoring_resource
-                (tenant_id, monitoring_resource_id,
-                 monitoring_source_id, source_instance_generation,
-                 resource_kind, provider_object_kind,
-                 provider_external_ref, display_name, scope_state,
-                 scope_projection_revision, scope_evidence_state,
-                 presence_state, presence_evidence_state,
-                 last_observed_at, last_confirmed_present_at)
-            SELECT %s, %s, %s, g.source_instance_generation,
-                   r.resource_kind, r.provider_object_kind,
-                   'ext-' || %s, 'g10-test-res', r.scope_state,
-                   r.scope_projection_revision, r.scope_evidence_state,
-                   r.presence_state, r.presence_evidence_state,
-                   now(), now()
-              FROM monitoring.monitoring_resource r
-              JOIN monitoring.monitoring_source_generation g
-                ON g.monitoring_source_id = %s
-              LIMIT 1
-            """, (TENANT, rid, src, rid, src))
-        conn.execute(
-            """
-            INSERT INTO monitoring.monitoring_problem_provider_binding
-                (tenant_id, problem_id, monitoring_source_id,
-                 source_instance_generation, monitoring_resource_id,
-                 provider_profile, provider_external_ref,
-                 provider_trigger_ref)
-            SELECT %s, %s, %s, active_source_instance_generation,
-                   %s, 'zabbix', 'ext-' || %s, 'trg-' || %s
-              FROM monitoring.monitoring_source
-             WHERE monitoring_source_id = %s
-            """, (TENANT, pid, src, rid, pid, pid, src))
-        conn.execute(
-            """
-            INSERT INTO monitoring.monitoring_problem
-                (tenant_id, problem_id, monitoring_source_id,
-                 source_instance_generation, monitoring_resource_id,
-                 problem_state, severity_class, summary, opened_at,
-                 last_confirmed_at, evidence_state,
-                 projection_revision, problem_poll_epoch,
-                 problem_poll_generation)
-            SELECT %s, %s, %s, active_source_instance_generation,
-                   %s, 'active', 'critical', 'g10 test problem',
-                   now(), now(), 'current', 7, 1, 1
-              FROM monitoring.monitoring_source
-             WHERE monitoring_source_id = %s
-            """, (TENANT, pid, src, rid, src))
+        _seed_monitoring(conn, TENANT, src, rid, pid)
         conn.commit()
         yield {"source": src, "problem": pid, "policy": pol,
                "resource": rid, "conn": conn}
@@ -527,7 +443,7 @@ def test_least_privilege_boundaries():
         app.execute("SELECT count(*) FROM itsm.incident")
     # app invoker cannot reach worker-only functions
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        app.execute("SELECT itsm.g10_next_sync_candidate('tenant:dev')")
+        app.execute("SELECT itsm.g10_next_sync_candidate('tenant:test')")
     app.close()
 
     worker = role_conn("jlmirror_worker")
@@ -538,7 +454,7 @@ def test_least_privilege_boundaries():
             "SELECT itsm.g10_create_incident('t','a','t','d','p','l',"
             "'{}'::jsonb)")
     # worker CAN reach the narrow sync capability
-    worker.execute("SELECT itsm.g10_next_sync_candidate('tenant:dev')")
+    worker.execute("SELECT itsm.g10_next_sync_candidate('tenant:test')")
     worker.close()
 
 
