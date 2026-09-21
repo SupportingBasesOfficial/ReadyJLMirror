@@ -187,6 +187,17 @@ def complete_dispatch(conn, *, tenant_id: str, dispatch_id: str,
          json.dumps(dispatch_evidence or {}), ADAPTER_VERSION,
          outcome, provider_message_ref, failure_class,
          logical_dispatch_id))
+    if provider_message_ref:
+        # Global routing index — the callback binds provider refs
+        # back to (tenant, intent) without trusting the payload.
+        conn.execute(
+            """
+            INSERT INTO notification.provider_ref_binding
+                (provider_message_ref, tenant_id,
+                 notification_intent_id)
+            VALUES (%s,%s,%s)
+            ON CONFLICT DO NOTHING
+            """, (provider_message_ref, tenant_id, intent_id))
     conn.execute(
         """
         UPDATE notification.notification_dispatch_outbox

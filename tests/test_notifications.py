@@ -68,6 +68,7 @@ def intent(fx):  # noqa: F811
               "notification.notification_callback_inbox",
               "notification.notification_attempt",
               "notification.notification_dispatch_outbox",
+              "notification.provider_ref_binding",
               "notification.notification_intent"):
         conn.execute(
             f"DELETE FROM {t} WHERE notification_intent_id=%s",
@@ -234,6 +235,35 @@ def test_out_of_order_evidence_reconciles(intent):
         conn.commit()
         state = _projection(conn, intent["intent"])[0]
         assert state == "delivered"
+        conn.commit()
+    finally:
+        conn.rollback()
+        conn.close()
+
+
+def test_provider_ref_binding_routes_callback(intent):
+    """Dispatch completion writes the global routing index — the
+    callback derives (tenant, intent) from the provider ref, never
+    from the payload or a global env tenant."""
+    conn = _conn()
+    try:
+        conn.execute(
+            "SELECT set_config('jlmirror.tenant_id','tenant:dev',false)")
+        _dispatch_once(conn, "provider_accepted", intent["intent"])
+        conn.commit()
+        # the routing index is tenant-independent — query it under a
+        # different tenant context to prove binding, not context,
+        # resolves the route
+        conn.execute(
+            "SELECT set_config('jlmirror.tenant_id','tenant:other',false)")
+        cur = conn.execute(
+            """
+            SELECT tenant_id, notification_intent_id
+              FROM notification.provider_ref_binding
+             WHERE provider_message_ref='wamid.test'
+            """)
+        row = cur.fetchone()
+        assert row == ("tenant:dev", intent["intent"])
         conn.commit()
     finally:
         conn.rollback()

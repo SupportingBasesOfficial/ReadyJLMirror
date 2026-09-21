@@ -292,6 +292,8 @@ Real persistence + real Zabbix adapter, implementing the accepted
 ## What this is NOT yet
 
 - Not production-ready: dev HMAC trust (not SPIFFE), dev auth bypass flag, dev realm passwords, no CSRF key ring rotation
+- Boundary secrets fail closed outside development: `db_password`, `BFF_INTERNAL_SECRET`, `KEYCLOAK_CLIENT_SECRET` and `NOTIFICATION_CALLBACK_SECRET` must resolve via mounted file or env — the dev literal is rejected (`APP_ENVIRONMENT != development`)
+- Callback tenant routing is binding-derived: `notification.provider_ref_binding` (written at dispatch completion) maps the provider's message ref to `(tenant, intent)` — the callback payload never asserts a tenant and there is no global tenant fallback; unbindable callbacks park as poisoned under the `platform` pseudo-tenant
 - WhatsApp adapter defaults to the dev sink — production needs the real provider URL + token via credential binding and a rotated `NOTIFICATION_CALLBACK_SECRET`
 - The G10 ITSM adapter defaults to a simulated provider (deterministic `dev-ticket-*` refs); production needs `ITSM_PROVIDER_URL` pointing at a governed bridge plus a credential binding
 - Automation, AIOps and further governance slices remain governed by the canonical authorization chain — not implemented until authorized

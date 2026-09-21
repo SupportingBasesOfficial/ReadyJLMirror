@@ -8,6 +8,8 @@ Secrets (db_password, bff_internal_secret, keycloak_client_secret)
 resolve through `_secret`: mounted file > env var > dev default.
 `SECRETS_DIR` (default /run/secrets) follows the docker-secrets
 pattern — injectable by Vault/OpenBao agents without code changes.
+The dev default is development-only: outside `APP_ENVIRONMENT=
+development` an unresolved secret fails settings construction.
 """
 
 from __future__ import annotations
@@ -27,6 +29,10 @@ def _secret(*file_names: str, env_name: str, default: str) -> str:
 
     Multiple file names are tried in order (e.g. a per-role
     `db_password_jlmirror_app` before a generic `db_password`).
+
+    Fail closed: outside development a missing secret raises at
+    settings construction — a known dev default must never be
+    silently usable where it authenticates a trust boundary.
     """
     secrets_dir = os.environ.get("SECRETS_DIR", "/run/secrets")
     for file_name in file_names:
@@ -37,7 +43,17 @@ def _secret(*file_names: str, env_name: str, default: str) -> str:
                 return value
         except (OSError, ValueError):
             pass
-    return _env(env_name, default)
+    value = os.environ.get(env_name, "")
+    if _env("APP_ENVIRONMENT", "development") != "development":
+        if not value:
+            raise RuntimeError(
+                f"{env_name} is required outside development "
+                f"(no mounted file or env var resolved)")
+        if value == default:
+            raise RuntimeError(
+                f"{env_name} still holds the development default — "
+                f"refusing to start outside development")
+    return value or default
 
 
 @dataclass(frozen=True)

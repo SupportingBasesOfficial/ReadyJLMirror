@@ -244,8 +244,18 @@ async def notification_detail(intent_id: str, request: Request,
 # ---------------------------------------------------------------------------
 
 
-_CALLBACK_SECRET = os.environ.get("NOTIFICATION_CALLBACK_SECRET",
-                                 "dev-callback-secret")
+# Fail closed outside development: no shared secret, no endpoint —
+# a missing env must never silently accept the dev default.
+def _callback_secret() -> str:
+    from shared.config import settings
+    secret = os.environ.get("NOTIFICATION_CALLBACK_SECRET", "")
+    if not settings.is_development:
+        if not secret or secret == "dev-callback-secret":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="notification callback secret not configured")
+        return secret
+    return secret or "dev-callback-secret"
 # Signed-payload timestamps older than this are rejected — the
 # timestamp is inside the HMAC'd body so a captured callback cannot
 # be freshened without the secret.
@@ -261,7 +271,7 @@ async def provider_callback(request: Request) -> dict:
     """
     raw = await request.body()
     sig = request.headers.get("x-provider-signature", "")
-    expected = hmac.new(_CALLBACK_SECRET.encode(), raw,
+    expected = hmac.new(_callback_secret().encode(), raw,
                         hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected):
         raise HTTPException(status_code=401,
@@ -285,8 +295,6 @@ async def provider_callback(request: Request) -> dict:
                   "failed": "failed"}
     norm = status_map.get(payload.get("status"), "unknown")
     digest = hashlib.sha256(raw).hexdigest()
-    tenant = os.environ.get("NOTIFICATION_CALLBACK_TENANT",
-                            "tenant:dev")
     envelope = {"callback_id": callback_id,
                 "provider_message_ref": provider_ref,
                 "status": payload.get("status")}
@@ -302,22 +310,25 @@ async def provider_callback(request: Request) -> dict:
         notification helpers (dedup + monotonic reconcile)."""
         with psycopg.connect(settings.db_dsn,
                              autocommit=False) as conn:
-            conn.execute(
-                "SELECT set_config('jlmirror.tenant_id', %s, false)",
-                (tenant,))
-            # Bind by provider message ref — an evidence lookup
-            # key, never platform identity.
+            # Resolve (tenant, intent) through the global routing
+            # index written at dispatch completion — the provider
+            # payload never asserts a tenant. Unbindable callbacks
+            # park under the platform pseudo-tenant as poisoned.
             intent_id = None
+            tenant = "platform"
             if provider_ref:
                 cur = conn.execute(
                     """
-                    SELECT notification_intent_id
-                      FROM notification.notification_attempt
-                     WHERE tenant_id=%s AND provider_message_ref=%s
-                     ORDER BY attempt_number DESC LIMIT 1
-                    """, (tenant, provider_ref))
+                    SELECT tenant_id, notification_intent_id
+                      FROM notification.provider_ref_binding
+                     WHERE provider_message_ref=%s
+                    """, (provider_ref,))
                 row = cur.fetchone()
-                intent_id = row[0] if row else None
+                if row:
+                    tenant, intent_id = row
+            conn.execute(
+                "SELECT set_config('jlmirror.tenant_id', %s, false)",
+                (tenant,))
             if expired:
                 state, err_class = "poisoned", "replay_window_expired"
             else:
