@@ -319,7 +319,8 @@ async def api_session(request: Request) -> JSONResponse:
     """
     session = await _resolve_session(request)
     if session is None:
-        return JSONResponse({"state": "unauthenticated"})
+        return JSONResponse({"state": "unauthenticated",
+                             "environment": settings.environment})
 
     async with db_connection() as conn:
         memberships = await access.accessible_tenants(

@@ -67,7 +67,15 @@ async function refresh() {
 
   switch (s.state) {
     case "unauthenticated": {
-      renderCenter('<a class="btn" href="/auth/login">Sign in</a>');
+      renderCenter(
+        `<h1><span class="brand">JL</span>Mirror</h1>` +
+        `<div class="sub">Enterprise operations platform</div>` +
+        `<a class="btn" href="/auth/login">Sign in</a>` +
+        (s.environment === "development"
+          ? `<div style="margin-top:1rem"><a class="link" ` +
+            `style="font-size:.78rem" href="/auth/dev-login">` +
+            `dev sign-in</a></div>`
+          : ""));
       meta.innerHTML = "";
       break;
     }
@@ -82,7 +90,8 @@ async function refresh() {
       const items = s.memberships.map(m =>
         `<div class="tenant"><span>${esc(m.display_name)}</span>` +
         `<button data-t="${esc(m.tenant_id)}" class="pick">Select</button></div>`).join("");
-      renderCenter(`<p style="margin-bottom:.75rem">Select a tenant:</p>${items}`);
+      renderCenter(`<h1><span class="brand">JL</span>Mirror</h1>` +
+        `<p style="margin:.75rem 0">Select a tenant:</p>${items}`);
       document.querySelectorAll(".pick").forEach(b =>
         b.addEventListener("click", () => selectTenant(b.dataset.t)));
       meta.innerHTML = `<code>${esc(s.principal_id)}</code>`;
