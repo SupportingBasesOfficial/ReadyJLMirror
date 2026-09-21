@@ -13,6 +13,9 @@ This repository implements the product slices authorized by the canonical specif
 | Alerting core model | `alerting.alert` + immutable transitions, closed source-kind law, policy evidence required |
 | Publication bridge | atomic outbox obligations on problem/health transitions |
 | G6 transport consumer | `alerting.inbox_receipt` dedup + envelope validation + Monitoring owner reread -> durable resync completion (never Alert mutation) |
+| G7 alert policy lifecycle | immutable policy versions, explicit effective selection, alert pinned to exact version, idempotent evaluation, fail-closed stale evidence |
+| G8 human operations | assign / ACK / atomic reassign, current-action projection, immutable timeline, native visibility requirement + receipt (exact viewer only) |
+| G9 notification delivery | `whatsapp_business@1` intent -> durable outbox -> immutable attempts -> HMAC callbacks -> monotonic delivery projection, bounded retry + fallback-required |
 | Ops surface | DLQ visibility + operator requeue, worker heartbeat, readiness with declared failure modes, audit trail, backup/restore rehearsal, chaos matrix, SLO probe, DNS-pinned egress |
 | Security | mounted-file secrets, OpenBao dev backend, TLS + opt-in mTLS, least-privilege roles, direct-SQL escape battery |
 
@@ -238,9 +241,24 @@ Real persistence + real Zabbix adapter, implementing the accepted
   manifest), `python -m scripts.restore_verify` (restores into an
   isolated scratch DB, checks invariants, drops it — never touches
   live). Runbook: `docs/runbooks/disaster-recovery.md`
-- **Alerting** — `GET/POST /api/v1/alerting/alerts[/transitions]`:
-  the canonical core model (active|resolved, immutable transitions,
-  no automatic creation — policy evaluation is a separate gate)
+- **Alerting (G7)** — `POST/GET /api/v1/alerting/policies[/versions]`
+  + `/effective` for the immutable policy lifecycle;
+  `GET /api/v1/alerting/alerts[/{id}[/timeline]]` for alerts pinned
+  to the exact policy version that produced them
+- **Human ops (G8)** — `POST /alerts/{id}/assign|ack` (reassign is
+  atomic), `POST /alerts/{id}/visibility-requirements` +
+  `POST /visibility-requirements/{id}/receipts`; timeline and
+  current-action projection derive from immutable facts
+- **Notifications (G9)** — `POST /alerts/{id}/notifications` creates
+  an immutable `whatsapp_business@1` intent + durable outbox entry;
+  the worker dispatches through the WhatsApp adapter (dev: BFF sink
+  at `/dev/whatsapp`); provider callbacks POST to
+  `/api/v1/alerting/notifications/callback` with an HMAC-SHA256
+  signature over the raw body (replayed, forged, stale-timestamp or
+  unbindable callbacks are durably poisoned, never become evidence);
+  `GET /notifications[/{id}]` exposes the monotonic delivery
+  projection — sent ≠ accepted ≠ delivered ≠ external read, and
+  none of them is the G8 native view
 - **G6 inbox** — `workers/alerting_transport.py` consumes the two
   accepted outbox contracts: envelope validation -> create-or-observe
   receipt -> Monitoring owner reread -> durable resync completion;
@@ -256,8 +274,9 @@ Real persistence + real Zabbix adapter, implementing the accepted
 
 ## What this is NOT yet
 
-- Not production-ready: dev HMAC trust (not SPIFFE), dev auth bypass flag, no real Zabbix/Kafka, no CSRF key ring rotation, dev realm passwords
-- No automatic alert creation/resolution — policy evaluation, ACK, suppression, routing, notification, ITSM, Automation, AIOps remain governed by the canonical authorization chain
+- Not production-ready: dev HMAC trust (not SPIFFE), dev auth bypass flag, dev realm passwords, no CSRF key ring rotation
+- WhatsApp adapter defaults to the dev sink — production needs the real provider URL + token via credential binding and a rotated `NOTIFICATION_CALLBACK_SECRET`
+- ITSM, automation, AIOps and further governance slices remain governed by the canonical authorization chain — not implemented until authorized
 
 ## Submodule
 
