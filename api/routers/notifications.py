@@ -125,7 +125,12 @@ async def list_notifications(request: Request,
             SELECT i.notification_intent_id, i.alert_id, i.reason,
                    i.destination_ref, i.created_at,
                    p.current_state, p.attempt_count,
-                   p.retry_required, p.fallback_action_required
+                   p.retry_required, p.fallback_action_required,
+                   (SELECT MIN(o.next_attempt_at)
+                      FROM notification.notification_dispatch_outbox o
+                     WHERE o.notification_intent_id
+                           = i.notification_intent_id
+                       AND o.state = 'pending') AS next_attempt_at
               FROM notification.notification_intent i
               LEFT JOIN notification.notification_projection p
                 ON p.tenant_id = i.tenant_id
@@ -137,6 +142,9 @@ async def list_notifications(request: Request,
         for r in await cur.fetchall():
             row = dict(zip(cols, r))
             row["created_at"] = row["created_at"].isoformat()
+            if row["next_attempt_at"]:
+                row["next_attempt_at"] = (
+                    row["next_attempt_at"].isoformat())
             rows.append(row)
         return rows
 
@@ -208,8 +216,27 @@ async def notification_detail(intent_id: str, request: Request,
                 "retry_required": prow[4],
                 "fallback_action_required": prow[5],
                 "revision": prow[6]}
+
+        # Retry policy surface — operators can see the budget and the
+        # next scheduled dispatch without reading the outbox directly.
+        from shared import notification as notif
+        cur = await conn.execute(
+            """
+            SELECT next_attempt_at
+              FROM notification.notification_dispatch_outbox
+             WHERE notification_intent_id=%s AND state='pending'
+             ORDER BY next_attempt_at LIMIT 1
+            """, (intent_id,))
+        nrow = await cur.fetchone()
+        retry_policy = {
+            "adapter_version": notif.ADAPTER_VERSION,
+            "max_attempts": notif.MAX_ATTEMPTS,
+            "backoff_seconds_per_attempt": 30,
+            "next_attempt_at":
+                nrow[0].isoformat() if nrow else None}
     return {"intent": intent, "attempts": attempts,
-            "evidence": evidence, "projection": projection}
+            "evidence": evidence, "projection": projection,
+            "retry_policy": retry_policy}
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +246,11 @@ async def notification_detail(intent_id: str, request: Request,
 
 _CALLBACK_SECRET = os.environ.get("NOTIFICATION_CALLBACK_SECRET",
                                  "dev-callback-secret")
+# Signed-payload timestamps older than this are rejected — the
+# timestamp is inside the HMAC'd body so a captured callback cannot
+# be freshened without the secret.
+_REPLAY_WINDOW_SECONDS = int(
+    os.environ.get("NOTIFICATION_CALLBACK_REPLAY_WINDOW", "600"))
 
 
 @router.post("/notifications/callback", include_in_schema=False)
@@ -236,9 +268,17 @@ async def provider_callback(request: Request) -> dict:
                             detail="invalid callback signature")
     payload = json.loads(raw.decode())
     # Dev callback shape: {callback_id, provider_message_ref,
-    #                      status: sent|delivered|read|failed}
+    #                      status: sent|delivered|read|failed,
+    #                      timestamp: epoch-seconds (optional)}
     callback_id = payload.get("callback_id")
     provider_ref = payload.get("provider_message_ref")
+    cb_ts = payload.get("timestamp")
+    import time as _time
+    from shared import notification as _notif
+    expired = (cb_ts is not None
+               and _notif.callback_timestamp_expired(
+                   cb_ts, now=_time.time(),
+                   window=_REPLAY_WINDOW_SECONDS))
     status_map = {"sent": "provider_accepted",
                   "delivered": "delivered",
                   "read": "external_read_observed",
@@ -278,7 +318,11 @@ async def provider_callback(request: Request) -> dict:
                     """, (tenant, provider_ref))
                 row = cur.fetchone()
                 intent_id = row[0] if row else None
-            state = "processed" if intent_id else "poisoned"
+            if expired:
+                state, err_class = "poisoned", "replay_window_expired"
+            else:
+                state = "processed" if intent_id else "poisoned"
+                err_class = None if intent_id else "unbindable_callback"
             cur = conn.execute(
                 """
                 INSERT INTO notification.notification_callback_inbox
@@ -293,12 +337,11 @@ async def provider_callback(request: Request) -> dict:
                 """,
                 (tenant, f"cbi_{secrets.token_urlsafe(12)}", digest,
                  intent_id, callback_id, norm, state,
-                 json.dumps(envelope),
-                 None if intent_id else "unbindable_callback"))
+                 json.dumps(envelope), err_class))
             if cur.fetchone() is None:
                 conn.commit()
                 return "duplicate"          # replayed callback
-            if intent_id:
+            if intent_id and not expired:
                 notif.record_evidence(
                     conn, tenant_id=tenant, intent_id=intent_id,
                     normalized_state=norm,
@@ -306,6 +349,10 @@ async def provider_callback(request: Request) -> dict:
                     provider_message_ref=provider_ref,
                     raw_envelope=envelope)
             conn.commit()
-            return state
+            return "expired" if expired else state
 
-    return {"state": await asyncio.to_thread(_ingest)}
+    state = await asyncio.to_thread(_ingest)
+    if state == "expired":
+        raise HTTPException(status_code=400,
+                            detail="callback outside replay window")
+    return {"state": state}

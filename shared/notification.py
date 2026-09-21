@@ -24,6 +24,17 @@ MAX_ATTEMPTS = 3
 ADAPTER_VERSION = "whatsapp_business@1"
 
 
+def callback_timestamp_expired(ts, *, now: float,
+                               window: int) -> bool:
+    """Signed-payload freshness: the timestamp lives inside the
+    HMAC'd body, so a captured callback cannot be freshened without
+    the secret. Missing/unparseable timestamps fail closed."""
+    try:
+        return abs(now - float(ts)) > window
+    except (TypeError, ValueError):
+        return True
+
+
 def _hash(obj) -> str:
     return hashlib.sha256(
         json.dumps(obj, sort_keys=True,
@@ -57,12 +68,22 @@ def _recompute_projection(conn, tenant_id: str, intent_id: str) -> None:
     attempts = cur.fetchone()[0]
 
     attempt_state = last_attempt[0] if last_attempt else "dispatching"
-    ev_state = last_ev[0] if last_ev else None
-    # Monotonic strongest-known: evidence may strengthen the
-    # attempt outcome; never invents it.
+    # Monotonic strongest-known: the projection takes the MAXIMUM
+    # evidence rank ever observed — out-of-order weaker evidence can
+    # never downgrade it (canonical reconcile law). last_evidence_id
+    # stays the most recent row for diagnostics.
+    cur = conn.execute(
+        """
+        SELECT normalized_state
+          FROM notification.notification_provider_evidence
+         WHERE tenant_id=%s AND notification_intent_id=%s
+        """, (tenant_id, intent_id))
+    ev_states = [r[0] for r in cur.fetchall()]
     rank_a = _STATE_RANK.get(attempt_state, 0)
-    rank_e = _STATE_RANK.get(ev_state, -1) if ev_state else -1
-    current = ev_state if rank_e > rank_a else attempt_state
+    best_ev = max(ev_states, key=lambda s: _STATE_RANK.get(s, 0),
+                  default=None)
+    rank_e = _STATE_RANK.get(best_ev, -1) if best_ev else -1
+    current = best_ev if rank_e > rank_a else attempt_state
 
     delivered_at = None
     read_at = None
