@@ -90,11 +90,22 @@ def main() -> None:
     once = "--once" in sys.argv
     interval = settings.worker_poll_interval_seconds
     logger.info("workers starting (once=%s, poll=%ss)", once, interval)
-    with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
-        while True:
-            tick(conn)
+    while True:
+        try:
+            with psycopg.connect(
+                    settings.db_dsn, autocommit=False,
+                    connect_timeout=10) as conn:
+                while True:
+                    tick(conn)
+                    if once:
+                        return
+                    time.sleep(interval)
+        except psycopg.OperationalError:
+            # DB restart/failover — drop the dead connection and
+            # re-enter; processors resume from durable outbox state.
+            logger.exception("db connection lost; reconnecting")
             if once:
-                return
+                raise
             time.sleep(interval)
 
 
