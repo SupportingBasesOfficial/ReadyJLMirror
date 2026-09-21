@@ -19,6 +19,14 @@ function csrfHeaders() {
 }
 
 function render(html) { root.innerHTML = html; }
+/* Escape any server/provider-supplied value before it enters an
+ * innerHTML template — monitoring data (problem summaries, display
+ * names, refs) is attacker-influenceable upstream. */
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;",
+            '"': "&quot;", "'": "&#39;" }[c]));
+}
 function fail(msg) {
   err.textContent = msg;
   err.classList.remove("hidden");
@@ -50,20 +58,20 @@ async function refresh() {
     }
     case "needs_tenant": {
       const items = s.memberships.map(m =>
-        `<div class="tenant"><span>${m.display_name}</span>` +
-        `<button data-t="${m.tenant_id}" class="pick">Select</button></div>`).join("");
+        `<div class="tenant"><span>${esc(m.display_name)}</span>` +
+        `<button data-t="${esc(m.tenant_id)}" class="pick">Select</button></div>`).join("");
       render(`<p style="margin-bottom:.75rem">Select a tenant:</p>${items}`);
       document.querySelectorAll(".pick").forEach(b =>
         b.addEventListener("click", () => selectTenant(b.dataset.t)));
-      meta.innerHTML = `<code>${s.principal_id}</code>`;
+      meta.innerHTML = `<code>${esc(s.principal_id)}</code>`;
       break;
     }
     case "ready": {
       document.querySelector(".card").classList.add("wide");
       render(
-        `<p>Signed in to <strong>${s.tenant.display_name}</strong></p>` +
+        `<p>Signed in to <strong>${esc(s.tenant.display_name)}</strong></p>` +
         `<div class="meta" style="margin:1rem 0 1.25rem">` +
-        `principal <code>${s.principal_id}</code> · role <code>${s.tenant.role}</code></div>` +
+        `principal <code>${esc(s.principal_id)}</code> · role <code>${esc(s.tenant.role)}</code></div>` +
         `<div style="display:flex;gap:.5rem">` +
         `<button class="secondary" id="changeTenant">Change tenant</button>` +
         `<form method="post" action="/auth/logout"><button class="secondary">Sign out</button></form>` +
@@ -73,12 +81,12 @@ async function refresh() {
       document.getElementById("changeTenant").addEventListener("click", async () => {
         render(`<p style="margin-bottom:.75rem">Select a tenant:</p>` +
           s.memberships.map(m =>
-            `<div class="tenant"><span>${m.display_name}</span>` +
-            `<button data-t="${m.tenant_id}" class="pick">Select</button></div>`).join(""));
+            `<div class="tenant"><span>${esc(m.display_name)}</span>` +
+            `<button data-t="${esc(m.tenant_id)}" class="pick">Select</button></div>`).join(""));
         document.querySelectorAll(".pick").forEach(b =>
           b.addEventListener("click", () => selectTenant(b.dataset.t)));
       });
-      meta.innerHTML = `authenticated at <code>${s.authenticated_at}</code>`;
+      meta.innerHTML = `authenticated at <code>${esc(s.authenticated_at)}</code>`;
       loadMonitoring(s);
       break;
     }
@@ -137,10 +145,10 @@ async function loadMonitoring(s) {
     : `<table><thead><tr><th>Source</th><th>Provider</th>` +
       `<th>Evidence</th></tr></thead><tbody>` +
       sources.map(src =>
-        `<tr class="clickable" data-src="${src.monitoring_source_id}">` +
-        `<td>${src.display_name}</td>` +
-        `<td><code>${src.provider_instance_ref}</code></td>` +
-        `<td>${src.operational_evidence_state}</td></tr>`).join("") +
+        `<tr class="clickable" data-src="${esc(src.monitoring_source_id)}">` +
+        `<td>${esc(src.display_name)}</td>` +
+        `<td><code>${esc(src.provider_instance_ref)}</code></td>` +
+        `<td>${esc(src.operational_evidence_state)}</td></tr>`).join("") +
       `</tbody></table>`;
 
   const alertsHtml = (!Array.isArray(alerts) || alerts.length === 0)
@@ -148,12 +156,12 @@ async function loadMonitoring(s) {
     : `<table><thead><tr><th>State</th><th>Alert</th>` +
       `<th>Policy</th><th>Source kind</th><th>Opened</th></tr></thead><tbody>` +
       alerts.map(a =>
-        `<tr class="clickable" data-alert="${a.alert_id}">` +
-        `<td class="a-${a.lifecycle_state}">${a.lifecycle_state}</td>` +
-        `<td><code>${(a.alert_id || "").slice(0, 18)}</code></td>` +
-        `<td>${a.policy_id} v${a.policy_version}</td>` +
-        `<td>${a.source_kind}</td>` +
-        `<td>${(a.opened_at || "").slice(0, 19)}</td></tr>`).join("") +
+        `<tr class="clickable" data-alert="${esc(a.alert_id)}">` +
+        `<td class="a-${esc(a.lifecycle_state)}">${esc(a.lifecycle_state)}</td>` +
+        `<td><code>${esc((a.alert_id || "").slice(0, 18))}</code></td>` +
+        `<td>${esc(a.policy_id)} v${esc(a.policy_version)}</td>` +
+        `<td>${esc(a.source_kind)}</td>` +
+        `<td>${esc((a.opened_at || "").slice(0, 19))}</td></tr>`).join("") +
       `</tbody></table>`;
 
   mon.innerHTML =
@@ -244,48 +252,48 @@ async function loadSourceDetail(sourceId, tid) {
 
   const healthRows = Array.isArray(health) && health.length
     ? health.map(h =>
-        `<tr><td><code>${h.monitoring_resource_id}</code></td>` +
-        `<td class="h-${h.health_class}">${h.health_class}</td>` +
-        `<td>${h.evidence_state}</td>` +
-        `<td>r${h.projection_revision}</td></tr>`).join("")
+        `<tr><td><code>${esc(h.monitoring_resource_id)}</code></td>` +
+        `<td class="h-${esc(h.health_class)}">${esc(h.health_class)}</td>` +
+        `<td>${esc(h.evidence_state)}</td>` +
+        `<td>r${esc(h.projection_revision)}</td></tr>`).join("")
     : `<tr><td colspan="4" class="empty">No health projections yet</td></tr>`;
 
   const problemRows = Array.isArray(problems) && problems.length
     ? problems.map(p =>
-        `<tr><td class="sev-${p.severity_class}">${p.severity_class}</td>` +
-        `<td>${p.summary || ""}</td>` +
-        `<td><code>${p.provider_eventid || ""}</code></td>` +
-        `<td>${p.evidence_state}</td></tr>`).join("")
+        `<tr><td class="sev-${esc(p.severity_class)}">${esc(p.severity_class)}</td>` +
+        `<td>${esc(p.summary)}</td>` +
+        `<td><code>${esc(p.provider_eventid)}</code></td>` +
+        `<td>${esc(p.evidence_state)}</td></tr>`).join("")
     : `<tr><td colspan="4" class="empty">No active problems</td></tr>`;
 
   const currentRows = Array.isArray(current) && current.length
     ? current.slice(0, 20).map(c =>
-        `<tr><td>${c.name || c.metric_definition_id}</td>` +
-        `<td><code>${c.canonical_value}</code></td>` +
-        `<td>${c.evidence_state}</td></tr>`).join("")
+        `<tr><td>${esc(c.name || c.metric_definition_id)}</td>` +
+        `<td><code>${esc(c.canonical_value)}</code></td>` +
+        `<td>${esc(c.evidence_state)}</td></tr>`).join("")
     : `<tr><td colspan="3" class="empty">No current state</td></tr>`;
 
   const alertRows = Array.isArray(alerts) && alerts.length
     ? alerts.map(a =>
-        `<tr class="clickable" data-alert="${a.alert_id}">` +
-        `<td class="a-${a.lifecycle_state}">${a.lifecycle_state}</td>` +
-        `<td><code>${(a.alert_id || "").slice(0, 18)}</code></td>` +
-        `<td>${a.source_kind}</td>` +
-        `<td>${a.policy_id} v${a.policy_version}</td>` +
-        `<td>r${a.source_occurrence_revision}</td></tr>`).join("")
+        `<tr class="clickable" data-alert="${esc(a.alert_id)}">` +
+        `<td class="a-${esc(a.lifecycle_state)}">${esc(a.lifecycle_state)}</td>` +
+        `<td><code>${esc((a.alert_id || "").slice(0, 18))}</code></td>` +
+        `<td>${esc(a.source_kind)}</td>` +
+        `<td>${esc(a.policy_id)} v${esc(a.policy_version)}</td>` +
+        `<td>r${esc(a.source_occurrence_revision)}</td></tr>`).join("")
     : `<tr><td colspan="5" class="empty">No alerts</td></tr>`;
 
   const badStates = new Set(["reconciliation_required", "failed_terminal"]);
   const opRows = Array.isArray(ops) && ops.length
     ? ops.map(o =>
         `<tr class="${badStates.has(o.state) ? "op-bad" : ""}">` +
-        `<td class="op-${o.state}">${o.state}</td>` +
-        `<td>${o.responsibility_kind}</td>` +
-        `<td><code>${(o.monitoring_sync_operation_id || "").slice(0, 20)}</code></td>` +
-        `<td>${o.last_error_class || ""}</td>` +
-        `<td>${o.created_at || ""}</td>` +
+        `<td class="op-${esc(o.state)}">${esc(o.state)}</td>` +
+        `<td>${esc(o.responsibility_kind)}</td>` +
+        `<td><code>${esc((o.monitoring_sync_operation_id || "").slice(0, 20))}</code></td>` +
+        `<td>${esc(o.last_error_class)}</td>` +
+        `<td>${esc(o.created_at)}</td>` +
         `<td>${badStates.has(o.state)
-            ? `<button class="secondary op-requeue" data-op="${o.monitoring_sync_operation_id}">retry</button>`
+            ? `<button class="secondary op-requeue" data-op="${esc(o.monitoring_sync_operation_id)}">retry</button>`
             : ""}</td></tr>`).join("")
     : `<tr><td colspan="6" class="empty">No operations</td></tr>`;
 
@@ -373,36 +381,36 @@ async function loadAlertDetail(alertId, tid) {
   }
   const a = detail.alert;
   const transitions = (detail.transitions || []).map(t =>
-    `<li><span class="t-kind">${t.to_lifecycle_state}</span> ` +
-    `at r${t.source_revision} ` +
-    `<span class="t-at">${(t.occurred_at || "").slice(0, 19)}</span></li>`
+    `<li><span class="t-kind">${esc(t.to_lifecycle_state)}</span> ` +
+    `at r${esc(t.source_revision)} ` +
+    `<span class="t-at">${esc((t.occurred_at || "").slice(0, 19))}</span></li>`
   ).join("");
 
   const cur = (timeline && timeline.current_action) || null;
   const curHtml = cur
-    ? `<p>current action <strong>${cur.action}</strong>` +
-      (cur.owner ? ` · owner <code>${cur.owner}</code>` : "") +
-      ` · rev ${cur.revision}</p>`
+    ? `<p>current action <strong>${esc(cur.action)}</strong>` +
+      (cur.owner ? ` · owner <code>${esc(cur.owner)}</code>` : "") +
+      ` · rev ${esc(cur.revision)}</p>`
     : `<p class="empty">no human action required</p>`;
 
   const events = ((timeline && timeline.timeline) || []).map(e =>
-    `<li><span class="t-kind">${e.kind}</span> ` +
-    `${e.owner || e.principal_id || e.viewer || ""}` +
-    `${e.action ? " · " + e.action : ""}` +
-    `${e.note ? " · " + e.note : ""}` +
-    `${e.reason ? " · " + e.reason : ""} ` +
-    `<span class="t-at">${(e.at || "").slice(0, 19)}</span></li>`
+    `<li><span class="t-kind">${esc(e.kind)}</span> ` +
+    `${esc(e.owner || e.principal_id || e.viewer || "")}` +
+    `${e.action ? " · " + esc(e.action) : ""}` +
+    `${e.note ? " · " + esc(e.note) : ""}` +
+    `${e.reason ? " · " + esc(e.reason) : ""} ` +
+    `<span class="t-at">${esc((e.at || "").slice(0, 19))}</span></li>`
   ).join("") || '<li class="empty">no human operations yet</li>';
 
   // Delivery is per-intent and scoped to THIS alert only.
   const mine = (notifications || []).filter(n => n.alert_id === alertId);
   const notifRows = mine.length
     ? mine.map(n =>
-        `<tr><td class="d-${n.current_state || "dispatching"}">` +
-        `${n.current_state || "dispatching"}</td>` +
-        `<td>${n.reason}</td>` +
-        `<td><code>${n.destination_ref}</code></td>` +
-        `<td>${n.attempt_count || 0}` +
+        `<tr><td class="d-${esc(n.current_state || "dispatching")}">` +
+        `${esc(n.current_state || "dispatching")}</td>` +
+        `<td>${esc(n.reason)}</td>` +
+        `<td><code>${esc(n.destination_ref)}</code></td>` +
+        `<td>${esc(n.attempt_count || 0)}` +
         `${n.retry_required ? '<span class="flag">retry</span>' : ""}` +
         `${n.fallback_action_required
             ? '<span class="flag bad">fallback required</span>' : ""}</td>` +
@@ -410,13 +418,13 @@ async function loadAlertDetail(alertId, tid) {
     : `<tr><td colspan="4" class="empty">No notifications</td></tr>`;
 
   det.innerHTML =
-    `<div class="section"><h2>Alert ${alertId.slice(0, 18)}</h2>` +
-    `<p class="a-${a.lifecycle_state}">${a.lifecycle_state}</p>` +
-    `<div class="meta">policy <code>${a.policy_id}</code> ` +
-    `v${a.policy_version} (pinned) · subject ` +
-    `<code>${(a.source_subject_id || "").slice(0, 28)}</code> · ` +
-    `occurrence r${a.source_occurrence_revision} · ` +
-    `current r${a.current_source_revision}</div>` +
+    `<div class="section"><h2>Alert ${esc(alertId.slice(0, 18))}</h2>` +
+    `<p class="a-${esc(a.lifecycle_state)}">${esc(a.lifecycle_state)}</p>` +
+    `<div class="meta">policy <code>${esc(a.policy_id)}</code> ` +
+    `v${esc(a.policy_version)} (pinned) · subject ` +
+    `<code>${esc((a.source_subject_id || "").slice(0, 28))}</code> · ` +
+    `occurrence r${esc(a.source_occurrence_revision)} · ` +
+    `current r${esc(a.current_source_revision)}</div>` +
     `<ul class="timeline">${transitions}</ul></div>` +
 
     `<div class="section"><h2>Human operations</h2>${curHtml}` +
