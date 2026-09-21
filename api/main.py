@@ -34,6 +34,7 @@ from api.routers import (
     authority,
     async_ops,
     human_ops,
+    itsm,
     monitoring,
     notifications,
     observability,
@@ -343,6 +344,7 @@ app.include_router(observability.router)
 app.include_router(release.router)
 app.include_router(alerting.router)
 app.include_router(human_ops.router)
+app.include_router(itsm.router)
 app.include_router(notifications.router)
 app.include_router(platform.router)
 app.include_router(tenant.router)

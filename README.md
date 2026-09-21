@@ -16,6 +16,7 @@ This repository implements the product slices authorized by the canonical specif
 | G7 alert policy lifecycle | immutable policy versions, explicit effective selection, alert pinned to exact version, idempotent evaluation, fail-closed stale evidence |
 | G8 human operations | assign / ACK / atomic reassign, current-action projection, immutable timeline, native visibility requirement + receipt (exact viewer only) |
 | G9 notification delivery | `whatsapp_business@1` intent -> durable outbox -> immutable attempts -> HMAC callbacks -> monotonic delivery projection, bounded retry + fallback-required |
+| G10 ITSM incidents | Incident independent of Alert (create only on admitted active alert), open -> in_progress -> resolved -> closed (no reopen), assignment history + immutable comments, durable provider-neutral sync outbox with claim lease, bounded retry, lease-expiry reconcile to `unknown`, external ticket refs as evidence only |
 | Ops surface | DLQ visibility + operator requeue, worker heartbeat, readiness with declared failure modes, audit trail, backup/restore rehearsal, chaos matrix, SLO probe, DNS-pinned egress |
 | Security | mounted-file secrets, OpenBao dev backend, TLS + opt-in mTLS, least-privilege roles, direct-SQL escape battery |
 
@@ -259,6 +260,16 @@ Real persistence + real Zabbix adapter, implementing the accepted
   `GET /notifications[/{id}]` exposes the monotonic delivery
   projection — sent ≠ accepted ≠ delivered ≠ external read, and
   none of them is the G8 native view
+- **ITSM incidents (G10)** — `POST /alerts/{id}/incidents`,
+  `GET /alerts/{id}/incidents`, `GET /incidents/{id}`,
+  `POST /incidents/{id}/transition|assignments|comments`; every
+  mutation goes through canonical `itsm.g10_*` SECURITY DEFINER
+  functions — `jlmirror_app`/`jlmirror_worker` hold zero `itsm.*`
+  table privilege and only the EXECUTE grants of their invoker
+  roles; the worker claims the durable sync outbox (lease, bounded
+  retry to 3 attempts, expired lease reconciles to `unknown`) and
+  writes external ticket linkage as evidence — provider state never
+  mutates the Incident
 - **G6 inbox** — `workers/alerting_transport.py` consumes the two
   accepted outbox contracts: envelope validation -> create-or-observe
   receipt -> Monitoring owner reread -> durable resync completion;
@@ -276,7 +287,8 @@ Real persistence + real Zabbix adapter, implementing the accepted
 
 - Not production-ready: dev HMAC trust (not SPIFFE), dev auth bypass flag, dev realm passwords, no CSRF key ring rotation
 - WhatsApp adapter defaults to the dev sink — production needs the real provider URL + token via credential binding and a rotated `NOTIFICATION_CALLBACK_SECRET`
-- ITSM, automation, AIOps and further governance slices remain governed by the canonical authorization chain — not implemented until authorized
+- The G10 ITSM adapter defaults to a simulated provider (deterministic `dev-ticket-*` refs); production needs `ITSM_PROVIDER_URL` pointing at a governed bridge plus a credential binding
+- Automation, AIOps and further governance slices remain governed by the canonical authorization chain — not implemented until authorized
 
 ## Submodule
 

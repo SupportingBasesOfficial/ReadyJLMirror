@@ -153,6 +153,10 @@ services:
       WHATSAPP_API_URL: ${WHATSAPP_API_URL:-http://bff:8080/dev/whatsapp}
       WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
       NOTIFICATION_CALLBACK_SECRET: ${NOTIFICATION_CALLBACK_SECRET:-dev-callback-secret}
+      # G10 ITSM adapter — dev empty = simulated provider
+      # (deterministic dev-ticket-* refs). Prod: governed ITSM bridge
+      # URL; the token goes through a credential binding.
+      ITSM_PROVIDER_URL: ${ITSM_PROVIDER_URL:-}
       # Provider egress (dev Zabbix profile / intranet deployments)
       EGRESS_ALLOW_HOSTS: ${EGRESS_ALLOW_HOSTS:-}
       EGRESS_ALLOW_PRIVATE_IPS: ${EGRESS_ALLOW_PRIVATE_IPS:-}

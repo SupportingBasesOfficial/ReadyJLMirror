@@ -370,11 +370,13 @@ function post(path, tid, body) {
 async function loadAlertDetail(alertId, tid) {
   const det = document.getElementById("monDetail");
   det.innerHTML = '<div class="spinner"></div>';
-  const [detail, timeline, notifications] = await Promise.all([
-    alerting(`/alerts/${alertId}`, tid),
-    alerting(`/alerts/${alertId}/timeline`, tid),
-    alerting(`/notifications`, tid),
-  ]);
+  const [detail, timeline, notifications, incidents] =
+    await Promise.all([
+      alerting(`/alerts/${alertId}`, tid),
+      alerting(`/alerts/${alertId}/timeline`, tid),
+      alerting(`/notifications`, tid),
+      alerting(`/alerts/${alertId}/incidents`, tid),
+    ]);
   if (!detail) {
     det.innerHTML = '<p class="empty">Alert unavailable.</p>';
     return;
@@ -417,6 +419,16 @@ async function loadAlertDetail(alertId, tid) {
         `</tr>`).join("")
     : `<tr><td colspan="4" class="empty">No notifications</td></tr>`;
 
+  const incRows = (incidents || []).length
+    ? (incidents || []).map(i =>
+        `<tr><td><button class="link" data-inc="` +
+        `${esc(i.incident_id)}">${esc(i.incident_id.slice(0, 26))}` +
+        `</button></td>` +
+        `<td>${esc(i.title)}</td>` +
+        `<td class="a-${esc(i.lifecycle_state)}">` +
+        `${esc(i.lifecycle_state)}</td></tr>`).join("")
+    : `<tr><td colspan="3" class="empty">No incidents</td></tr>`;
+
   det.innerHTML =
     `<div class="section"><h2>Alert ${esc(alertId.slice(0, 18))}</h2>` +
     `<p class="a-${esc(a.lifecycle_state)}">${esc(a.lifecycle_state)}</p>` +
@@ -447,7 +459,16 @@ async function loadAlertDetail(alertId, tid) {
     `<button class="secondary" id="btnAlertRefresh">refresh</button></div>` +
     `<p class="note">provider accepted ≠ delivered ≠ read. External read ` +
     `evidence is supplementary — it is not the authoritative native view.` +
-    `</p><div id="notifyForm"></div></div>`;
+    `</p><div id="notifyForm"></div></div>` +
+
+    `<div class="section"><h2>ITSM incidents</h2>` +
+    `<table><thead><tr><th>Incident</th><th>Title</th>` +
+    `<th>State</th></tr></thead>` +
+    `<tbody>${incRows}</tbody></table>` +
+    `<div class="actions">` +
+    `<button class="secondary" id="btnNewIncident">` +
+    `create incident</button></div>` +
+    `<div id="incidentDetail"></div></div>`;
 
   const reload = () => loadAlertDetail(alertId, tid);
   document.getElementById("btnAlertRefresh")
@@ -526,6 +547,114 @@ async function loadAlertDetail(alertId, tid) {
         if (!r.ok) fail("Notification denied."); else reload();
       });
   });
+
+  document.getElementById("btnNewIncident")
+    .addEventListener("click", () => {
+      document.getElementById("incidentDetail").innerHTML =
+        `<form id="incForm">` +
+        `<label>Title<input name="title" required maxlength="240" ` +
+        `placeholder="incident title"></label>` +
+        `<label>Description<input name="desc" maxlength="8000" ` +
+        `placeholder="optional"></label>` +
+        `<button type="submit">Create incident</button></form>` +
+        `<p class="note">Incident lifecycle is independent — it never ` +
+        `changes the alert. A durable provider sync is enqueued on ` +
+        `creation.</p>`;
+      document.getElementById("incForm").addEventListener(
+        "submit", async (ev) => {
+          ev.preventDefault();
+          const r = await post(
+            `/alerts/${alertId}/incidents`, tid, {
+              title: ev.target.title.value.trim(),
+              description: ev.target.desc.value.trim() || null,
+            });
+          if (!r.ok) fail("Incident denied (alert must be active).");
+          else reload();
+        });
+    });
+
+  document.querySelectorAll("[data-inc]").forEach(b =>
+    b.addEventListener("click", () =>
+      loadIncidentDetail(b.dataset.inc, tid, alertId, reload)));
+}
+
+async function loadIncidentDetail(incidentId, tid, alertId, reload) {
+  const el = document.getElementById("incidentDetail");
+  el.innerHTML = '<div class="spinner"></div>';
+  const inc = await alerting(`/incidents/${incidentId}`, tid);
+  if (!inc) {
+    el.innerHTML = '<p class="empty">Incident unavailable.</p>';
+    return;
+  }
+  const sync = inc.provider_sync || {};
+  const trs = (inc.transitions || []).map(t =>
+    `<li><span class="t-kind">${esc(t.to_state)}</span> ` +
+    `${esc(t.actor_principal_id)} ` +
+    `<span class="t-at">${esc((t.occurred_at || "").slice(0, 19))}` +
+    `</span></li>`).join("") || '<li class="empty">none</li>';
+  const asg = (inc.assignments || []).map(a =>
+    `<li>${esc(a.assignee_principal_id)} ` +
+    `${a.effective_until
+        ? '<span class="t-at">until ' +
+          esc(a.effective_until.slice(0, 19)) + "</span>"
+        : '<span class="t-kind">current</span>'}</li>`).join("") ||
+    '<li class="empty">unassigned</li>';
+  const cmts = (inc.comments || []).map(c =>
+    `<li>${esc(c.body)} — ${esc(c.actor_principal_id)} ` +
+    `<span class="t-at">${esc((c.created_at || "").slice(0, 19))}` +
+    `</span></li>`).join("") || '<li class="empty">no comments</li>';
+
+  const next = {open: ["in_progress", "resolved"],
+                in_progress: ["resolved"],
+                resolved: ["closed"], closed: []}[inc.lifecycle_state] || [];
+
+  el.innerHTML =
+    `<h3>${esc(inc.title)} <span class="a-${esc(inc.lifecycle_state)}">` +
+    `${esc(inc.lifecycle_state)}</span></h3>` +
+    `<div class="meta"><code>${esc(inc.incident_id)}</code> · alert ` +
+    `<code>${esc(inc.alert_id.slice(0, 18))}</code></div>` +
+    `<p class="meta">provider sync ` +
+    `<strong>${esc(sync.sync_state || "unknown")}</strong>` +
+    (sync.provider_ticket_ref
+      ? ` · ticket <code>${esc(sync.provider_ticket_ref)}</code>` : "") +
+    ` · attempt ${esc(sync.attempt_number || 0)}` +
+    (sync.last_failure_class
+      ? ` · <span class="flag bad">${esc(sync.last_failure_class)}</span>`
+      : "") + `</p>` +
+    `<h4>Transitions</h4><ul class="timeline">${trs}</ul>` +
+    `<h4>Assignments</h4><ul class="timeline">${asg}</ul>` +
+    `<h4>Comments</h4><ul class="timeline">${cmts}</ul>` +
+    `<div class="actions">` +
+    next.map(s =>
+      `<button class="secondary" data-tr="${esc(s)}">${esc(s)}</button>`
+    ).join("") +
+    `<button class="secondary" id="btnIncAssign">assign</button>` +
+    `<button class="secondary" id="btnIncComment">comment</button>` +
+    `</div><div id="incForm2"></div>`;
+
+  document.querySelectorAll("[data-tr]").forEach(b =>
+    b.addEventListener("click", async () => {
+      const r = await post(`/incidents/${incidentId}/transition`,
+                           tid, {target_state: b.dataset.tr});
+      if (!r.ok) fail("Transition denied.");
+      else reload();
+    }));
+  document.getElementById("btnIncAssign").addEventListener(
+    "click", async () => {
+      const p = prompt("Assignee principal id");
+      if (!p) return;
+      const r = await post(`/incidents/${incidentId}/assignments`,
+                           tid, {assignee_principal_id: p.trim()});
+      if (!r.ok) fail("Assign denied."); else reload();
+    });
+  document.getElementById("btnIncComment").addEventListener(
+    "click", async () => {
+      const body = prompt("Comment");
+      if (!body) return;
+      const r = await post(`/incidents/${incidentId}/comments`,
+                           tid, {body});
+      if (!r.ok) fail("Comment denied."); else reload();
+    });
 }
 
 // Surface auth errors from the callback redirect (e.g. /?error=forbidden)

@@ -42,6 +42,16 @@
   .op-bad { background: rgba(255,107,107,.05); }
   .a-active { color: #e6b450; font-weight: 600; }
   .a-resolved { color: #6fdc8c; }
+  /* G10 incident lifecycle */
+  .a-open { color: #e6b450; font-weight: 600; }
+  .a-in_progress { color: #6ea8fe; font-weight: 600; }
+  .a-closed { color: #8b93a5; }
+  button.link { background: none; border: none; color: #6ea8fe;
+    cursor: pointer; font-size: .8rem; padding: 0; text-align: left; }
+  button.link:hover { text-decoration: underline; }
+  .section h3 { font-size: .85rem; margin: .6rem 0 .2rem; }
+  .section h4 { font-size: .72rem; color: #8b93a5; margin: .7rem 0 .15rem;
+    text-transform: uppercase; letter-spacing: .04em; }
   /* G9 delivery states — sent != accepted != delivered != read,
      and none of them is the G8 authoritative native view. */
   .d-dispatching, .d-sent { color: #6ea8fe; }
