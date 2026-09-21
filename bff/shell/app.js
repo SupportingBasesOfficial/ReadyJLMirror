@@ -77,6 +77,8 @@ async function refresh() {
         `<form method="post" action="/auth/logout"><button class="secondary">Sign out</button></form>` +
         `</div>` +
         `<div class="section"><h2>Monitoring</h2><div id="mon">` +
+        `<div class="spinner"></div></div></div>` +
+        `<div class="section"><h2>Administration</h2><div id="admin">` +
         `<div class="spinner"></div></div></div>`);
       document.getElementById("changeTenant").addEventListener("click", async () => {
         render(`<p style="margin-bottom:.75rem">Select a tenant:</p>` +
@@ -88,6 +90,7 @@ async function refresh() {
       });
       meta.innerHTML = `authenticated at <code>${esc(s.authenticated_at)}</code>`;
       loadMonitoring(s);
+      loadAdmin(s);
       break;
     }
     default: {
@@ -654,6 +657,153 @@ async function loadIncidentDetail(incidentId, tid, alertId, reload) {
       const r = await post(`/incidents/${incidentId}/comments`,
                            tid, {body});
       if (!r.ok) fail("Comment denied."); else reload();
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Administration — tenant members + custom roles + platform view
+// ---------------------------------------------------------------------------
+
+const ROLE_TEMPLATES = ["admin", "operator", "viewer", "auditor"];
+const ALL_PERMISSIONS = [
+  "tenant:read", "tenant:admin",
+  "monitoring:read", "monitoring:operate",
+  "alerting:read", "alerting:operate",
+  "observability:read", "audit:read",
+];
+
+function tapi(path, method, body) {
+  return fetch(`/api/v1${path}`, {
+    method: method || "GET", credentials: "same-origin",
+    headers: csrfHeaders(),
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+async function loadAdmin(s) {
+  const el = document.getElementById("admin");
+  const [mRes, rRes, oRes, gRes] = await Promise.all([
+    tapi("/tenant/members"), tapi("/tenant/roles"),
+    tapi("/platform/organizations"),
+    tapi("/platform/delegated-grants"),
+  ]);
+  const members = mRes.ok ? await mRes.json() : null;
+  const roles = rRes.ok ? await rRes.json() : null;
+  const platformOk = oRes.ok;
+  const orgs = platformOk ? await oRes.json() : null;
+  const grants = gRes.ok ? await gRes.json() : [];
+
+  if (members === null) {
+    el.innerHTML = '<p class="empty">tenant:read required ' +
+      'for administration.</p>';
+    return;
+  }
+
+  const memberRows = members.length
+    ? members.map(m =>
+        `<tr><td><code>${esc(m.principal_id)}</code></td>` +
+        `<td>${esc(m.role)}</td><td>${esc(m.state)}</td>` +
+        `<td>${m.state === "active"
+          ? `<button class="link" data-revoke="${esc(m.membership_id)}">` +
+            `revoke</button>` : ""}</td></tr>`).join("")
+    : `<tr><td colspan="4" class="empty">no members</td></tr>`;
+
+  const roleRows = (roles || []).length
+    ? (roles || []).map(r =>
+        `<tr><td><code>${esc(r.role_name)}</code></td>` +
+        `<td>${esc((r.permissions || []).join(", "))}</td>` +
+        `<td>${esc(r.state)}</td>` +
+        `<td>${r.state === "active"
+          ? `<button class="link" data-retire="${esc(r.role_name)}">` +
+            `retire</button>` : ""}</td></tr>`).join("")
+    : `<tr><td colspan="4" class="empty">no custom roles</td></tr>`;
+
+  const roleOptions = ROLE_TEMPLATES.map(r => `<option>${r}</option>`)
+    .join("") + (roles || [])
+      .filter(r => r.state === "active")
+      .map(r => `<option>custom:${esc(r.role_name)}</option>`).join("");
+
+  const permBoxes = ALL_PERMISSIONS.map(p =>
+    `<label style="display:inline-block;margin:.15rem .6rem .15rem 0;` +
+    `font-size:.75rem"><input type="checkbox" name="perm" ` +
+    `value="${esc(p)}"> ${esc(p)}</label>`).join("");
+
+  let platformHtml;
+  if (!platformOk) {
+    platformHtml = '<p class="empty">platform admin required for ' +
+      'organizations and delegated grants.</p>';
+  } else {
+    const orgRows = (orgs || []).map(o =>
+      `<tr><td><code>${esc(o.organization_id)}</code></td>` +
+      `<td>${esc(o.display_name)}</td>` +
+      `<td>${esc(o.state)}</td></tr>`).join("") ||
+      `<tr><td colspan="3" class="empty">no organizations</td></tr>`;
+    const grantRows = (grants || []).map(g =>
+      `<tr><td><code>${esc(g.principal_id)}</code></td>` +
+      `<td>${esc(g.source_organization_id)} ` +
+      `&rarr; <code>${esc(g.target_tenant_id)}</code></td>` +
+      `<td>${esc((g.permissions || []).join(", "))}</td>` +
+      `<td>${esc(g.state || "")}</td></tr>`).join("") ||
+      `<tr><td colspan="4" class="empty">no delegated grants</td></tr>`;
+    platformHtml =
+      `<h4>Organizations</h4><table><tbody>${orgRows}</tbody></table>` +
+      `<h4>Delegated grants</h4><table><tbody>${grantRows}</tbody>` +
+      `</table>`;
+  }
+
+  el.innerHTML =
+    `<h4>Members</h4>` +
+    `<table><thead><tr><th>Principal</th><th>Role</th><th>State</th>` +
+    `<th></th></tr></thead><tbody>${memberRows}</tbody></table>` +
+    `<form id="memberForm"><div style="display:flex;gap:.5rem">` +
+    `<input name="principal" required placeholder="principal.…" ` +
+    `style="flex:1"><select name="role" style="width:auto">` +
+    `${roleOptions}</select>` +
+    `<button type="submit">add / update</button></div></form>` +
+
+    `<h4>Custom roles</h4>` +
+    `<table><thead><tr><th>Role</th><th>Permissions</th>` +
+    `<th>State</th><th></th></tr></thead>` +
+    `<tbody>${roleRows}</tbody></table>` +
+    `<form id="roleForm"><input name="name" required ` +
+    `placeholder="role name"><div>${permBoxes}</div>` +
+    `<button type="submit">create role</button></form>` +
+
+    `<h4>Platform</h4>${platformHtml}`;
+
+  el.querySelectorAll("[data-revoke]").forEach(b =>
+    b.addEventListener("click", async () => {
+      const r = await tapi(`/tenant/members/${b.dataset.revoke}/revoke`,
+                           "POST");
+      if (!r.ok) fail("Revoke denied."); else loadAdmin(s);
+    }));
+  el.querySelectorAll("[data-retire]").forEach(b =>
+    b.addEventListener("click", async () => {
+      const r = await tapi(`/tenant/roles/${b.dataset.retire}/retire`,
+                           "POST");
+      if (!r.ok) fail("Retire denied."); else loadAdmin(s);
+    }));
+
+  document.getElementById("memberForm").addEventListener(
+    "submit", async (ev) => {
+      ev.preventDefault();
+      const r = await tapi("/tenant/members", "POST", {
+        principal_id: ev.target.principal.value.trim(),
+        role: ev.target.role.value,
+      });
+      if (!r.ok) fail("Member grant denied (tenant:admin required).");
+      else loadAdmin(s);
+    });
+  document.getElementById("roleForm").addEventListener(
+    "submit", async (ev) => {
+      ev.preventDefault();
+      const perms = [...ev.target.querySelectorAll(
+        "input[name=perm]:checked")].map(c => c.value);
+      const r = await tapi("/tenant/roles", "POST", {
+        name: ev.target.name.value.trim(), permissions: perms,
+      });
+      if (!r.ok) fail("Role create denied (tenant:admin required).");
+      else loadAdmin(s);
     });
 }
 

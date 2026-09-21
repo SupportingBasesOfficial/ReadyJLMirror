@@ -260,6 +260,12 @@ Real persistence + real Zabbix adapter, implementing the accepted
   `GET /notifications[/{id}]` exposes the monotonic delivery
   projection — sent ≠ accepted ≠ delivered ≠ external read, and
   none of them is the G8 native view
+- **Administration** — `GET/POST /api/v1/tenant/members[/{id}/revoke]`
+  and `/tenant/roles[/{name}/retire]` (gate: `tenant:read` /
+  `tenant:admin`); `GET /api/v1/platform/organizations` and
+  `/delegated-grants` require a `platform_admin_principal`; the
+  shell renders members + custom roles with add/revoke/retire
+  controls and a read-only platform block
 - **ITSM incidents (G10)** — `POST /alerts/{id}/incidents`,
   `GET /alerts/{id}/incidents`, `GET /incidents/{id}`,
   `POST /incidents/{id}/transition|assignments|comments`; every
