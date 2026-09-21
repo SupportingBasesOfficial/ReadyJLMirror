@@ -42,6 +42,28 @@
   .op-bad { background: rgba(255,107,107,.05); }
   .a-active { color: #e6b450; font-weight: 600; }
   .a-resolved { color: #6fdc8c; }
+  /* G9 delivery states — sent != accepted != delivered != read,
+     and none of them is the G8 authoritative native view. */
+  .d-dispatching, .d-sent { color: #6ea8fe; }
+  .d-provider_accepted { color: #9d8cf5; }
+  .d-delivered { color: #6fdc8c; }
+  .d-external_read_observed { color: #6fdc8c; font-weight: 600; }
+  .d-failed { color: #ff6b6b; font-weight: 600; }
+  .d-unknown { color: #8b93a5; }
+  .flag { display: inline-block; font-size: .68rem; padding: .1rem .4rem;
+    border-radius: 4px; background: #3a2a1a; color: #e6b450;
+    margin-left: .35rem; }
+  .flag.bad { background: #3a1a1a; color: #ff6b6b; }
+  .flag.ok { background: #16301f; color: #6fdc8c; }
+  .timeline { list-style: none; margin: .25rem 0; padding: 0; }
+  .timeline li { font-size: .8rem; padding: .3rem 0 .3rem .8rem;
+    border-left: 2px solid #262c3a; color: #c3c8d4; }
+  .timeline li .t-kind { color: #6ea8fe; }
+  .timeline li .t-at { color: #8b93a5; font-size: .72rem; }
+  .note { color: #8b93a5; font-size: .74rem; margin: .35rem 0 0; }
+  form select { display: block; width: 100%; margin-top: .25rem;
+    background: #1c2130; border: 1px solid #262c3a; border-radius: 6px;
+    color: #e6e8ec; padding: .5rem .7rem; font-size: .85rem; }
   .section { margin-top: 1.5rem; padding-top: 1rem;
     border-top: 1px solid #262c3a; }
   .section h2 { font-size: .72rem; font-weight: 500; text-transform: uppercase;

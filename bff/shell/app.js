@@ -146,10 +146,12 @@ async function loadMonitoring(s) {
   const alertsHtml = (!Array.isArray(alerts) || alerts.length === 0)
     ? '<p class="empty">No alerts.</p>'
     : `<table><thead><tr><th>State</th><th>Alert</th>` +
-      `<th>Source kind</th><th>Opened</th></tr></thead><tbody>` +
+      `<th>Policy</th><th>Source kind</th><th>Opened</th></tr></thead><tbody>` +
       alerts.map(a =>
-        `<tr><td class="a-${a.lifecycle_state}">${a.lifecycle_state}</td>` +
+        `<tr class="clickable" data-alert="${a.alert_id}">` +
+        `<td class="a-${a.lifecycle_state}">${a.lifecycle_state}</td>` +
         `<td><code>${(a.alert_id || "").slice(0, 18)}</code></td>` +
+        `<td>${a.policy_id} v${a.policy_version}</td>` +
         `<td>${a.source_kind}</td>` +
         `<td>${(a.opened_at || "").slice(0, 19)}</td></tr>`).join("") +
       `</tbody></table>`;
@@ -166,6 +168,9 @@ async function loadMonitoring(s) {
   mon.querySelectorAll("[data-src]").forEach(row =>
     row.addEventListener("click", () =>
       loadSourceDetail(row.dataset.src, tid)));
+  mon.querySelectorAll("[data-alert]").forEach(row =>
+    row.addEventListener("click", () =>
+      loadAlertDetail(row.dataset.alert, tid)));
 }
 
 // ---------------------------------------------------------------------------
@@ -262,12 +267,13 @@ async function loadSourceDetail(sourceId, tid) {
 
   const alertRows = Array.isArray(alerts) && alerts.length
     ? alerts.map(a =>
-        `<tr><td class="a-${a.lifecycle_state}">${a.lifecycle_state}</td>` +
+        `<tr class="clickable" data-alert="${a.alert_id}">` +
+        `<td class="a-${a.lifecycle_state}">${a.lifecycle_state}</td>` +
         `<td><code>${(a.alert_id || "").slice(0, 18)}</code></td>` +
         `<td>${a.source_kind}</td>` +
         `<td>${a.policy_id} v${a.policy_version}</td>` +
-        `<td>r${a.projection_revision}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="empty">No alerts — none authorized yet</td></tr>`;
+        `<td>r${a.source_occurrence_revision}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="empty">No alerts</td></tr>`;
 
   const badStates = new Set(["reconciliation_required", "failed_terminal"]);
   const opRows = Array.isArray(ops) && ops.length
@@ -325,8 +331,193 @@ async function loadSourceDetail(sourceId, tid) {
       if (!r.ok) { b.textContent = "failed"; b.disabled = false; }
       else { await loadSourceDetail(sourceId, tid); }
     }));
+  det.querySelectorAll("[data-alert]").forEach(row =>
+    row.addEventListener("click", () =>
+      loadAlertDetail(row.dataset.alert, tid)));
   document.getElementById("monRefresh").addEventListener("click", () =>
     loadSourceDetail(sourceId, tid));
+}
+
+// ---------------------------------------------------------------------------
+// Alert detail — G7 occurrence + G8 human operations + G9 delivery.
+// The UI MUST keep these distinct: alert lifecycle is not ACK, ACK is
+// not the current action owner, and notification delivery (sent /
+// provider accepted / delivered / external read) is never the G8
+// authoritative native view.
+// ---------------------------------------------------------------------------
+
+function alerting(path, tid) {
+  return fetch(`/api/v1/alerting${path}${path.includes("?") ? "&" : "?"}` +
+               `tenant_id=${tid}`, { credentials: "same-origin" })
+    .then(r => r.ok ? r.json() : null);
+}
+
+function post(path, tid, body) {
+  return fetch(`/api/v1/alerting${path}?tenant_id=${tid}`, {
+    method: "POST", credentials: "same-origin",
+    headers: csrfHeaders(), body: JSON.stringify(body || {}),
+  });
+}
+
+async function loadAlertDetail(alertId, tid) {
+  const det = document.getElementById("monDetail");
+  det.innerHTML = '<div class="spinner"></div>';
+  const [detail, timeline, notifications] = await Promise.all([
+    alerting(`/alerts/${alertId}`, tid),
+    alerting(`/alerts/${alertId}/timeline`, tid),
+    alerting(`/notifications`, tid),
+  ]);
+  if (!detail) {
+    det.innerHTML = '<p class="empty">Alert unavailable.</p>';
+    return;
+  }
+  const a = detail.alert;
+  const transitions = (detail.transitions || []).map(t =>
+    `<li><span class="t-kind">${t.to_lifecycle_state}</span> ` +
+    `at r${t.source_revision} ` +
+    `<span class="t-at">${(t.occurred_at || "").slice(0, 19)}</span></li>`
+  ).join("");
+
+  const cur = (timeline && timeline.current_action) || null;
+  const curHtml = cur
+    ? `<p>current action <strong>${cur.action}</strong>` +
+      (cur.owner ? ` · owner <code>${cur.owner}</code>` : "") +
+      ` · rev ${cur.revision}</p>`
+    : `<p class="empty">no human action required</p>`;
+
+  const events = ((timeline && timeline.timeline) || []).map(e =>
+    `<li><span class="t-kind">${e.kind}</span> ` +
+    `${e.owner || e.principal_id || e.viewer || ""}` +
+    `${e.action ? " · " + e.action : ""}` +
+    `${e.note ? " · " + e.note : ""}` +
+    `${e.reason ? " · " + e.reason : ""} ` +
+    `<span class="t-at">${(e.at || "").slice(0, 19)}</span></li>`
+  ).join("") || '<li class="empty">no human operations yet</li>';
+
+  // Delivery is per-intent and scoped to THIS alert only.
+  const mine = (notifications || []).filter(n => n.alert_id === alertId);
+  const notifRows = mine.length
+    ? mine.map(n =>
+        `<tr><td class="d-${n.current_state || "dispatching"}">` +
+        `${n.current_state || "dispatching"}</td>` +
+        `<td>${n.reason}</td>` +
+        `<td><code>${n.destination_ref}</code></td>` +
+        `<td>${n.attempt_count || 0}` +
+        `${n.retry_required ? '<span class="flag">retry</span>' : ""}` +
+        `${n.fallback_action_required
+            ? '<span class="flag bad">fallback required</span>' : ""}</td>` +
+        `</tr>`).join("")
+    : `<tr><td colspan="4" class="empty">No notifications</td></tr>`;
+
+  det.innerHTML =
+    `<div class="section"><h2>Alert ${alertId.slice(0, 18)}</h2>` +
+    `<p class="a-${a.lifecycle_state}">${a.lifecycle_state}</p>` +
+    `<div class="meta">policy <code>${a.policy_id}</code> ` +
+    `v${a.policy_version} (pinned) · subject ` +
+    `<code>${(a.source_subject_id || "").slice(0, 28)}</code> · ` +
+    `occurrence r${a.source_occurrence_revision} · ` +
+    `current r${a.current_source_revision}</div>` +
+    `<ul class="timeline">${transitions}</ul></div>` +
+
+    `<div class="section"><h2>Human operations</h2>${curHtml}` +
+    `<ul class="timeline">${events}</ul>` +
+    `<div class="actions">` +
+    `<button class="secondary" id="btnAck">acknowledge</button>` +
+    `<button class="secondary" id="btnAssign">assign action</button>` +
+    `<button class="secondary" id="btnVis">require native view</button>` +
+    `</div>` +
+    `<p class="note">ACK is evidence only — it never changes alert ` +
+    `lifecycle or action ownership.</p>` +
+    `<div id="opsForm"></div></div>` +
+
+    `<div class="section"><h2>Notification delivery</h2>` +
+    `<table><thead><tr><th>Delivery</th><th>Reason</th>` +
+    `<th>Destination</th><th>Attempts</th></tr></thead>` +
+    `<tbody>${notifRows}</tbody></table>` +
+    `<div class="actions">` +
+    `<button class="secondary" id="btnNotify">notify via WhatsApp</button>` +
+    `<button class="secondary" id="btnAlertRefresh">refresh</button></div>` +
+    `<p class="note">provider accepted ≠ delivered ≠ read. External read ` +
+    `evidence is supplementary — it is not the authoritative native view.` +
+    `</p><div id="notifyForm"></div></div>`;
+
+  const reload = () => loadAlertDetail(alertId, tid);
+  document.getElementById("btnAlertRefresh")
+    .addEventListener("click", reload);
+
+  document.getElementById("btnAck").addEventListener("click", async () => {
+    const note = prompt("ACK note (optional)") || null;
+    const r = await post(`/alerts/${alertId}/ack`, tid, { note });
+    if (!r.ok) fail("Acknowledge denied."); else reload();
+  });
+
+  document.getElementById("btnAssign").addEventListener("click", () => {
+    document.getElementById("opsForm").innerHTML =
+      `<form id="assignForm">` +
+      `<label>Owner principal<input name="owner" required ` +
+      `placeholder="principal.…"></label>` +
+      `<label>Action<select name="kind">` +
+      `<option>investigate_alert</option>` +
+      `<option>acknowledge_alert</option>` +
+      `<option>review_alert</option>` +
+      `<option>customer_review_required</option></select></label>` +
+      `<button type="submit">Assign</button></form>`;
+    document.getElementById("assignForm").addEventListener(
+      "submit", async (ev) => {
+        ev.preventDefault();
+        const r = await post(`/alerts/${alertId}/assign`, tid, {
+          owner_principal_id: ev.target.owner.value.trim(),
+          action_kind: ev.target.kind.value,
+        });
+        if (!r.ok) fail("Assign denied."); else reload();
+      });
+  });
+
+  document.getElementById("btnVis").addEventListener("click", () => {
+    document.getElementById("opsForm").innerHTML =
+      `<form id="visForm">` +
+      `<label>Required viewer principal<input name="viewer" required ` +
+      `placeholder="principal.…"></label>` +
+      `<label>Side<select name="side">` +
+      `<option>internal</option><option>customer</option></select></label>` +
+      `<button type="submit">Require native view</button></form>` +
+      `<p class="note">Only platform_native_authenticated_view@1 is ` +
+      `admitted, and only while the alert is active.</p>`;
+    document.getElementById("visForm").addEventListener(
+      "submit", async (ev) => {
+        ev.preventDefault();
+        const r = await post(
+          `/alerts/${alertId}/visibility-requirements`, tid, {
+            required_viewer_principal_id: ev.target.viewer.value.trim(),
+            viewer_side: ev.target.side.value,
+          });
+        if (!r.ok) fail("Requirement denied (alert must be active).");
+        else reload();
+      });
+  });
+
+  document.getElementById("btnNotify").addEventListener("click", () => {
+    document.getElementById("notifyForm").innerHTML =
+      `<form id="notifyFormEl">` +
+      `<label>Destination reference<input name="dest" required ` +
+      `placeholder="5511999990000"></label>` +
+      `<label>Reason<select name="reason">` +
+      `<option>alert_requires_attention</option>` +
+      `<option>alert_action_requested</option>` +
+      `<option>customer_awareness_required</option></select></label>` +
+      `<button type="submit">Create intent</button></form>` +
+      `<p class="note">Creating an intent never changes alert, ACK or ` +
+      `ownership state. Dispatch is worker-owned and retried bounded.</p>`;
+    document.getElementById("notifyFormEl").addEventListener(
+      "submit", async (ev) => {
+        ev.preventDefault();
+        const r = await post(`/alerts/${alertId}/notifications`, tid, {
+          destination_ref: ev.target.dest.value.trim(),
+          reason: ev.target.reason.value,
+        });
+        if (!r.ok) fail("Notification denied."); else reload();
+      });
+  });
 }
 
 // Surface auth errors from the callback redirect (e.g. /?error=forbidden)

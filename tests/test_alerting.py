@@ -30,26 +30,17 @@ def fx():
     with _conn() as conn:
         conn.execute(
             "SELECT set_config('jlmirror.tenant_id','tenant:dev',false)")
-        # Isolate: wipe ALL tenant alerting state — evaluation runs
-        # over every enabled policy of the tenant, so live/demo
-        # policies would otherwise count.
-        for t in ("notification.notification_dispatch_outbox",
-                  "notification.notification_provider_evidence",
-                  "notification.notification_attempt",
-                  "notification.notification_callback_inbox",
-                  "notification.notification_projection",
-                  "notification.notification_intent",
-                  "human_operations.alert_action_assignment",
-                  "human_operations.alert_acknowledgement",
-                  "human_operations.visibility_receipt",
-                  "human_operations.visibility_requirement",
-                  "human_operations.current_action_projection",
-                  "alerting.alert_decision", "alerting.alert_transition",
-                  "alerting.alert",
-                  "alerting.alert_policy_effective_version",
-                  "alerting.alert_policy_version",
-                  "alerting.alert_policy"):
-            conn.execute(f"DELETE FROM {t} WHERE tenant_id='tenant:dev'")
+        # Isolate WITHOUT destroying tenant data: evaluation runs
+        # over every ENABLED policy of the tenant, so suspend the
+        # others for the duration and restore them afterwards.
+        cur = conn.execute(
+            """
+            UPDATE alerting.alert_policy_effective_version
+               SET enabled = FALSE
+             WHERE tenant_id='tenant:dev' AND enabled
+             RETURNING policy_id
+            """)
+        suspended = [r[0] for r in cur.fetchall()]
         conn.execute(
             """
             INSERT INTO monitoring.monitoring_source_generation
@@ -151,6 +142,13 @@ def fx():
         # monitoring fixture rows stay: bindings are immutable
         # evidence by design; everything is uniquely suffixed so
         # orphans never collide with later runs.
+        for policy_id in suspended:      # restore live policies
+            conn.execute(
+                """
+                UPDATE alerting.alert_policy_effective_version
+                   SET enabled = TRUE
+                 WHERE tenant_id='tenant:dev' AND policy_id=%s
+                """, (policy_id,))
         conn.commit()
 
 
