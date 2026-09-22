@@ -3006,7 +3006,9 @@ class PgProblemStateRepository:
                 if state == "resolved":
                     raise ValueError(
                         "monitoring.problem_state_resolved_event_reappeared")
-                meta_same = json.loads(old_meta or "{}") == json.loads(metadata)
+                old_meta_dict = (old_meta if isinstance(old_meta, dict)
+                                 else json.loads(old_meta or "{}"))
+                meta_same = old_meta_dict == json.loads(metadata)
                 changed = (severity != prob.severity_class.value
                            or summary != prob.summary
                            or ack != prob.provider_acknowledged

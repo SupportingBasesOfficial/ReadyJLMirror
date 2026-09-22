@@ -37,9 +37,32 @@ _MAX_ATTEMPTS = 5
 _CLAIM_LEASE_SECONDS = 60
 
 
+def _webhook_request() -> tuple[str, dict]:
+    """Resolve the publish URL and TLS kwargs.
+
+    API_MTLS=1 upgrades the webhook boundary: the worker presents its
+    service client cert (WORKER_CLIENT_CERT/KEY_FILE) and verifies the
+    API against API_CA_FILE — same trust model as BFF->API.
+    """
+    url = os.environ.get("ALERTING_WEBHOOK_URL", "").strip()
+    kwargs: dict = {"timeout": 10.0}
+    if os.environ.get("API_MTLS", "").strip().lower() in (
+            "1", "true", "yes"):
+        if url.startswith("http://"):
+            url = "https://" + url[len("http://"):]
+        cert = os.environ.get("WORKER_CLIENT_CERT_FILE", "")
+        key = os.environ.get("WORKER_CLIENT_KEY_FILE", "")
+        ca = os.environ.get("API_CA_FILE", "")
+        if cert and key:
+            kwargs["cert"] = (cert, key)
+        if ca:
+            kwargs["verify"] = ca
+    return url, kwargs
+
+
 def _publish_durable(conn: psycopg.Connection) -> int:
     """Claim and publish pending durable outbox rows. Returns count."""
-    webhook_url = os.environ.get("ALERTING_WEBHOOK_URL", "").strip()
+    webhook_url, httpx_kwargs = _webhook_request()
     now = datetime.now(timezone.utc)
 
     cur = conn.execute(
@@ -90,7 +113,7 @@ def _publish_durable(conn: psycopg.Connection) -> int:
         try:
             if webhook_url:
                 resp = httpx.post(
-                    webhook_url, json=envelope, timeout=10.0)
+                    webhook_url, json=envelope, **httpx_kwargs)
                 resp.raise_for_status()
                 receipt_id = f"webhook:{resp.status_code}:{message_id}"
             else:

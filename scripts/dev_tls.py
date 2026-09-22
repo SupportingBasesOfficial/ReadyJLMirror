@@ -7,9 +7,11 @@ gitignored, mounted at /run/secrets in compose:
     cert.pem, key.pem          generic localhost server cert (BFF HTTPS)
     api-cert.pem, api-key.pem  API server cert  (CN=api)
     bff-cert.pem, bff-key.pem  BFF client cert  (CN=bff) — mTLS identity
+    worker-cert.pem, worker-key.pem  worker client cert (CN=worker)
 
 The API requires a client certificate when API_MTLS=1; the BFF
-presents bff-*.pem. Production: the same trust model comes from
+presents bff-*.pem and the worker presents worker-*.pem (outbox
+webhook publish). Production: the same trust model comes from
 SPIRE/SPIFFE or the platform CA — only issuance differs.
 
 Usage: python -m scripts.dev_tls
@@ -136,6 +138,14 @@ def main() -> None:
         issuer_key=ca_key, pub_key=bff_key.public_key(), is_ca=False,
         eku=client_eku, san_names=["bff"], san_ips=[]))
 
+    # Worker client cert (mTLS identity toward the API — outbox webhook)
+    worker_key = _key()
+    _write_key(OUT / "worker-key.pem", worker_key)
+    _write_cert(OUT / "worker-cert.pem", _issue(
+        subject_cn="worker", issuer_name=ca_cert.subject,
+        issuer_key=ca_key, pub_key=worker_key.public_key(), is_ca=False,
+        eku=client_eku, san_names=["worker"], san_ips=[]))
+
     # Zabbix web server cert (dev provider profile — api_jsonrpc.php
     # over https so the real egress path applies unchanged)
     zbx_key = _key()
@@ -151,6 +161,8 @@ def main() -> None:
     print("  BFF https : TLS_CERT_FILE/TLS_KEY_FILE -> cert.pem,key.pem")
     print("  API mTLS  : API_MTLS=1 + API_TLS_* -> api-*, ca.pem")
     print("  BFF client: BFF_CLIENT_CERT/BFF_CLIENT_KEY -> bff-*, "
+          "API_CA_FILE -> ca.pem")
+    print("  Worker    : WORKER_CLIENT_CERT/KEY_FILE -> worker-*, "
           "API_CA_FILE -> ca.pem")
 
 

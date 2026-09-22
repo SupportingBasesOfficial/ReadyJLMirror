@@ -154,7 +154,12 @@ services:
       CREDENTIALS_DIR: /run/secret-bindings
       SECRETS_DIR: /run/secrets
       # Dev webhook: real HTTP delivery to the API sink — leave
-      # empty for dev-log simulated receipts.
+      # empty for dev-log simulated receipts. When API_MTLS=1 the
+      # dispatcher upgrades to https and presents WORKER_CLIENT_*.
+      API_MTLS: ${API_MTLS:-}
+      API_CA_FILE: ${API_CA_FILE:-}
+      WORKER_CLIENT_CERT_FILE: ${WORKER_CLIENT_CERT_FILE:-/run/secrets/tls/worker-cert.pem}
+      WORKER_CLIENT_KEY_FILE: ${WORKER_CLIENT_KEY_FILE:-/run/secrets/tls/worker-key.pem}
       ALERTING_WEBHOOK_URL: ${ALERTING_WEBHOOK_URL:-http://api:8000/dev/outbox-sink}
       # G9 WhatsApp adapter — dev points at the API's dev sink
       # (returns provider-shaped wamid). Prod: Meta Graph URL +
