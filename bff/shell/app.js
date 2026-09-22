@@ -314,13 +314,28 @@ function renderOnboardForm(tid) {
       const picked = new Set(
         f.host_group_refs.value.split(",").map(s => s.trim())
           .filter(Boolean));
-      list.innerHTML = resp.map(g =>
-        `<label style="display:inline-flex;gap:6px;margin:2px 10px 2px 0;` +
-        `font-weight:normal">` +
-        `<input type="checkbox" class="grpPick" value="${g.groupid}"` +
-        `${picked.has(g.groupid) ? " checked" : ""}> ` +
-        `${g.name || "(unnamed)"} <span style="color:#8b93a5">` +
-        `(${g.groupid})</span></label>`).join("");
+      list.innerHTML =
+        `<div class="groupbox"><div class="gb-head">` +
+        `<span>${resp.length} host group(s) — select the scope</span>` +
+        `<span><a id="gbAll">all</a><a id="gbNone">none</a></span>` +
+        `</div>` +
+        resp.map(g =>
+          `<label class="grouppick">` +
+          `<input type="checkbox" class="grpPick" value="${g.groupid}"` +
+          `${picked.has(g.groupid) ? " checked" : ""}> ` +
+          `<span>${g.name || "(unnamed)"}</span>` +
+          `<span class="gid">${g.groupid}</span></label>`).join("") +
+        `</div>`;
+      document.getElementById("gbAll").onclick = () => {
+        list.querySelectorAll(".grpPick")
+          .forEach(c => c.checked = true);
+        list.onchange();
+      };
+      document.getElementById("gbNone").onclick = () => {
+        list.querySelectorAll(".grpPick")
+          .forEach(c => c.checked = false);
+        list.onchange();
+      };
       list.onchange = () => {
         f.host_group_refs.value =
           [...list.querySelectorAll(".grpPick:checked")]

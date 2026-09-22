@@ -127,6 +127,24 @@
     justify-content: space-between; align-items: center; }
   .meta { font-size: .8rem; color: #8b93a5; margin-top: 1.5rem; }
   .meta code { color: #b6bfce; }
+  /* ---------- discovered host groups picker ---------- */
+  .groupbox { border: 1px solid #262c3a; border-radius: 6px;
+    background: #1c2130; max-height: 240px; overflow-y: auto;
+    margin: .5rem 0 .9rem; }
+  .groupbox .gb-head { display: flex; justify-content: space-between;
+    align-items: center; padding: .45rem .7rem; border-bottom: 1px solid
+    #262c3a; font-size: .72rem; color: #8b93a5; position: sticky;
+    top: 0; background: #1c2130; }
+  .groupbox .gb-head a { color: #6ea8fe; cursor: pointer;
+    margin-left: .8rem; }
+  label.grouppick { display: flex; align-items: center; gap: .55rem;
+    font-size: .8rem; color: #e6e8ec; padding: .35rem .7rem;
+    margin: 0; font-weight: normal; cursor: pointer; }
+  label.grouppick:hover { background: #262c3a; }
+  label.grouppick input[type=checkbox] { width: auto; display: inline;
+    margin: 0; accent-color: #2f6fed; }
+  label.grouppick .gid { color: #8b93a5; font-size: .72rem;
+    margin-left: auto; }
   .badge { font-size: .7rem; background: #1c2130; border: 1px solid #262c3a;
     padding: .2rem .6rem; border-radius: 999px; color: #8b93a5; }
   .error { color: #f08080; font-size: .85rem; margin-bottom: 1rem; }
