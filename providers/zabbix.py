@@ -99,10 +99,22 @@ def _rpc(endpoint: str, method: str, params: dict, api_token: str) -> Any:
         extensions["sni_hostname"] = host
 
     try:
-        # PROVIDER_CA_FILE: enterprise CA bundle for internal/provider
-        # TLS endpoints (private CAs are the norm for intranet Zabbix).
+        # PROVIDER_CA_FILE: enterprise CA for internal/provider TLS
+        # endpoints (private CAs are the norm for intranet Zabbix).
+        # It AUGMENTS the public trust store — never replaces it — so
+        # private-CA providers and public-CA providers both work.
         import os
-        verify = os.environ.get("PROVIDER_CA_FILE") or True
+        import ssl
+        verify: "ssl.SSLContext | bool" = True
+        ca_file = os.environ.get("PROVIDER_CA_FILE")
+        if ca_file:
+            ctx = ssl.create_default_context()
+            try:
+                ctx.load_verify_locations(cafile=ca_file)
+            except (OSError, ssl.SSLError) as exc:
+                raise ProviderUnavailableError(
+                    f"PROVIDER_CA_FILE unreadable: {exc}") from exc
+            verify = ctx
         with httpx.Client(timeout=_TIMEOUT, verify=verify) as client:
             resp = client.post(
                 url,
