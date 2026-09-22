@@ -91,6 +91,32 @@ def end_session_endpoint() -> str:
     )
 
 
+def token_endpoint() -> str:
+    """Server-side token endpoint (internal Keycloak URL).
+
+    Built from the internal URL, never from the discovery document:
+    Keycloak announces browser-facing endpoints that may be
+    unreachable (or resolve elsewhere) inside the container network.
+    """
+    return (
+        f"{settings.keycloak_internal_url}/realms/{settings.keycloak_realm}"
+        "/protocol/openid-connect/token"
+    )
+
+
+def expected_issuer() -> str:
+    """Issuer stamped on tokens — the realm's public (frontend) URL.
+
+    Keycloak always uses the configured frontend URL for `iss`,
+    regardless of which channel issued the token; the discovery
+    document's `issuer` field is resolved per-request and cannot be
+    trusted when fetched via the internal address.
+    """
+    return (
+        f"{settings.keycloak_public_url}/realms/{settings.keycloak_realm}"
+    )
+
+
 def build_authorize_url(*, state: str, nonce: str, code_challenge: str) -> str:
     redirect_uri = f"{settings.bff_public_url}/auth/callback"
     params = {
@@ -109,11 +135,10 @@ def build_authorize_url(*, state: str, nonce: str, code_challenge: str) -> str:
 
 async def exchange_code(*, code: str, code_verifier: str) -> dict:
     """Exchange an authorization code for tokens (server-side only)."""
-    disc = await discover()
     redirect_uri = f"{settings.bff_public_url}/auth/callback"
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(
-            disc["token_endpoint"],
+            token_endpoint(),
             data={
                 "grant_type": "authorization_code",
                 "client_id": settings.keycloak_client_id,
@@ -148,18 +173,17 @@ class ValidatedIdentity:
     authenticated_at_epoch: int     # `auth_time`
 
 
-def validate_id_token(id_token: str, *, expected_nonce: str) -> ValidatedIdentity:
+def validate_id_token(
+    id_token: str, *, expected_nonce: str, expected_issuer: str
+) -> ValidatedIdentity:
     """Validate an ID token: signature (JWKS), iss, aud, exp, nonce."""
     signing_key = _jwks().get_signing_key_from_jwt(id_token).key
-    issuer = (
-        f"{settings.keycloak_public_url}/realms/{settings.keycloak_realm}"
-    )
     claims = jwt.decode(
         id_token,
         signing_key,
         algorithms=["RS256"],
         audience=settings.keycloak_client_id,
-        issuer=issuer,
+        issuer=expected_issuer,
         options={"require": ["exp", "iat", "iss", "aud", "sub", "nonce"]},
     )
     if claims.get("nonce") != expected_nonce:

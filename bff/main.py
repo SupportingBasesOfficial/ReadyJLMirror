@@ -203,7 +203,11 @@ async def auth_callback(code: str, state: str) -> Response:
 
     try:
         tokens = await oidc.exchange_code(code=code, code_verifier=code_verifier)
-        identity = oidc.validate_id_token(tokens["id_token"], expected_nonce=nonce)
+        identity = oidc.validate_id_token(
+            tokens["id_token"],
+            expected_nonce=nonce,
+            expected_issuer=oidc.expected_issuer(),
+        )
     except Exception as exc:
         logger.warning("OIDC exchange/validation failed: %s", exc)
         return RedirectResponse("/?error=auth_failed", status_code=status.HTTP_302_FOUND)
