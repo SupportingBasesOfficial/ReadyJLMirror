@@ -27,6 +27,14 @@ function esc(v) {
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;",
             '"': "&quot;", "'": "&#39;" }[c]));
 }
+
+// Server timestamps are always UTC ISO; render in the viewer's own
+// timezone (the browser knows it) — correct for any user anywhere.
+function fmtTs(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? esc(iso) : esc(d.toLocaleString());
+}
 function fail(msg) {
   err.textContent = msg;
   err.classList.remove("hidden");
@@ -113,7 +121,7 @@ async function refresh() {
         document.querySelectorAll(".pick").forEach(b =>
           b.addEventListener("click", () => selectTenant(b.dataset.t)));
       };
-      meta.innerHTML = `authenticated at <code>${esc(s.authenticated_at)}</code>`;
+      meta.innerHTML = `authenticated at <code>${fmtTs(s.authenticated_at)}</code>`;
       showView(currentView);
       break;
     }
@@ -230,7 +238,7 @@ function renderAlertList(tid) {
         `<td><code>${esc((a.alert_id || "").slice(0, 18))}</code></td>` +
         `<td>${esc(a.policy_id)} v${esc(a.policy_version)}</td>` +
         `<td>${esc(a.source_kind)}</td>` +
-        `<td>${esc((a.opened_at || "").slice(0, 19))}</td></tr>`).join("") +
+        `<td>${fmtTs(a.opened_at)}</td></tr>`).join("") +
       `</tbody></table>`;
   document.querySelectorAll("[data-alert]").forEach(row =>
     row.addEventListener("click", () =>
@@ -430,7 +438,7 @@ async function loadSourceDetail(sourceId, tid) {
         `<td>${esc(o.responsibility_kind)}</td>` +
         `<td><code>${esc((o.monitoring_sync_operation_id || "").slice(0, 20))}</code></td>` +
         `<td>${esc(o.last_error_class)}</td>` +
-        `<td>${esc(o.created_at)}</td>` +
+        `<td>${fmtTs(o.created_at)}</td>` +
         `<td>${badStates.has(o.state)
             ? `<button class="secondary op-requeue" data-op="${esc(o.monitoring_sync_operation_id)}">retry</button>`
             : ""}</td></tr>`).join("")
@@ -529,7 +537,7 @@ async function loadAlertDetail(alertId, tid) {
   const transitions = (detail.transitions || []).map(t =>
     `<li><span class="t-kind">${esc(t.to_lifecycle_state)}</span> ` +
     `at r${esc(t.source_revision)} ` +
-    `<span class="t-at">${esc((t.occurred_at || "").slice(0, 19))}</span></li>`
+    `<span class="t-at">${fmtTs(t.occurred_at)}</span></li>`
   ).join("");
 
   const cur = (timeline && timeline.current_action) || null;
@@ -545,7 +553,7 @@ async function loadAlertDetail(alertId, tid) {
     `${e.action ? " · " + esc(e.action) : ""}` +
     `${e.note ? " · " + esc(e.note) : ""}` +
     `${e.reason ? " · " + esc(e.reason) : ""} ` +
-    `<span class="t-at">${esc((e.at || "").slice(0, 19))}</span></li>`
+    `<span class="t-at">${fmtTs(e.at)}</span></li>`
   ).join("") || '<li class="empty">no human operations yet</li>';
 
   // Delivery is per-intent and scoped to THIS alert only.
@@ -740,18 +748,18 @@ async function loadIncidentDetail(incidentId, tid, alertId, reload) {
   const trs = (inc.transitions || []).map(t =>
     `<li><span class="t-kind">${esc(t.to_state)}</span> ` +
     `${esc(t.actor_principal_id)} ` +
-    `<span class="t-at">${esc((t.occurred_at || "").slice(0, 19))}` +
+    `<span class="t-at">${fmtTs(t.occurred_at)}` +
     `</span></li>`).join("") || '<li class="empty">none</li>';
   const asg = (inc.assignments || []).map(a =>
     `<li>${esc(a.assignee_principal_id)} ` +
     `${a.effective_until
         ? '<span class="t-at">until ' +
-          esc(a.effective_until.slice(0, 19)) + "</span>"
+          fmtTs(a.effective_until) + "</span>"
         : '<span class="t-kind">current</span>'}</li>`).join("") ||
     '<li class="empty">unassigned</li>';
   const cmts = (inc.comments || []).map(c =>
     `<li>${esc(c.body)} — ${esc(c.actor_principal_id)} ` +
-    `<span class="t-at">${esc((c.created_at || "").slice(0, 19))}` +
+    `<span class="t-at">${fmtTs(c.created_at)}` +
     `</span></li>`).join("") || '<li class="empty">no comments</li>';
 
   const next = {open: ["in_progress", "resolved"],
