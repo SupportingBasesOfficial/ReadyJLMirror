@@ -160,25 +160,30 @@ async function poll(sourceId, kind, tenantId) {
   const r = await fetch(
     `/api/v1/monitoring/sources/${sourceId}/${kind}?tenant_id=${tenantId}`,
     { method: "POST", credentials: "same-origin", headers: csrfHeaders() });
-  return r.ok;
+  if (!r.ok) return null;
+  const body = await r.json().catch(() => ({}));
+  return body.monitoring_sync_operation_id || true;
 }
 
-// After enqueue, follow the ops until they leave pending/running —
-// the detail view reloads so progress and results become visible
-// without a manual refresh. `seq` keeps stale watchers from
-// yanking the user back after they navigate away.
-async function watchSourceOps(sourceId, tid, seq) {
-  for (let i = 0; i < 40; i++) {
+// After enqueue, follow the enqueued op: one reload to show it
+// pending/running, one final reload when it settles. `seq` keeps
+// stale watchers from yanking the user back after navigating away.
+async function watchSourceOps(sourceId, tid, seq, opId) {
+  await new Promise(r => setTimeout(r, 2500));
+  if (seq !== detailSeq) return;
+  await loadSourceDetail(sourceId, tid, seq);
+  if (typeof opId !== "string") return;
+  for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 3000));
     if (seq !== detailSeq) return;
     let ops;
     try { ops = await api(`/sources/${sourceId}/operations?tenant_id=${tid}`); }
     catch { return; }
-    const busy = Array.isArray(ops) && ops.some(
-      o => o.state === "pending" || o.state === "running");
-    if (!busy || i % 2 === 0) {
+    const op = Array.isArray(ops) && ops.find(
+      o => o.monitoring_sync_operation_id === opId);
+    if (!op || (op.state !== "pending" && op.state !== "running")) {
       if (seq === detailSeq) await loadSourceDetail(sourceId, tid, seq);
-      if (!busy) return;
+      return;
     }
   }
 }
@@ -500,10 +505,10 @@ async function loadSourceDetail(sourceId, tid, seq) {
   det.querySelectorAll("[data-p]").forEach(b =>
     b.addEventListener("click", async () => {
       b.disabled = true;
-      const ok = await poll(sourceId, b.dataset.p, tid);
-      b.textContent = ok ? "queued" : "failed";
-      if (!ok) { b.disabled = false; return; }
-      watchSourceOps(sourceId, tid, seq);
+      const opId = await poll(sourceId, b.dataset.p, tid);
+      b.textContent = opId ? "queued" : "failed";
+      if (!opId) { b.disabled = false; return; }
+      watchSourceOps(sourceId, tid, seq, opId);
     }));
   det.querySelectorAll(".op-requeue").forEach(b =>
     b.addEventListener("click", async () => {
