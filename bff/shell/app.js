@@ -317,7 +317,8 @@ function renderOnboardForm(tid) {
       list.innerHTML =
         `<div class="groupbox"><div class="gb-head">` +
         `<span>${resp.length} host group(s) — select the scope</span>` +
-        `<span><a id="gbAll">all</a><a id="gbNone">none</a></span>` +
+        `<span><a id="gbAll">select all</a>` +
+        `<a id="gbNone">clear</a></span>` +
         `</div>` +
         resp.map(g =>
           `<label class="grouppick">` +
