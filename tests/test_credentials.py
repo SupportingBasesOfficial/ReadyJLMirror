@@ -60,3 +60,31 @@ def test_chain_raises_last_error(tmp_path):
         ChainedCredentialResolver(
             FileSecretsResolver(tmp_path), EnvCredentialResolver()
         ).resolve_zabbix_api_token("missing-everywhere")
+
+
+# --- provider token write path (UI-supplied credential at onboarding) ---
+
+
+def test_write_binding_token_roundtrip(tmp_path):
+    from providers.credentials import write_binding_token
+    write_binding_token("my-ref", "  secret-token-123 ", tmp_path)
+    f = tmp_path / "my-ref.token"
+    assert f.read_text().strip() == "secret-token-123"
+    cred = FileSecretsResolver(tmp_path).resolve_zabbix_api_token(
+        "my-ref")
+    assert cred.api_token == "secret-token-123"
+
+
+def test_write_binding_token_rejects_traversal(tmp_path):
+    from providers.credentials import write_binding_token
+    with pytest.raises(CredentialResolutionError):
+        write_binding_token("../escape", "x", tmp_path)
+    with pytest.raises(CredentialResolutionError):
+        write_binding_token("a/b", "x", tmp_path)
+    assert not (tmp_path / "escape.token").exists()
+
+
+def test_write_binding_token_rejects_empty(tmp_path):
+    from providers.credentials import write_binding_token
+    with pytest.raises(CredentialResolutionError):
+        write_binding_token("ok-ref", "   ", tmp_path)

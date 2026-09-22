@@ -45,3 +45,4 @@ secrets/*
 
 # local backup artifacts (dumps are protected data)
 backups/
+secrets-tokens/

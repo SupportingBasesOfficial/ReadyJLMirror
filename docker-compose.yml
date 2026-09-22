@@ -73,6 +73,9 @@ services:
       DB_PASSWORD: jlmirror_dev
       BFF_INTERNAL_SECRET: dev-internal-secret-change-me
       SECRETS_DIR: /run/secrets
+      # Provider tokens supplied at onboarding land here (write-only
+      # for the API; the worker mounts it read-only).
+      CREDENTIALS_DIR: /run/secret-bindings
       # Opt-in mTLS: python -m scripts.dev_tls, then set API_MTLS=1
       # plus the cert paths in .env (see .env.example).
       API_MTLS: ${API_MTLS:-}
@@ -81,6 +84,7 @@ services:
       API_CA_FILE: ${API_CA_FILE:-}
     volumes:
       - ./secrets:/run/secrets:ro
+      - ./secrets-tokens:/run/secret-bindings
     healthcheck:
       test: ["CMD-SHELL",
              "python -c \"import os,httpx,sys; mtls=os.environ.get('API_MTLS'); port=os.environ.get('API_PORT','8000'); kw={'cert':('/run/secrets/tls/bff-cert.pem','/run/secrets/tls/bff-key.pem'),'verify':'/run/secrets/tls/ca.pem'} if mtls else {}; scheme='https' if mtls else 'http'; sys.exit(0 if httpx.get(f'{scheme}://localhost:{port}/health',timeout=3,**kw).status_code==200 else 1)\""]
@@ -142,7 +146,7 @@ services:
       DB_NAME: jlmirror
       DB_USER: jlmirror_worker
       DB_PASSWORD: jlmirror_dev
-      CREDENTIALS_DIR: /run/secrets
+      CREDENTIALS_DIR: /run/secret-bindings
       SECRETS_DIR: /run/secrets
       # Dev webhook: real HTTP delivery to the API sink — leave
       # empty for dev-log simulated receipts.
@@ -163,6 +167,7 @@ services:
       PROVIDER_CA_FILE: ${PROVIDER_CA_FILE:-}
     volumes:
       - ./secrets:/run/secrets:ro
+      - ./secrets-tokens:/run/secret-bindings:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

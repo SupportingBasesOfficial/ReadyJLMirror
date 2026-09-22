@@ -259,6 +259,10 @@ function renderOnboardForm(tid) {
     ` placeholder="https://zabbix.example.com" pattern="https://.*"></label>` +
     `<label>Credential binding ref<input name="credential_binding_ref"` +
     ` required placeholder="cred-binding-1"></label>` +
+    `<label>API token <span style="color:#8b93a5">(optional — ` +
+    `written to the secrets store, never stored in the DB)</span>` +
+    `<input name="api_token" type="password" autocomplete="off"` +
+    ` placeholder="leave empty if the token file already exists"></label>` +
     `<label>Host group refs<input name="host_group_refs" required` +
     ` placeholder="5,6 (comma-separated groupids)"></label>` +
     `<button type="submit">Create source</button>` +
@@ -279,6 +283,8 @@ function renderOnboardForm(tid) {
         host_group_refs: f.host_group_refs.value.split(",")
           .map(s => s.trim()).filter(Boolean),
       };
+      if (f.api_token.value.trim())
+        body.api_token = f.api_token.value.trim();
       const r = await fetch("/api/v1/monitoring/sources", {
         method: "POST", credentials: "same-origin",
         headers: csrfHeaders(), body: JSON.stringify(body),

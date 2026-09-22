@@ -70,6 +70,37 @@ class FileSecretsResolver:
         )
 
 
+def write_binding_token(
+    credential_binding_ref: str,
+    token: str,
+    secrets_dir: str | Path | None = None,
+) -> Path:
+    """Persist a provider token into the secrets store.
+
+    Used by the API when a tenant supplies the token at onboarding
+    instead of pre-seeding the file. The token is written atomically
+    (temp file + rename) with 0600 permissions; it is never logged
+    and never reaches the database — only the binding ref is stored.
+    """
+    if not _REF_SAFE.match(credential_binding_ref):
+        raise CredentialResolutionError(
+            "credential binding ref is not a safe file component"
+        )
+    token = token.strip()
+    if not token:
+        raise CredentialResolutionError("credential token is empty")
+    directory = Path(
+        secrets_dir or os.environ.get("CREDENTIALS_DIR", "/run/secrets")
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"{credential_binding_ref}.token"
+    tmp = directory / f".{credential_binding_ref}.{os.getpid()}.tmp"
+    tmp.write_text(token + "\n", encoding="utf-8")
+    tmp.chmod(0o600)
+    os.replace(tmp, target)
+    return target
+
+
 class EnvCredentialResolver:
     """Environment-variable credential resolver (development)."""
 

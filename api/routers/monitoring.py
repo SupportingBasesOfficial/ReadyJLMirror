@@ -191,6 +191,10 @@ class SourceCreateRequest(BaseModel):
     credential_binding_ref: str
     host_group_refs: list[str]
     idempotency_key: str | None = None
+    # Optional: tenant supplies the provider token once — the API
+    # writes it to the secrets store (0600, atomic) under the binding
+    # ref. It is never logged and never reaches the database.
+    api_token: str | None = None
 
 
 class SourceResponse(BaseModel):
@@ -214,6 +218,25 @@ async def create_source(body: SourceCreateRequest, request: Request) -> SourceRe
         ConfiguredProviderScope.from_refs(body.host_group_refs)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    if body.api_token:
+        # Write the token to the secrets store BEFORE the source is
+        # created — a failed write aborts onboarding cleanly. The
+        # binding ref is validated (strict charset, no traversal).
+        from providers.credentials import write_binding_token
+        from jlmirror_monitoring.validation_worker import (
+            CredentialResolutionError)
+        try:
+            write_binding_token(
+                body.credential_binding_ref, body.api_token)
+        except CredentialResolutionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc))
+        except OSError:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="credential store unavailable")
 
     key = body.idempotency_key or f"idem-{secrets.token_urlsafe(16)}"
     try:
