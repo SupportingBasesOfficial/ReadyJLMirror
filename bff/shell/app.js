@@ -44,6 +44,7 @@ let sessionState = null;
 let currentView = "alerts";
 let alertFilter = "active";
 let lastAlerts = [];
+let detailSeq = 0;
 
 function renderCenter(html) {
   render(`<div class="centerwrap"><div class="card">${html}</div></div>`);
@@ -156,9 +157,30 @@ function api(path) {
 }
 
 async function poll(sourceId, kind, tenantId) {
-  await fetch(`/api/v1/monitoring/sources/${sourceId}/${kind}?tenant_id=${tenantId}`, {
-    method: "POST", credentials: "same-origin", headers: csrfHeaders(),
-  });
+  const r = await fetch(
+    `/api/v1/monitoring/sources/${sourceId}/${kind}?tenant_id=${tenantId}`,
+    { method: "POST", credentials: "same-origin", headers: csrfHeaders() });
+  return r.ok;
+}
+
+// After enqueue, follow the ops until they leave pending/running —
+// the detail view reloads so progress and results become visible
+// without a manual refresh. `seq` keeps stale watchers from
+// yanking the user back after they navigate away.
+async function watchSourceOps(sourceId, tid, seq) {
+  for (let i = 0; i < 40; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    if (seq !== detailSeq) return;
+    let ops;
+    try { ops = await api(`/sources/${sourceId}/operations?tenant_id=${tid}`); }
+    catch { return; }
+    const busy = Array.isArray(ops) && ops.some(
+      o => o.state === "pending" || o.state === "running");
+    if (!busy || i % 2 === 0) {
+      if (seq === detailSeq) await loadSourceDetail(sourceId, tid, seq);
+      if (!busy) return;
+    }
+  }
 }
 
 async function loadMonitoring(s) {
@@ -384,7 +406,9 @@ function renderOnboardForm(tid) {
     });
 }
 
-async function loadSourceDetail(sourceId, tid) {
+async function loadSourceDetail(sourceId, tid, seq) {
+  if (seq === undefined) seq = ++detailSeq;
+  else detailSeq = seq;
   const det = root;
   det.innerHTML = '<div class="spinner"></div>';
   const [health, problems, current, ops, alerts] = await Promise.all([
@@ -475,8 +499,11 @@ async function loadSourceDetail(sourceId, tid) {
 
   det.querySelectorAll("[data-p]").forEach(b =>
     b.addEventListener("click", async () => {
-      await poll(sourceId, b.dataset.p, tid);
-      b.disabled = true; b.textContent = "queued";
+      b.disabled = true;
+      const ok = await poll(sourceId, b.dataset.p, tid);
+      b.textContent = ok ? "queued" : "failed";
+      if (!ok) { b.disabled = false; return; }
+      watchSourceOps(sourceId, tid, seq);
     }));
   det.querySelectorAll(".op-requeue").forEach(b =>
     b.addEventListener("click", async () => {
