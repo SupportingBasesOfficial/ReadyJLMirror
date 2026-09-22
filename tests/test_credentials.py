@@ -88,3 +88,63 @@ def test_write_binding_token_rejects_empty(tmp_path):
     from providers.credentials import write_binding_token
     with pytest.raises(CredentialResolutionError):
         write_binding_token("ok-ref", "   ", tmp_path)
+
+
+# --- onboarding discovery endpoint (token -> real group list) ---
+
+
+def test_discover_groups_endpoint(monkeypatch):
+    """Discovery returns the provider's real groups; token stays transient."""
+    from fastapi.testclient import TestClient
+    from api.main import app
+    from jlmirror_monitoring.validation_worker import (
+        AdmittedProviderEndpoint, ZabbixHostGroup)
+    from providers import zabbix as zbx
+    from providers import egress
+
+    seen = {}
+
+    class _Admission:
+        def admit_zabbix_api(self, cfg):
+            seen["base_url"] = cfg.base_url
+            return AdmittedProviderEndpoint(
+                api_url=cfg.base_url.rstrip("/") + "/api_jsonrpc.php",
+                egress_decision_ref="egress-test")
+
+    class _Client:
+        def list_host_groups(self, endpoint, credential):
+            seen["token"] = credential.api_token
+            return [
+                ZabbixHostGroup(groupid="5", name="Cliente A"),
+                ZabbixHostGroup(groupid="9", name="Network devices"),
+            ]
+
+    monkeypatch.setattr(egress, "DevOutboundAdmission", _Admission)
+    monkeypatch.setattr(zbx, "ZabbixClient", _Client)
+    # Endpoint imports resolve at call time — patch the module attrs
+    import api.routers.monitoring as mon
+    monkeypatch.setattr(mon, "DevOutboundAdmission", _Admission,
+                        raising=False)
+    monkeypatch.setattr(mon, "ZabbixClient", _Client, raising=False)
+
+    r = TestClient(app).post(
+        "/api/v1/monitoring/sources/discover-groups",
+        json={"provider_base_url": "https://zbx.example.com",
+              "api_token": "transient-token"})
+    assert r.status_code == 200, r.text
+    assert r.json() == [
+        {"groupid": "5", "name": "Cliente A"},
+        {"groupid": "9", "name": "Network devices"},
+    ]
+    assert seen["token"] == "transient-token"
+    assert seen["base_url"] == "https://zbx.example.com"
+
+
+def test_discover_groups_requires_token():
+    from fastapi.testclient import TestClient
+    from api.main import app
+    r = TestClient(app).post(
+        "/api/v1/monitoring/sources/discover-groups",
+        json={"provider_base_url": "https://zbx.example.com",
+              "api_token": "   "})
+    assert r.status_code == 400

@@ -267,6 +267,77 @@ async def create_source(body: SourceCreateRequest, request: Request) -> SourceRe
     return SourceResponse(**result)
 
 
+class DiscoverGroupsRequest(BaseModel):
+    provider_base_url: str
+    # Transient token — used once for the discovery call, never
+    # persisted or logged. The onboarding form supplies the same
+    # token it will later submit as `api_token` on source creation.
+    api_token: str
+
+
+class DiscoveredGroup(BaseModel):
+    groupid: str
+    name: str | None = None
+
+
+@router.post("/sources/discover-groups", response_model=list[DiscoveredGroup])
+async def discover_groups(
+    body: DiscoverGroupsRequest,
+) -> list[DiscoveredGroup]:
+    """List the host groups visible to a provider token.
+
+    Lets the onboarding UI offer real scope choices instead of asking
+    the tenant to hunt groupids in the Zabbix UI. The call goes
+    through the same egress admission as the worker (allowlist + DNS
+    pinning + SSRF screen); the token is used in memory only.
+    """
+    try:
+        provider_config = ZabbixProviderConfiguration(
+            base_url=body.provider_base_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=str(exc))
+    if not body.api_token.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="api_token required for discovery")
+
+    import asyncio
+
+    from providers.egress import DevOutboundAdmission
+    from providers.zabbix import ZabbixClient
+    from jlmirror_monitoring.validation_worker import (
+        EgressAdmissionError,
+        ProviderAuthenticationError,
+        ProviderProtocolError,
+        ProviderUnavailableError,
+        ResolvedZabbixCredential,
+    )
+
+    try:
+        endpoint = DevOutboundAdmission().admit_zabbix_api(provider_config)
+    except EgressAdmissionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=str(exc))
+
+    credential = ResolvedZabbixCredential(
+        api_token=body.api_token.strip(),
+        credential_generation_ref="cred-gen-transient:onboarding",
+    )
+    try:
+        groups = await asyncio.to_thread(
+            ZabbixClient().list_host_groups, endpoint, credential)
+    except ProviderAuthenticationError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="provider rejected the API token")
+    except ProviderUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail=str(exc))
+    except ProviderProtocolError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail=str(exc))
+    return [DiscoveredGroup(groupid=g.groupid, name=g.name) for g in groups]
+
+
 class SourceDetailResponse(BaseModel):
     monitoring_source_id: str
     display_name: str

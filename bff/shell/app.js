@@ -265,11 +265,68 @@ function renderOnboardForm(tid) {
     ` placeholder="leave empty if the token file already exists"></label>` +
     `<label>Host group refs<input name="host_group_refs" required` +
     ` placeholder="5,6 (comma-separated groupids)"></label>` +
+    `<button type="button" class="secondary small" id="discoverGroups">` +
+    `discover groups</button>` +
+    ` <span style="color:#8b93a5;font-size:12px">uses base URL + ` +
+    `API token above to list the provider's groups</span>` +
+    `<div id="groupList" style="margin:8px 0"></div>` +
     `<button type="submit">Create source</button>` +
     `<div class="error hidden" id="onboardErr"></div></form></div>`;
 
   document.getElementById("backMon").addEventListener(
     "click", () => showView("monitoring"));
+  document.getElementById("discoverGroups").addEventListener(
+    "click", async () => {
+      const f = document.getElementById("onboardForm");
+      const list = document.getElementById("groupList");
+      const err = document.getElementById("onboardErr");
+      err.classList.add("hidden");
+      if (!f.api_token.value.trim()) {
+        err.textContent = "Paste the API token first — discovery " +
+          "authenticates with it (it is not stored by this call).";
+        err.classList.remove("hidden");
+        return;
+      }
+      list.innerHTML = '<div class="spinner"></div>';
+      const r = await fetch("/api/v1/monitoring/sources/discover-groups", {
+        method: "POST", credentials: "same-origin",
+        headers: csrfHeaders(),
+        body: JSON.stringify({
+          provider_base_url: f.provider_base_url.value.trim(),
+          api_token: f.api_token.value.trim(),
+        }),
+      });
+      const resp = await r.json();
+      if (!r.ok) {
+        list.innerHTML = "";
+        err.textContent = resp.detail
+          ? (typeof resp.detail === "string" ? resp.detail
+             : JSON.stringify(resp.detail))
+          : "Discovery failed";
+        err.classList.remove("hidden");
+        return;
+      }
+      if (!resp.length) {
+        list.innerHTML = "<span style='color:#8b93a5'>no host groups " +
+          "visible to this token</span>";
+        return;
+      }
+      const picked = new Set(
+        f.host_group_refs.value.split(",").map(s => s.trim())
+          .filter(Boolean));
+      list.innerHTML = resp.map(g =>
+        `<label style="display:inline-flex;gap:6px;margin:2px 10px 2px 0;` +
+        `font-weight:normal">` +
+        `<input type="checkbox" class="grpPick" value="${g.groupid}"` +
+        `${picked.has(g.groupid) ? " checked" : ""}> ` +
+        `${g.name || "(unnamed)"} <span style="color:#8b93a5">` +
+        `(${g.groupid})</span></label>`).join("");
+      list.onchange = () => {
+        f.host_group_refs.value =
+          [...list.querySelectorAll(".grpPick:checked")]
+            .map(c => c.value).join(",");
+      };
+    });
   document.getElementById("onboardForm").addEventListener(
     "submit", async (ev) => {
       ev.preventDefault();

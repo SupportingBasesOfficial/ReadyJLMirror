@@ -76,6 +76,11 @@ services:
       # Provider tokens supplied at onboarding land here (write-only
       # for the API; the worker mounts it read-only).
       CREDENTIALS_DIR: /run/secret-bindings
+      # Onboarding discovery calls the provider from the API — same
+      # fail-closed egress posture as the worker.
+      EGRESS_ALLOW_HOSTS: ${EGRESS_ALLOW_HOSTS:-}
+      EGRESS_ALLOW_PRIVATE_IPS: ${EGRESS_ALLOW_PRIVATE_IPS:-}
+      PROVIDER_CA_FILE: ${PROVIDER_CA_FILE:-}
       # Opt-in mTLS: python -m scripts.dev_tls, then set API_MTLS=1
       # plus the cert paths in .env (see .env.example).
       API_MTLS: ${API_MTLS:-}

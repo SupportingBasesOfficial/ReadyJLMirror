@@ -171,6 +171,31 @@ class ZabbixClient:
         )
         if not isinstance(result, list):
             raise ProviderProtocolError("hostgroup.get result is not a list")
+        return self._parse_groups(result)
+
+    def list_host_groups(
+        self,
+        endpoint: AdmittedProviderEndpoint,
+        credential: ResolvedZabbixCredential,
+    ) -> Sequence[ZabbixHostGroup]:
+        """Discover every host group visible to the credential.
+
+        Unfiltered ``hostgroup.get`` — used at onboarding so the tenant
+        picks scope anchors from the provider's real group list instead
+        of typing opaque groupids.
+        """
+        result = _rpc(
+            endpoint.api_url,
+            "hostgroup.get",
+            {"output": ["groupid", "name"], "sortfield": "name"},
+            credential.api_token,
+        )
+        if not isinstance(result, list):
+            raise ProviderProtocolError("hostgroup.get result is not a list")
+        return self._parse_groups(result)
+
+    @staticmethod
+    def _parse_groups(result: Sequence[Any]) -> list[ZabbixHostGroup]:
         groups: list[ZabbixHostGroup] = []
         for item in result:
             if not isinstance(item, dict) or "groupid" not in item:
