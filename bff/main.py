@@ -305,7 +305,23 @@ async def auth_logout(request: Request) -> Response:
                 expected_generation=session["session_generation"],
             )
             await conn.commit()
-    response = RedirectResponse("/", status_code=status.HTTP_302_FOUND)
+    response: Response
+    sid = str(session.get("idp_session_ref") or "") if session else ""
+    if sid and not sid.startswith("dev-sid-"):
+        # RP-initiated logout: end the IdP SSO session too, then the
+        # IdP lands back on the shell. Without this the Keycloak
+        # session outlives our logout and the next sign-in silently
+        # re-authenticates via SSO instead of prompting.
+        from urllib.parse import urlencode
+        params = urlencode({
+            "client_id": settings.keycloak_client_id,
+            "post_logout_redirect_uri": f"{settings.bff_public_url}/",
+        })
+        response = RedirectResponse(
+            f"{oidc.end_session_endpoint()}?{params}",
+            status_code=status.HTTP_302_FOUND)
+    else:
+        response = RedirectResponse("/", status_code=status.HTTP_302_FOUND)
     _clear_auth_cookies(response)
     return response
 
