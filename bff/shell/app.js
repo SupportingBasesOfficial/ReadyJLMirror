@@ -165,26 +165,49 @@ async function poll(sourceId, kind, tenantId) {
   return body.monitoring_sync_operation_id || true;
 }
 
-// After enqueue, follow the enqueued op: one reload to show it
-// pending/running, one final reload when it settles. `seq` keeps
-// stale watchers from yanking the user back after navigating away.
-async function watchSourceOps(sourceId, tid, seq, opId) {
-  await new Promise(r => setTimeout(r, 2500));
-  if (seq !== detailSeq) return;
-  await loadSourceDetail(sourceId, tid, seq);
-  if (typeof opId !== "string") return;
-  for (let i = 0; i < 30; i++) {
-    await new Promise(r => setTimeout(r, 3000));
-    if (seq !== detailSeq) return;
-    let ops;
-    try { ops = await api(`/sources/${sourceId}/operations?tenant_id=${tid}`); }
-    catch { return; }
-    const op = Array.isArray(ops) && ops.find(
-      o => o.monitoring_sync_operation_id === opId);
-    if (!op || (op.state !== "pending" && op.state !== "running")) {
-      if (seq === detailSeq) await loadSourceDetail(sourceId, tid, seq);
-      return;
+// After enqueue, follow the enqueued ops: one reload to show them
+// pending/running, one final reload when they settle. A single
+// watcher per rendered detail accumulates the op ids of every
+// click, so several buttons do not start parallel reload loops.
+// `seq` keeps stale watchers from yanking the user back after
+// navigating away.
+let opWatch = null;
+
+function watchSourceOps(sourceId, tid, seq, opId) {
+  if (!opWatch || opWatch.seq !== seq || !opWatch.alive) {
+    opWatch = { seq, sourceId, tid, opIds: new Set(), alive: true };
+    runOpWatch(opWatch);
+  }
+  if (typeof opId === "string") opWatch.opIds.add(opId);
+}
+
+async function runOpWatch(w) {
+  try {
+    await new Promise(r => setTimeout(r, 2500));
+    if (w.seq !== detailSeq) return;
+    await loadSourceDetail(w.sourceId, w.tid, w.seq);
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      if (w.seq !== detailSeq) return;
+      let ops;
+      try {
+        ops = await api(
+          `/sources/${w.sourceId}/operations?tenant_id=${w.tid}`);
+      } catch { return; }
+      if (!Array.isArray(ops)) return;
+      for (const o of ops) {
+        if (w.opIds.has(o.monitoring_sync_operation_id)
+            && o.state !== "pending" && o.state !== "running")
+          w.opIds.delete(o.monitoring_sync_operation_id);
+      }
+      if (w.opIds.size === 0) {
+        if (w.seq === detailSeq)
+          await loadSourceDetail(w.sourceId, w.tid, w.seq);
+        return;
+      }
     }
+  } finally {
+    w.alive = false;
   }
 }
 
@@ -416,19 +439,27 @@ async function loadSourceDetail(sourceId, tid, seq) {
   else detailSeq = seq;
   const det = root;
   det.innerHTML = '<div class="spinner"></div>';
-  const [health, problems, current, ops, alerts] = await Promise.all([
-    api(`/sources/${sourceId}/health?tenant_id=${tid}`),
-    api(`/sources/${sourceId}/problems?tenant_id=${tid}&active_only=true`),
-    api(`/sources/${sourceId}/current?tenant_id=${tid}`),
-    api(`/sources/${sourceId}/operations?tenant_id=${tid}`),
-    fetch(`/api/v1/alerting/alerts?tenant_id=${tid}&source_id=${sourceId}`,
-          { credentials: "same-origin" })
-        .then(r => r.ok ? r.json() : []),
-  ]);
+  const [health, problems, current, ops, alerts, resources] =
+    await Promise.all([
+      api(`/sources/${sourceId}/health?tenant_id=${tid}`),
+      api(`/sources/${sourceId}/problems?tenant_id=${tid}&active_only=true`),
+      api(`/sources/${sourceId}/current?tenant_id=${tid}`),
+      api(`/sources/${sourceId}/operations?tenant_id=${tid}`),
+      fetch(`/api/v1/alerting/alerts?tenant_id=${tid}&source_id=${sourceId}`,
+            { credentials: "same-origin" })
+          .then(r => r.ok ? r.json() : []),
+      api(`/sources/${sourceId}/resources?tenant_id=${tid}`),
+    ]);
+
+  const resNames = {};
+  if (Array.isArray(resources)) for (const r of resources)
+    resNames[r.monitoring_resource_id] = r.display_name;
 
   const healthRows = Array.isArray(health) && health.length
     ? health.map(h =>
-        `<tr><td><code>${esc(h.monitoring_resource_id)}</code></td>` +
+        `<tr><td title="${esc(h.monitoring_resource_id)}">` +
+        `${esc(resNames[h.monitoring_resource_id]
+              || h.monitoring_resource_id)}</td>` +
         `<td class="h-${esc(h.health_class)}">${esc(h.health_class)}</td>` +
         `<td>${esc(h.evidence_state)}</td>` +
         `<td>r${esc(h.projection_revision)}</td></tr>`).join("")
@@ -478,12 +509,20 @@ async function loadSourceDetail(sourceId, tid, seq) {
     `&#8592; monitoring</button>` +
     `<h2>Source ${esc(sourceId.slice(0, 24))}</h2></div>` +
     `<div class="actions">` +
-    `<button class="secondary" data-p="inventory">inventory</button>` +
-    `<button class="secondary" data-p="metrics/poll">metrics</button>` +
-    `<button class="secondary" data-p="current/poll">current</button>` +
-    `<button class="secondary" data-p="history/poll">history</button>` +
-    `<button class="secondary" data-p="problems/poll">problems</button>` +
-    `<button class="secondary" id="monRefresh">refresh</button></div>` +
+    `<span class="hint">sync:</span>` +
+    `<button class="secondary" data-p="inventory" ` +
+    `title="Enqueue provider inventory sync">inventory</button>` +
+    `<button class="secondary" data-p="metrics/poll" ` +
+    `title="Enqueue metric definition poll">metrics</button>` +
+    `<button class="secondary" data-p="current/poll" ` +
+    `title="Enqueue current state poll">current</button>` +
+    `<button class="secondary" data-p="history/poll" ` +
+    `title="Enqueue metric history sync">history</button>` +
+    `<button class="secondary" data-p="problems/poll" ` +
+    `title="Enqueue problem state sync">problems</button>` +
+    `<button class="secondary" id="monRefresh">refresh</button>` +
+    `<span class="hint">buttons enqueue provider syncs — ` +
+    `results appear below when the worker finishes</span></div>` +
     `<div class="section"><h2>Health</h2>` +
     `<table><thead><tr><th>Resource</th><th>Health</th><th>Evidence</th>` +
     `<th>Rev</th></tr></thead><tbody>${healthRows}</tbody></table></div>` +
