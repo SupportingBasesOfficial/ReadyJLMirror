@@ -161,6 +161,30 @@ class ZabbixClient:
 
     def __init__(self) -> None:
         self.scope_group_ids: list[str] | None = None
+        self._v7_group_select: bool | None = None
+
+    def _group_select_param(self, endpoint: AdmittedProviderEndpoint) -> list[str]:
+        """host.get group sub-select name for the server version.
+
+        Zabbix 7.0 renamed `selectGroups` -> `selectHostGroups` (the
+        response key became `hostgroups`). Older servers keep the old
+        name; the new name is silently ignored pre-7.0, so the choice
+        must be version-aware. `apiinfo.version` is unauthenticated
+        by design — probed once per client instance.
+        """
+        if self._v7_group_select is None:
+            try:
+                major = int(str(self.api_version(endpoint)).split(".")[0])
+                self._v7_group_select = major >= 7
+            except Exception:
+                self._v7_group_select = "unknown"
+        if self._v7_group_select is True:
+            return ["selectHostGroups"]
+        if self._v7_group_select is False:
+            return ["selectGroups"]
+        # Version undeterminable: request both names — servers ignore
+        # the unknown one and the mapper merges either response key.
+        return ["selectHostGroups", "selectGroups"]
 
     def hostgroup_get(
         self,
@@ -245,7 +269,8 @@ class ZabbixClient:
                 "selectInterfaces": [
                     "interfaceid", "type", "main", "useip", "ip", "dns", "port"
                 ],
-                "selectGroups": ["groupid", "name"],
+                **{sel: ["groupid", "name"]
+                   for sel in self._group_select_param(endpoint)},
                 "selectParentTemplates": ["templateid", "name"],
                 "selectTags": ["tag", "value"],
                 "selectInventory": "extend",
@@ -294,11 +319,12 @@ class ZabbixClient:
                 )
                 for iface in item.get("interfaces") or []
             )
+            # Zabbix >= 7.0 returns `hostgroups`; older returns `groups`.
             groups = tuple(
                 ZabbixNamedRefEvidence(
                     ref=str(g["groupid"]), name=g.get("name")
                 )
-                for g in item.get("groups") or []
+                for g in (item.get("hostgroups") or item.get("groups") or [])
             )
             templates = tuple(
                 ZabbixNamedRefEvidence(
