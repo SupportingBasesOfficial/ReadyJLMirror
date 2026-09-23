@@ -4,6 +4,9 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+rule_files:
+  - /etc/prometheus/rules.yml
+
 scrape_configs:
   # When API_MTLS=1 the API requires client certs; the mounted worker
   # identity is a valid mTLS peer. For plain-dev (no mTLS) switch

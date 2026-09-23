@@ -1,0 +1,77 @@
+# Dev alert rules — the operational failure modes that should page an
+# operator. Thresholds are dev-tuned; production tightens for_*.
+groups:
+  - name: jlmirror.pipeline
+    rules:
+      - alert: JLMirrorWorkerDead
+        expr: jlmirror_worker_heartbeat_staleness_seconds < 0
+              or jlmirror_worker_heartbeat_staleness_seconds > 120
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: Worker pipeline heartbeat stale or absent
+          description: >-
+            The durable worker_heartbeat has not advanced in over two
+            minutes — the whole sync/outbox/inbox pipeline is dead.
+
+      - alert: JLMirrorOutboxBacklog
+        expr: jlmirror_outbox_oldest_pending_seconds > 300
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: Oldest pending outbox message older than 5m
+          description: >-
+            The dispatcher is not draining — check publish webhook or
+            worker health.
+
+      - alert: JLMirrorOutboxQuarantine
+        expr: jlmirror_outbox_messages{state="quarantined"} > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: Quarantined outbox messages need operator redrive
+          description: >-
+            Dead-lettered publications accumulate until an operator
+            redrives them (source detail -> operations -> quarantined
+            deliveries).
+
+      - alert: JLMirrorInboxQuarantine
+        expr: jlmirror_inbox_receipts{state="quarantined"} > 0
+        for: 5m
+        labels: { severity: info }
+        annotations:
+          summary: Quarantined inbox receipts present
+          description: >-
+            Envelope/identity failures — inspect alerting inbox for
+            envelope_invalid vs inbox.identity_conflict.
+
+      - alert: JLMirrorSyncBacklog
+        expr: jlmirror_sync_op_oldest_pending_seconds > 900
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: Oldest pending sync op older than 15m
+          description: >-
+            Sync operations are accumulating faster than workers drain
+            them, or claims are stuck.
+
+      - alert: JLMirrorSyncTerminalFailures
+        expr: increase(
+                jlmirror_sync_operations{state="failed_terminal"}[10m]
+              ) > 0
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: Sync operations reached failed_terminal
+          description: >-
+            Orphan/retry-exhausted or authority-superseded operations —
+            check source detail for the error class.
+
+      - alert: JLMirrorHttpErrorRate
+        expr: >-
+          sum(rate(jlmirror_http_errors_total[5m]))
+            / sum(rate(jlmirror_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: API 5xx share above 5%

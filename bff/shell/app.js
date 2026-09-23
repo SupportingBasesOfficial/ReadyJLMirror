@@ -482,6 +482,27 @@ function dlqSection(outbox) {
     `</tbody></table></div>`;
 }
 
+// Quarantined inbox receipts — the consumer-side dead letters.
+// envelope_invalid means the producer emitted a non-conformant
+// envelope (legitimate poison, no redrive — fixing the producer is
+// the only path); inbox.identity_conflict means the same message
+// identity arrived with a different payload (fail-closed by design).
+function inboxDlqSection(receipts) {
+  const rows = Array.isArray(receipts) ? receipts : [];
+  if (!rows.length) return "";
+  return `<div class="section"><h2>Quarantined inbox receipts</h2>` +
+    `<p class="hint">consumer-side dead letters — not redrivable; ` +
+    `fix the producer or the divergent payload</p>` +
+    `<table><thead><tr><th>Contract</th><th>Message</th>` +
+    `<th>Error</th><th>Received</th></tr></thead><tbody>` +
+    rows.map(m =>
+      `<tr><td><code>${esc(m.contract_name)}</code></td>` +
+      `<td><code>${esc((m.message_id || "").slice(0, 24))}</code></td>` +
+      `<td>${esc(m.last_error_class || "")}</td>` +
+      `<td>${fmtTs(m.received_at)}</td></tr>`).join("") +
+    `</tbody></table></div>`;
+}
+
 async function loadSourceDetail(sourceId, tid, seq) {
   // Watcher-triggered reloads pass seq — keep the current DOM until
   // the fresh render is ready so the page never flashes a spinner.
@@ -494,7 +515,7 @@ async function loadSourceDetail(sourceId, tid, seq) {
   // Contract list endpoints return {items, next_cursor}; the shell
   // uses view=operational for internal fields (groups, provider refs).
   const [source, healthR, problemsR, currentR, ops, alerts, resourcesR,
-         outbox] =
+         outbox, inboxQ] =
     await Promise.all([
       api(`/sources/${sourceId}?tenant_id=${tid}`),
       api(`/sources/${sourceId}/health?tenant_id=${tid}&view=operational`),
@@ -507,6 +528,9 @@ async function loadSourceDetail(sourceId, tid, seq) {
       api(`/sources/${sourceId}/resources?tenant_id=${tid}&view=operational`),
       api(`/outbox/messages?tenant_id=${tid}&state=quarantined`)
           .catch(() => []),
+      fetch(`/api/v1/alerting/inbox?tenant_id=${tid}&state=quarantined`,
+            { credentials: "same-origin" })
+          .then(r => r.ok ? r.json() : []).catch(() => []),
     ]);
   const health = healthR && healthR.items;
   const problems = problemsR && problemsR.items;
@@ -705,7 +729,7 @@ async function loadSourceDetail(sourceId, tid, seq) {
     `<table><thead><tr><th>State</th>` +
     `<th>Kind</th><th>Op</th><th>Error class</th><th>Created</th>` +
     `<th></th></tr></thead><tbody>${opRows}</tbody></table></div>` +
-    dlqSection(outbox);
+    dlqSection(outbox) + inboxDlqSection(inboxQ);
 
   det.innerHTML =
     `<div class="viewhead"><button class="backbtn" id="backMon">` +

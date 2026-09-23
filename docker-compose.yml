@@ -229,6 +229,7 @@ services:
     image: prom/prometheus:v2.54.1
     volumes:
       - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus-rules.yml:/etc/prometheus/rules.yml:ro
       - ./secrets/tls:/run/secrets/tls:ro
     ports:
       - "9090:9090"
