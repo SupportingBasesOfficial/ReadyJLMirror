@@ -437,10 +437,13 @@ function renderOnboardForm(tid) {
 let detailTab = "overview";   // active source-detail tab
 
 async function loadSourceDetail(sourceId, tid, seq) {
+  // Watcher-triggered reloads pass seq — keep the current DOM until
+  // the fresh render is ready so the page never flashes a spinner.
+  const bg = seq !== undefined;
   if (seq === undefined) seq = ++detailSeq;
   else detailSeq = seq;
   const det = root;
-  det.innerHTML = '<div class="spinner"></div>';
+  if (!bg) det.innerHTML = '<div class="spinner"></div>';
   const [source, health, problems, current, ops, alerts, resources] =
     await Promise.all([
       api(`/sources/${sourceId}?tenant_id=${tid}`),

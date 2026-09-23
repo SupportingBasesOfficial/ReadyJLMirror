@@ -614,6 +614,16 @@ async def readiness() -> JSONResponse:
     )
 
 
+@app.middleware("http")
+async def shell_no_cache(request: Request, call_next):
+    """Shell assets revalidate every load — stale app.js keeps running
+    old client logic (e.g. an outdated op watcher) across rebuilds."""
+    resp = await call_next(request)
+    if request.url.path in ("/", "/index.html", "/app.js", "/style.css"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 app.mount("/", StaticFiles(directory=SHELL_DIR, html=True), name="shell")
 
 
