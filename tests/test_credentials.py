@@ -228,9 +228,7 @@ def test_chain_skips_bao_when_unconfigured(monkeypatch, tmp_path):
     monkeypatch.delenv("BAO_TOKEN", raising=False)
     monkeypatch.setenv("SECRETS_DIR", str(tmp_path))
     monkeypatch.setenv("ZABBIX_CRED_CRED_A", "env-token")
-    from providers.credentials import (
-        ChainedCredentialResolver, FileSecretsResolver,
-        EnvCredentialResolver)
+    from providers.credentials import ChainedCredentialResolver
     chain = ChainedCredentialResolver()
     kinds = [type(r).__name__ for r in chain._resolvers]
     assert kinds == ["FileSecretsResolver", "EnvCredentialResolver"]

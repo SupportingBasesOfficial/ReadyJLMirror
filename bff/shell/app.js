@@ -454,6 +454,34 @@ let showAllOps = false;       // ops table expanded — survives silent refresh
 let detailFilters = {};       // per-tab filter state — survives refresh
 let detailFilterSource = "";  // filters reset when another source opens
 
+// Quarantined outbox messages (tenant-wide DLQ) — dead-lettered after
+// publication retries. Operators redrive them back to pending; the
+// dispatcher picks them up on the next tick.
+function dlqSection(outbox) {
+  const rows = Array.isArray(outbox) ? outbox : [];
+  if (!rows.length) return "";
+  return `<div class="section"><h2>Quarantined deliveries</h2>` +
+    `<p class="hint">dead-lettered after retry exhaustion — ` +
+    `${rows.length} pending operator decision</p>` +
+    `<table><thead><tr><th>Contract</th><th>Subject</th>` +
+    `<th>Attempts</th><th>Redrives</th><th>Error</th>` +
+    `<th>Appended</th><th></th></tr></thead><tbody>` +
+    rows.map(m =>
+      `<tr><td><code>${esc(m.contract_name)}` +
+      ` v${esc(String(m.contract_version))}</code></td>` +
+      `<td>${esc(m.subject_type)} ` +
+      `<code>${esc((m.subject_id || "").slice(0, 16))}</code></td>` +
+      `<td>${m.attempt_count}</td>` +
+      `<td>${m.redrive_count || 0}</td>` +
+      `<td>${esc(m.last_error_class || "")}</td>` +
+      `<td>${fmtTs(m.appended_at)}</td>` +
+      `<td>${caps().monitorOp
+        ? `<button class="secondary small dlq-redrive" ` +
+          `data-rec="${m.record_id}">redrive</button>`
+        : ""}</td></tr>`).join("") +
+    `</tbody></table></div>`;
+}
+
 async function loadSourceDetail(sourceId, tid, seq) {
   // Watcher-triggered reloads pass seq — keep the current DOM until
   // the fresh render is ready so the page never flashes a spinner.
@@ -465,7 +493,8 @@ async function loadSourceDetail(sourceId, tid, seq) {
   if (!bg) det.innerHTML = '<div class="spinner"></div>';
   // Contract list endpoints return {items, next_cursor}; the shell
   // uses view=operational for internal fields (groups, provider refs).
-  const [source, healthR, problemsR, currentR, ops, alerts, resourcesR] =
+  const [source, healthR, problemsR, currentR, ops, alerts, resourcesR,
+         outbox] =
     await Promise.all([
       api(`/sources/${sourceId}?tenant_id=${tid}`),
       api(`/sources/${sourceId}/health?tenant_id=${tid}&view=operational`),
@@ -476,6 +505,8 @@ async function loadSourceDetail(sourceId, tid, seq) {
             { credentials: "same-origin" })
           .then(r => r.ok ? r.json() : []),
       api(`/sources/${sourceId}/resources?tenant_id=${tid}&view=operational`),
+      api(`/outbox/messages?tenant_id=${tid}&state=quarantined`)
+          .catch(() => []),
     ]);
   const health = healthR && healthR.items;
   const problems = problemsR && problemsR.items;
@@ -673,7 +704,8 @@ async function loadSourceDetail(sourceId, tid, seq) {
     `<div class="section">${syncBar}` +
     `<table><thead><tr><th>State</th>` +
     `<th>Kind</th><th>Op</th><th>Error class</th><th>Created</th>` +
-    `<th></th></tr></thead><tbody>${opRows}</tbody></table></div>`;
+    `<th></th></tr></thead><tbody>${opRows}</tbody></table></div>` +
+    dlqSection(outbox);
 
   det.innerHTML =
     `<div class="viewhead"><button class="backbtn" id="backMon">` +
@@ -771,6 +803,17 @@ async function loadSourceDetail(sourceId, tid, seq) {
         const r = await fetch(
           `/api/v1/monitoring/sources/${sourceId}/operations/` +
           `${b.dataset.op}/requeue?tenant_id=${tid}`,
+          { method: "POST", credentials: "same-origin",
+            headers: csrfHeaders() });
+        if (!r.ok) { b.textContent = "failed"; b.disabled = false; }
+        else { await loadSourceDetail(sourceId, tid); }
+      }));
+    tabBody.querySelectorAll(".dlq-redrive").forEach(b =>
+      b.addEventListener("click", async () => {
+        b.disabled = true; b.textContent = "queued";
+        const r = await fetch(
+          `/api/v1/monitoring/outbox/${b.dataset.rec}/redrive` +
+          `?tenant_id=${tid}`,
           { method: "POST", credentials: "same-origin",
             headers: csrfHeaders() });
         if (!r.ok) { b.textContent = "failed"; b.disabled = false; }

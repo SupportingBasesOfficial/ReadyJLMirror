@@ -927,8 +927,8 @@ async def list_outbox_endpoint(request: Request,
             """
             SELECT record_id, message_id, contract_name, contract_version,
                    subject_type, subject_id, dispatch_state, attempt_count,
-                   last_error_class, published_receipt_id, published_at,
-                   appended_at
+                   redrive_count, last_error_class, published_receipt_id,
+                   published_at, appended_at
               FROM monitoring.monitoring_outbox
              WHERE tenant_id = %s
                AND (%s IS NULL OR dispatch_state = %s)
@@ -938,14 +938,47 @@ async def list_outbox_endpoint(request: Request,
         )
         keys = ("record_id", "message_id", "contract_name",
                 "contract_version", "subject_type", "subject_id",
-                "dispatch_state", "attempt_count", "last_error_class",
-                "published_receipt_id", "published_at", "appended_at")
+                "dispatch_state", "attempt_count", "redrive_count",
+                "last_error_class", "published_receipt_id", "published_at",
+                "appended_at")
         rows = [dict(zip(keys, r)) for r in await cur.fetchall()]
     for r in rows:
         for k in ("published_at", "appended_at"):
             if r.get(k) is not None:
                 r[k] = r[k].isoformat()
     return rows
+
+
+@router.post("/outbox/{record_id}/redrive")
+async def redrive_outbox_endpoint(request: Request, record_id: int,
+                                  tenant_id: str | None = None) -> dict:
+    """Operator redrive of a quarantined outbox message (DLQ path).
+
+    Bounded by redrive_count — a permanently poisoned message cannot
+    be redriven forever. The dispatcher picks it up on the next tick.
+    """
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        cur = await conn.execute(
+            "SELECT monitoring.redrive_outbox_message(%s, %s)",
+            (tenant, record_id))
+        ok = (await cur.fetchone())[0]
+        if ok:
+            ctx = getattr(request.state, "jlmirror_context", {}) or {}
+            await record_audit_event(
+                conn, tenant,
+                action="monitoring.outbox.redriven",
+                actor_kind="operator",
+                actor_id=ctx.get("principal_id"),
+                subject_type="outbox_message",
+                subject_id=str(record_id),
+                correlation_id=ctx.get("correlation_id"))
+        await conn.commit()
+    if not ok:
+        raise HTTPException(
+            status_code=409,
+            detail="message is not quarantined or redrive cap reached")
+    return {"record_id": record_id, "redriven": True}
 
 
 @router.post("/outbox/run", status_code=200)
