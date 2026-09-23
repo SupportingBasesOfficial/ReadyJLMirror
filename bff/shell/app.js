@@ -435,6 +435,7 @@ function renderOnboardForm(tid) {
 }
 
 let detailTab = "overview";   // active source-detail tab
+let showAllOps = false;       // ops table expanded — survives silent refresh
 
 async function loadSourceDetail(sourceId, tid, seq) {
   // Watcher-triggered reloads pass seq — keep the current DOM until
@@ -584,14 +585,16 @@ async function loadSourceDetail(sourceId, tid, seq) {
         ? `<button class="secondary op-requeue" ` +
           `data-op="${esc(o.monitoring_sync_operation_id)}">retry</button>`
         : ""}</td></tr>`;
-  const opRows = opList.length
-    ? opList.slice(0, 12).map(o => opRow(o)).join("") +
-      opList.slice(12).map(o => opRow(o, "op-extra hidden")).join("") +
-      (opList.length > 12
-        ? `<tr><td colspan="6"><button class="secondary" ` +
-          `id="showAllOps">show all ${opList.length} operations</button>` +
-          `</td></tr>` : "")
-    : `<tr><td colspan="6" class="empty">No operations</td></tr>`;
+  const opRows = !opList.length
+    ? `<tr><td colspan="6" class="empty">No operations</td></tr>`
+    : showAllOps
+      ? opList.map(o => opRow(o)).join("")
+      : opList.slice(0, 12).map(o => opRow(o)).join("") +
+        opList.slice(12).map(o => opRow(o, "op-extra hidden")).join("") +
+        (opList.length > 12
+          ? `<tr><td colspan="6"><button class="secondary" ` +
+            `id="showAllOps">show all ${opList.length} operations</button>` +
+            `</td></tr>` : "");
   tabHtml.operations =
     `<div class="section"><div class="actions opsync">` +
     `<span class="hint">sync now (operator override — the scheduler ` +
@@ -640,6 +643,7 @@ async function loadSourceDetail(sourceId, tid, seq) {
         loadAlertDetail(row.dataset.alert, tid)));
     const sa = tabBody.querySelector("#showAllOps");
     if (sa) sa.addEventListener("click", () => {
+      showAllOps = true;
       tabBody.querySelectorAll(".op-extra")
         .forEach(r => r.classList.remove("hidden"));
       sa.closest("tr").remove();
