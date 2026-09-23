@@ -541,7 +541,8 @@ async def list_resources(
         """
         SELECT monitoring_resource_id, provider_external_ref, display_name,
                scope_state, presence_state, presence_evidence_state,
-               scope_evidence_state, last_observed_at, removed_at
+               scope_evidence_state, last_observed_at, removed_at,
+               host_groups
           FROM monitoring.monitoring_resource
          WHERE tenant_id = %s AND monitoring_source_id = %s
          ORDER BY provider_external_ref
@@ -551,7 +552,8 @@ async def list_resources(
     rows = await cur.fetchall()
     keys = ("monitoring_resource_id", "provider_external_ref", "display_name",
             "scope_state", "presence_state", "presence_evidence_state",
-            "scope_evidence_state", "last_observed_at", "removed_at")
+            "scope_evidence_state", "last_observed_at", "removed_at",
+            "host_groups")
     return [dict(zip(keys, r)) for r in rows]
 
 
@@ -814,14 +816,17 @@ class PgHostInventoryRepository:
                          provider_external_ref, display_name, scope_state,
                          scope_projection_revision, scope_evidence_state,
                          presence_state, presence_evidence_state,
-                         last_observed_at, last_confirmed_present_at)
+                         last_observed_at, last_confirmed_present_at,
+                         host_groups)
                     VALUES (%s, %s, %s, %s, 'host', 'zabbix_host', %s, %s,
                             'in_scope', %s, 'current', 'present', 'current',
-                            transaction_timestamp(), transaction_timestamp())
+                            transaction_timestamp(), transaction_timestamp(),
+                            %s::jsonb)
                     """,
                     (claim.tenant_id, resource_id, claim.monitoring_source_id,
                      claim.source_instance_generation, host.hostid,
-                     host.display_name, claim.scope_revision),
+                     host.display_name, claim.scope_revision,
+                     _host_groups_json(host)),
                 )
             else:
                 resource_id = row[0]
@@ -836,10 +841,12 @@ class PgHostInventoryRepository:
                            last_observed_at = transaction_timestamp(),
                            last_confirmed_present_at = transaction_timestamp(),
                            removed_at = NULL,
-                           updated_at = transaction_timestamp()
+                           updated_at = transaction_timestamp(),
+                           host_groups = %s::jsonb
                      WHERE tenant_id = %s AND monitoring_resource_id = %s
                     """,
                     (host.display_name, claim.scope_revision,
+                     _host_groups_json(host),
                      claim.tenant_id, resource_id),
                 )
 
@@ -1874,6 +1881,14 @@ def _canonical_value_json(value) -> str:
     if isinstance(value, Decimal):
         return json.dumps(str(value))
     return json.dumps(value)
+
+
+def _host_groups_json(host) -> str:
+    """Snapshot-authoritative group membership for the resource —
+    [{ref, name}] as the provider reported them this snapshot."""
+    return json.dumps([
+        {"ref": g.ref, "name": g.name} for g in host.groups
+    ])
 
 
 def _emit_domain_event(

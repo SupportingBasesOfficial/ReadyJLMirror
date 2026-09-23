@@ -526,6 +526,21 @@ async function loadSourceDetail(sourceId, tid, seq) {
   };
   const resList = Array.isArray(resources) ? resources : [];
   const probList = Array.isArray(problems) ? problems : [];
+  // Host-group membership (provider refs + names) per resource —
+  // powers the group filter on hosts/problems.
+  const resGroups = {};
+  const groupUnion = {};
+  for (const r of resList) {
+    const gs = Array.isArray(r.host_groups) ? r.host_groups : [];
+    resGroups[r.monitoring_resource_id] = gs;
+    for (const g of gs) groupUnion[g.ref] = g.name || g.ref;
+  }
+  const groupOpts = Object.entries(groupUnion)
+    .sort((a, b) => a[1].localeCompare(b[1]))
+    .map(([ref, name]) =>
+      `<option value="${esc(ref)}">${esc(name)}</option>`).join("");
+  const groupSel = `<select id="flt-sel2">` +
+    `<option value="">all groups</option>${groupOpts}</select>`;
   const hostHealths = [...new Set(resList.map(r =>
     (healthByRes[r.monitoring_resource_id] || {}).health_class
       || "unknown"))].sort();
@@ -534,7 +549,7 @@ async function loadSourceDetail(sourceId, tid, seq) {
     `<input id="flt-text" placeholder="filter host / provider ref…">` +
     `<select id="flt-sel"><option value="">all health</option>` +
     hostHealths.map(h => `<option>${esc(h)}</option>`).join("") +
-    `</select><span class="hint" id="flt-count"></span></div>` +
+    `</select>${groupSel}<span class="hint" id="flt-count"></span></div>` +
     `<table><thead><tr><th>Host</th>` +
     `<th>Provider ref</th><th>Health</th><th>Scope</th>` +
     `<th>Presence</th><th>Last seen</th></tr></thead>` +
@@ -553,7 +568,7 @@ async function loadSourceDetail(sourceId, tid, seq) {
     `<input id="flt-text" placeholder="filter host / summary…">` +
     `<select id="flt-sel"><option value="">all severities</option>` +
     sevs.map(s => `<option>${esc(s)}</option>`).join("") +
-    `</select><span class="hint" id="flt-count"></span></div>` +
+    `</select>${groupSel}<span class="hint" id="flt-count"></span></div>` +
     `<table><thead><tr><th>Severity</th>` +
     `<th>Host</th><th>Summary</th><th>Event</th><th>Evidence</th>` +
     `</tr></thead><tbody id="flt-body"></tbody></table></div>`;
@@ -661,11 +676,13 @@ async function loadSourceDetail(sourceId, tid, seq) {
     const f = detailFilters[detailTab] ||= { text: "", sel: "" };
     const txt = el.querySelector("#flt-text");
     const sel = el.querySelector("#flt-sel");
+    const sel2 = el.querySelector("#flt-sel2");
     if (txt && txt.value !== f.text) txt.value = f.text;
     if (sel && sel.value !== f.sel) sel.value = f.sel;
+    if (sel2 && sel2.value !== (f.sel2 || "")) sel2.value = f.sel2 || "";
     const render = () => {
       const q = f.text.trim().toLowerCase();
-      const rows = items.filter(i => match(i, q, f.sel));
+      const rows = items.filter(i => match(i, q, f.sel, f.sel2));
       const shown = cap ? rows.slice(0, cap) : rows;
       el.querySelector("#flt-body").innerHTML = shown.length
         ? shown.map(rowHtml).join("")
@@ -678,19 +695,25 @@ async function loadSourceDetail(sourceId, tid, seq) {
         () => { f.text = txt.value; render(); });
     if (sel) sel.addEventListener("change",
         () => { f.sel = sel.value; render(); });
+    if (sel2) sel2.addEventListener("change",
+        () => { f.sel2 = sel2.value; render(); });
     render();
   };
   const painters = {
     hosts: el => paintFiltered(el, resList,
-      (r, q, sel) =>
+      (r, q, sel, sel2) =>
         (!sel || ((healthByRes[r.monitoring_resource_id] || {})
             .health_class || "unknown") === sel) &&
+        (!sel2 || (resGroups[r.monitoring_resource_id] || [])
+            .some(g => g.ref === sel2)) &&
         (!q || (r.display_name || "").toLowerCase().includes(q) ||
               (r.provider_external_ref || "").includes(q)),
       hostRowHtml, "No resources match"),
     problems: el => paintFiltered(el, probList,
-      (p, q, sel) =>
+      (p, q, sel, sel2) =>
         (!sel || p.severity_class === sel) &&
+        (!sel2 || (resGroups[p.monitoring_resource_id] || [])
+            .some(g => g.ref === sel2)) &&
         (!q || (resNames[p.monitoring_resource_id] || "")
             .toLowerCase().includes(q) ||
               (p.summary || "").toLowerCase().includes(q)),
