@@ -1,0 +1,107 @@
+{
+  "uid": "jlmirror-pipeline",
+  "title": "JLMirror pipeline",
+  "tags": ["jlmirror"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Worker heartbeat staleness",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "jlmirror_worker_heartbeat_staleness_seconds",
+                   "legendFormat": "seconds"}],
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"steps": [
+        {"color": "green", "value": null},
+        {"color": "yellow", "value": 60},
+        {"color": "red", "value": 120}]}}},
+      "options": {"colorMode": "background", "graphMode": "area"}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Outbox quarantined",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "jlmirror_outbox_messages{state=\"quarantined\"}",
+                   "legendFormat": "messages"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [
+        {"color": "green", "value": null},
+        {"color": "red", "value": 1}]}}},
+      "options": {"colorMode": "background", "graphMode": "area"}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Oldest pending outbox (s)",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "jlmirror_outbox_oldest_pending_seconds",
+                   "legendFormat": "seconds"}],
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"steps": [
+        {"color": "green", "value": null},
+        {"color": "yellow", "value": 120},
+        {"color": "red", "value": 300}]}}},
+      "options": {"colorMode": "background", "graphMode": "area"}
+    },
+    {
+      "id": 4, "type": "stat", "title": "Inbox quarantined",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "jlmirror_inbox_receipts{state=\"quarantined\"}",
+                   "legendFormat": "receipts"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [
+        {"color": "green", "value": null},
+        {"color": "orange", "value": 1}]}}},
+      "options": {"colorMode": "background", "graphMode": "area"}
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Sync operations by state",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "jlmirror_sync_operations",
+                   "legendFormat": "{{state}}"}],
+      "fieldConfig": {"defaults": {"custom": {"stacking": {"mode": "normal"}}}}
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Outbox by dispatch state",
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "jlmirror_outbox_messages",
+                   "legendFormat": "{{state}}"}],
+      "fieldConfig": {"defaults": {"custom": {"stacking": {"mode": "normal"}}}}
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Alerts by lifecycle",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "jlmirror_alerts", "legendFormat": "{{state}}"}],
+      "fieldConfig": {"defaults": {"custom": {"stacking": {"mode": "normal"}}}}
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "API request rate / errors",
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "sum(rate(jlmirror_http_requests_total[5m]))",
+         "legendFormat": "requests/s"},
+        {"expr": "sum(rate(jlmirror_http_errors_total[5m]))",
+         "legendFormat": "errors/s"}]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Sources by evidence state",
+      "gridPos": {"x": 0, "y": 20, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "jlmirror_monitoring_sources",
+                   "legendFormat": "{{evidence_state}}"}]
+    },
+    {
+      "id": 10, "type": "timeseries",
+      "title": "API latency percentiles (s, by endpoint)",
+      "gridPos": {"x": 12, "y": 20, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr":
+        "jlmirror_http_request_duration_seconds{quantile=\"0.95\"}",
+        "legendFormat": "p95 {{endpoint}}"}]
+    }
+  ]
+}

@@ -240,6 +240,28 @@ services:
     profiles:
       - observability
 
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      # Dev-only admin credential; Grafana forces a password change
+      # prompt but does not require it.
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./docker/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./docker/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/provider.yml:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3300:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
+    restart: unless-stopped
+    profiles:
+      - observability
+
   # ------------------------------------------------------------------
   # Dev Zabbix provider profile — a REAL Zabbix server + web API +
   # agent so the whole monitoring pipeline exercises real provider

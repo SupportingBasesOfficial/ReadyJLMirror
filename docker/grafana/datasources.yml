@@ -1,0 +1,12 @@
+# Grafana datasource provisioning — Prometheus on the internal
+# compose network. No manual setup after clone.
+apiVersion: 1
+
+datasources:
+  - name: prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
