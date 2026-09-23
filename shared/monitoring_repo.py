@@ -3298,7 +3298,7 @@ async def list_problems(
         SELECT p.problem_id, p.problem_state, p.severity_class, p.summary,
                p.opened_at, p.resolved_at, p.last_confirmed_at,
                p.evidence_state, p.projection_revision,
-               p.provider_acknowledged,
+               p.provider_acknowledged, p.monitoring_resource_id,
                b.provider_external_ref AS provider_eventid
           FROM monitoring.monitoring_problem p
           JOIN monitoring.monitoring_problem_provider_binding b
@@ -3312,7 +3312,8 @@ async def list_problems(
     keys = ("problem_id", "problem_state", "severity_class", "summary",
             "opened_at", "resolved_at", "last_confirmed_at",
             "evidence_state", "projection_revision",
-            "provider_acknowledged", "provider_eventid")
+            "provider_acknowledged", "monitoring_resource_id",
+            "provider_eventid")
     return [dict(zip(keys, r)) for r in await cur.fetchall()]
 
 

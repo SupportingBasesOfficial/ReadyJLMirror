@@ -434,13 +434,16 @@ function renderOnboardForm(tid) {
     });
 }
 
+let detailTab = "overview";   // active source-detail tab
+
 async function loadSourceDetail(sourceId, tid, seq) {
   if (seq === undefined) seq = ++detailSeq;
   else detailSeq = seq;
   const det = root;
   det.innerHTML = '<div class="spinner"></div>';
-  const [health, problems, current, ops, alerts, resources] =
+  const [source, health, problems, current, ops, alerts, resources] =
     await Promise.all([
+      api(`/sources/${sourceId}?tenant_id=${tid}`),
       api(`/sources/${sourceId}/health?tenant_id=${tid}`),
       api(`/sources/${sourceId}/problems?tenant_id=${tid}&active_only=true`),
       api(`/sources/${sourceId}/current?tenant_id=${tid}`),
@@ -450,35 +453,104 @@ async function loadSourceDetail(sourceId, tid, seq) {
           .then(r => r.ok ? r.json() : []),
       api(`/sources/${sourceId}/resources?tenant_id=${tid}`),
     ]);
+  if (seq !== detailSeq) return;
 
-  const resNames = {};
+  const resNames = {}, healthByRes = {};
   if (Array.isArray(resources)) for (const r of resources)
     resNames[r.monitoring_resource_id] = r.display_name;
+  if (Array.isArray(health)) for (const h of health)
+    healthByRes[h.monitoring_resource_id] = h;
+  const src = (source && !Array.isArray(source)) ? source : {};
+  const nRes = Array.isArray(resources) ? resources.length : 0;
+  const nProb = Array.isArray(problems) ? problems.length : 0;
 
-  const healthRows = Array.isArray(health) && health.length
-    ? health.map(h =>
-        `<tr><td title="${esc(h.monitoring_resource_id)}">` +
-        `${esc(resNames[h.monitoring_resource_id]
-              || h.monitoring_resource_id)}</td>` +
-        `<td class="h-${esc(h.health_class)}">${esc(h.health_class)}</td>` +
-        `<td>${esc(h.evidence_state)}</td>` +
-        `<td>r${esc(h.projection_revision)}</td></tr>`).join("")
-    : `<tr><td colspan="4" class="empty">No health projections yet</td></tr>`;
+  const stat = (label, val, cls) =>
+    `<div class="stat"><div class="statv${cls ? " " + cls : ""}">` +
+    `${esc(String(val))}</div><div class="statl">${esc(label)}</div></div>`;
+  const kv = (k, v) =>
+    `<tr><td class="kvk">${esc(k)}</td>` +
+    `<td>${v == null || v === "" ? "—" : esc(String(v))}</td></tr>`;
 
-  const problemRows = Array.isArray(problems) && problems.length
+  const hCount = {};
+  if (Array.isArray(health)) for (const h of health)
+    hCount[h.health_class] = (hCount[h.health_class] || 0) + 1;
+  const scopeGroups = src.configured_provider_scope
+    && Array.isArray(src.configured_provider_scope.host_group_refs)
+    ? src.configured_provider_scope.host_group_refs.length : null;
+
+  const tabHtml = {};
+
+  tabHtml.overview =
+    `<div class="statgrid">` +
+    stat("hosts", nRes) +
+    stat("healthy", hCount.healthy || 0, "h-healthy") +
+    stat("degraded", hCount.degraded || 0, "h-degraded") +
+    stat("unhealthy", hCount.unhealthy || 0, "h-unhealthy") +
+    stat("active problems", nProb, nProb ? "sev-warning" : "") +
+    stat("alerts", Array.isArray(alerts) ? alerts.length : 0) +
+    `</div>` +
+    `<div class="section"><h2>Source</h2><table><tbody>` +
+    kv("display name", src.display_name) +
+    kv("provider", src.provider_instance_ref) +
+    kv("base url", src.provider_base_url) +
+    kv("evidence", src.operational_evidence_state) +
+    kv("credential binding", src.credential_binding_ref) +
+    kv("scope groups", scopeGroups) +
+    kv("last successful sync", fmtTs(src.last_successful_sync_at)) +
+    kv("last attempt", fmtTs(src.last_attempt_at)) +
+    `</tbody></table></div>`;
+
+  const hostRows = nRes
+    ? resources.map(r => {
+        const h = healthByRes[r.monitoring_resource_id] || {};
+        const hc = h.health_class || "unknown";
+        return `<tr><td>${esc(r.display_name
+              || r.monitoring_resource_id)}` +
+          `<div class="dim">${esc(r.monitoring_resource_id.slice(0, 20))}` +
+          `</div></td>` +
+          `<td><code>${esc(r.provider_external_ref)}</code></td>` +
+          `<td class="h-${esc(hc)}">${esc(hc)}</td>` +
+          `<td>${esc(r.scope_state)}</td>` +
+          `<td>${esc(r.presence_state)}</td>` +
+          `<td>${fmtTs(r.last_observed_at)}</td></tr>`;
+      }).join("")
+    : `<tr><td colspan="6" class="empty">No resources — ` +
+      `run an inventory sync</td></tr>`;
+  tabHtml.hosts =
+    `<div class="section"><table><thead><tr><th>Host</th>` +
+    `<th>Provider ref</th><th>Health</th><th>Scope</th>` +
+    `<th>Presence</th><th>Last seen</th></tr></thead>` +
+    `<tbody>${hostRows}</tbody></table></div>`;
+
+  const problemRows = nProb
     ? problems.map(p =>
-        `<tr><td class="sev-${esc(p.severity_class)}">${esc(p.severity_class)}</td>` +
+        `<tr><td class="sev-${esc(p.severity_class)}">` +
+        `${esc(p.severity_class)}</td>` +
+        `<td>${esc(resNames[p.monitoring_resource_id] || "—")}</td>` +
         `<td>${esc(p.summary)}</td>` +
         `<td><code>${esc(p.provider_eventid)}</code></td>` +
         `<td>${esc(p.evidence_state)}</td></tr>`).join("")
-    : `<tr><td colspan="4" class="empty">No active problems</td></tr>`;
+    : `<tr><td colspan="5" class="empty">No active problems</td></tr>`;
+  tabHtml.problems =
+    `<div class="section"><table><thead><tr><th>Severity</th>` +
+    `<th>Host</th><th>Summary</th><th>Event</th><th>Evidence</th>` +
+    `</tr></thead><tbody>${problemRows}</tbody></table></div>`;
 
-  const currentRows = Array.isArray(current) && current.length
-    ? current.slice(0, 20).map(c =>
+  const cur = Array.isArray(current) ? current : [];
+  const currentRows = cur.length
+    ? cur.slice(0, 50).map(c =>
         `<tr><td>${esc(c.name || c.metric_definition_id)}</td>` +
         `<td><code>${esc(c.canonical_value)}</code></td>` +
         `<td>${esc(c.evidence_state)}</td></tr>`).join("")
-    : `<tr><td colspan="3" class="empty">No current state</td></tr>`;
+    : `<tr><td colspan="3" class="empty">No current state — ` +
+      `run a current poll</td></tr>`;
+  tabHtml.metrics =
+    `<div class="section"><table><thead><tr><th>Metric</th>` +
+    `<th>Value</th><th>Evidence</th></tr></thead>` +
+    `<tbody>${currentRows}</tbody></table>` +
+    (cur.length > 50
+      ? `<p class="hint">showing 50 of ${cur.length}</p>` : "") +
+    `</div>`;
 
   const alertRows = Array.isArray(alerts) && alerts.length
     ? alerts.map(a =>
@@ -488,26 +560,44 @@ async function loadSourceDetail(sourceId, tid, seq) {
         `<td>${esc(a.source_kind)}</td>` +
         `<td>${esc(a.policy_id)} v${esc(a.policy_version)}</td>` +
         `<td>r${esc(a.source_occurrence_revision)}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="empty">No alerts</td></tr>`;
+    : `<tr><td colspan="5" class="empty">No alerts — policies ` +
+      `create them from matching problems</td></tr>`;
+  tabHtml.alerts =
+    `<div class="section"><table><thead><tr><th>State</th>` +
+    `<th>Alert</th><th>Source kind</th><th>Policy</th><th>Rev</th>` +
+    `</tr></thead><tbody>${alertRows}</tbody></table></div>`;
 
   const badStates = new Set(["reconciliation_required", "failed_terminal"]);
-  const opRows = Array.isArray(ops) && ops.length
-    ? ops.map(o =>
-        `<tr class="${badStates.has(o.state) ? "op-bad" : ""}">` +
-        `<td class="op-${esc(o.state)}">${esc(o.state)}</td>` +
-        `<td>${esc(o.responsibility_kind)}</td>` +
-        `<td><code>${esc((o.monitoring_sync_operation_id || "").slice(0, 20))}</code></td>` +
-        `<td>${esc(o.last_error_class)}</td>` +
-        `<td>${fmtTs(o.created_at)}</td>` +
-        `<td>${badStates.has(o.state)
-            ? `<button class="secondary op-requeue" data-op="${esc(o.monitoring_sync_operation_id)}">retry</button>`
-            : ""}</td></tr>`).join("")
+  const opList = Array.isArray(ops) ? ops : [];
+  const opRow = (o, extra) =>
+    `<tr class="${badStates.has(o.state) ? "op-bad " : ""}${extra || ""}">` +
+    `<td class="op-${esc(o.state)}">${esc(o.state)}</td>` +
+    `<td>${esc(o.responsibility_kind)}</td>` +
+    `<td><code>${esc((o.monitoring_sync_operation_id || "").slice(0, 20))}</code></td>` +
+    `<td>${esc(o.last_error_class)}</td>` +
+    `<td>${fmtTs(o.created_at)}</td>` +
+    `<td>${badStates.has(o.state)
+        ? `<button class="secondary op-requeue" ` +
+          `data-op="${esc(o.monitoring_sync_operation_id)}">retry</button>`
+        : ""}</td></tr>`;
+  const opRows = opList.length
+    ? opList.slice(0, 12).map(o => opRow(o)).join("") +
+      opList.slice(12).map(o => opRow(o, "op-extra hidden")).join("") +
+      (opList.length > 12
+        ? `<tr><td colspan="6"><button class="secondary" ` +
+          `id="showAllOps">show all ${opList.length} operations</button>` +
+          `</td></tr>` : "")
     : `<tr><td colspan="6" class="empty">No operations</td></tr>`;
+  tabHtml.operations =
+    `<div class="section"><table><thead><tr><th>State</th>` +
+    `<th>Kind</th><th>Op</th><th>Error class</th><th>Created</th>` +
+    `<th></th></tr></thead><tbody>${opRows}</tbody></table></div>`;
 
   det.innerHTML =
     `<div class="viewhead"><button class="backbtn" id="backMon">` +
     `&#8592; monitoring</button>` +
-    `<h2>Source ${esc(sourceId.slice(0, 24))}</h2></div>` +
+    `<h2>${esc(src.display_name || sourceId.slice(0, 24))} ` +
+    `<span class="dim">${esc(sourceId.slice(0, 24))}</span></h2></div>` +
     `<div class="actions">` +
     `<span class="hint">sync:</span>` +
     `<button class="secondary" data-p="inventory" ` +
@@ -520,26 +610,45 @@ async function loadSourceDetail(sourceId, tid, seq) {
     `title="Enqueue metric history sync">history</button>` +
     `<button class="secondary" data-p="problems/poll" ` +
     `title="Enqueue problem state sync">problems</button>` +
-    `<button class="secondary" id="monRefresh">refresh</button>` +
-    `<span class="hint">buttons enqueue provider syncs — ` +
-    `results appear below when the worker finishes</span></div>` +
-    `<div class="section"><h2>Health</h2>` +
-    `<table><thead><tr><th>Resource</th><th>Health</th><th>Evidence</th>` +
-    `<th>Rev</th></tr></thead><tbody>${healthRows}</tbody></table></div>` +
-    `<div class="section"><h2>Active problems</h2>` +
-    `<table><thead><tr><th>Severity</th><th>Summary</th><th>Event</th>` +
-    `<th>Evidence</th></tr></thead><tbody>${problemRows}</tbody></table></div>` +
-    `<div class="section"><h2>Current metrics</h2>` +
-    `<table><thead><tr><th>Metric</th><th>Value</th><th>Evidence</th>` +
-    `</tr></thead><tbody>${currentRows}</tbody></table></div>` +
-    `<div class="section"><h2>Alerts</h2>` +
-    `<table><thead><tr><th>State</th><th>Alert</th><th>Source kind</th>` +
-    `<th>Policy</th><th>Rev</th></tr></thead>` +
-    `<tbody>${alertRows}</tbody></table></div>` +
-    `<div class="section"><h2>Operations (DLQ)</h2>` +
-    `<table><thead><tr><th>State</th><th>Kind</th><th>Op</th>` +
-    `<th>Error class</th><th>Created</th><th></th></tr></thead>` +
-    `<tbody>${opRows}</tbody></table></div>`;
+    `<button class="secondary" id="monRefresh">refresh</button></div>` +
+    `<div class="tabbar">` +
+    ["overview", "hosts", "problems", "metrics", "alerts", "operations"]
+      .map(t => `<button class="tabbtn${t === detailTab
+        ? " active" : ""}" data-tab="${t}">${t}</button>`).join("") +
+    `</div><div id="tabBody"></div>`;
+
+  const tabBody = det.querySelector("#tabBody");
+  const paintTab = () => {
+    tabBody.innerHTML = tabHtml[detailTab];
+    tabBody.querySelectorAll(".op-requeue").forEach(b =>
+      b.addEventListener("click", async () => {
+        b.disabled = true; b.textContent = "queued";
+        const r = await fetch(
+          `/api/v1/monitoring/sources/${sourceId}/operations/` +
+          `${b.dataset.op}/requeue?tenant_id=${tid}`,
+          { method: "POST", credentials: "same-origin",
+            headers: csrfHeaders() });
+        if (!r.ok) { b.textContent = "failed"; b.disabled = false; }
+        else { await loadSourceDetail(sourceId, tid); }
+      }));
+    tabBody.querySelectorAll("[data-alert]").forEach(row =>
+      row.addEventListener("click", () =>
+        loadAlertDetail(row.dataset.alert, tid)));
+    const sa = tabBody.querySelector("#showAllOps");
+    if (sa) sa.addEventListener("click", () => {
+      tabBody.querySelectorAll(".op-extra")
+        .forEach(r => r.classList.remove("hidden"));
+      sa.closest("tr").remove();
+    });
+  };
+  det.querySelectorAll(".tabbtn").forEach(b =>
+    b.addEventListener("click", () => {
+      detailTab = b.dataset.tab;
+      det.querySelectorAll(".tabbtn").forEach(x =>
+        x.classList.toggle("active", x === b));
+      paintTab();
+    }));
+  paintTab();
 
   det.querySelectorAll("[data-p]").forEach(b =>
     b.addEventListener("click", async () => {
@@ -549,20 +658,6 @@ async function loadSourceDetail(sourceId, tid, seq) {
       if (!opId) { b.disabled = false; return; }
       watchSourceOps(sourceId, tid, seq, opId);
     }));
-  det.querySelectorAll(".op-requeue").forEach(b =>
-    b.addEventListener("click", async () => {
-      b.disabled = true; b.textContent = "queued";
-      const r = await fetch(
-        `/api/v1/monitoring/sources/${sourceId}/operations/` +
-        `${b.dataset.op}/requeue?tenant_id=${tid}`,
-        { method: "POST", credentials: "same-origin",
-          headers: csrfHeaders() });
-      if (!r.ok) { b.textContent = "failed"; b.disabled = false; }
-      else { await loadSourceDetail(sourceId, tid); }
-    }));
-  det.querySelectorAll("[data-alert]").forEach(row =>
-    row.addEventListener("click", () =>
-      loadAlertDetail(row.dataset.alert, tid)));
   document.getElementById("monRefresh").addEventListener("click", () =>
     loadSourceDetail(sourceId, tid));
   document.getElementById("backMon").addEventListener("click", () =>
