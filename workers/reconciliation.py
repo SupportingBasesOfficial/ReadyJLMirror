@@ -88,7 +88,10 @@ def _reap_orphaned_running(conn: psycopg.Connection) -> int:
 def _sweep_zombie_pending(conn: psycopg.Connection) -> int:
     """pending ops whose authority snapshot no longer matches the
     source can never be claimed — every claim fence requires
-    generation + configuration_revision + scope_revision equality."""
+    generation + configuration_revision + scope_revision equality,
+    and the poll kinds additionally fence on their epoch/generation
+    pair (claimable only when source.poll_generation =
+    op.poll_generation - 1)."""
     cur = conn.execute(
         """
         UPDATE monitoring.monitoring_sync_operation o
@@ -103,7 +106,23 @@ def _sweep_zombie_pending(conn: psycopg.Connection) -> int:
            AND (s.active_source_instance_generation
                     <> o.source_instance_generation
                 OR s.configuration_revision <> o.configuration_revision
-                OR s.scope_revision <> o.scope_revision)
+                OR s.scope_revision <> o.scope_revision
+                OR (o.responsibility_kind = 'metric_definition_poll'
+                    AND (o.item_definition_poll_epoch IS NULL
+                         OR o.item_definition_poll_generation IS NULL
+                         OR s.item_definition_poll_epoch
+                             IS DISTINCT FROM o.item_definition_poll_epoch
+                         OR s.item_definition_poll_generation
+                             IS DISTINCT FROM
+                                 o.item_definition_poll_generation - 1))
+                OR (o.responsibility_kind = 'current_state_poll'
+                    AND (o.current_state_poll_epoch IS NULL
+                         OR o.current_state_poll_generation IS NULL
+                         OR s.current_state_poll_epoch
+                             IS DISTINCT FROM o.current_state_poll_epoch
+                         OR s.current_state_poll_generation
+                             IS DISTINCT FROM
+                                 o.current_state_poll_generation - 1)))
         """,
     )
     n = cur.rowcount

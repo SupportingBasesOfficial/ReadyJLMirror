@@ -94,7 +94,8 @@ def source():
 
 def _mk_op(conn, src, gen, *, kind="problem_state_sync", state="pending",
            started=None, completed=None, recovery=0,
-           config_rev=1, scope_rev=1):
+           config_rev=1, scope_rev=1, item_epoch=None, item_gen=None,
+           cur_epoch=None, cur_gen=None):
     op = f"mon-op_{secrets.token_hex(6)}"
     conn.execute(
         f"""
@@ -103,13 +104,15 @@ def _mk_op(conn, src, gen, *, kind="problem_state_sync", state="pending",
              monitoring_source_id, source_instance_generation,
              configuration_revision, scope_revision,
              responsibility_kind, state, claim_token,
-             started_at, completed_at, recovery_count)
+             started_at, completed_at, recovery_count,
+             item_definition_poll_epoch, item_definition_poll_generation,
+             current_state_poll_epoch, current_state_poll_generation)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,{started or 'NULL'},
-                {completed or 'NULL'},%s)
+                {completed or 'NULL'},%s,%s,%s,%s,%s)
         """,
         (TENANT, op, src, gen, config_rev, scope_rev, kind, state,
          "claim-x" if state == "running" else None,
-         recovery))
+         recovery, item_epoch, item_gen, cur_epoch, cur_gen))
     return op
 
 
@@ -170,6 +173,32 @@ def test_zombie_pending_terminated(source):
         st = _op_state(conn, op)
     assert st[0] == "failed_terminal"
     assert st[3] == "authority_superseded"
+
+
+def test_zombie_epoch_fence_terminated(source):
+    """current_state_poll pending whose poll generation no longer
+    satisfies source.poll_generation = op.poll_generation - 1 is
+    unclaimable forever — same terminal sweep as authority drift."""
+    with _conn() as conn:
+        op = _mk_op(conn, source["src"], source["gen"],
+                    kind="current_state_poll", state="pending",
+                    cur_epoch=1, cur_gen=99)   # source gen is 1
+        _run(conn)
+        st = _op_state(conn, op)
+    assert st[0] == "failed_terminal"
+    assert st[3] == "authority_superseded"
+
+
+def test_pending_matching_epoch_untouched(source):
+    """A pending op whose generation satisfies the epoch fence must
+    survive the sweep."""
+    with _conn() as conn:
+        op = _mk_op(conn, source["src"], source["gen"],
+                    kind="current_state_poll", state="pending",
+                    cur_epoch=1, cur_gen=2)    # source gen 1 = op-1
+        _run(conn)
+        st = _op_state(conn, op)
+    assert st[0] == "pending"
 
 
 def test_live_pending_untouched(source):
