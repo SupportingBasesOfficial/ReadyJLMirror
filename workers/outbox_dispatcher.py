@@ -18,6 +18,7 @@ async_ops endpoint.
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import time
@@ -60,6 +61,44 @@ def _webhook_request() -> tuple[str, dict]:
     return url, kwargs
 
 
+def wire_envelope(row: dict) -> dict:
+    """Compose the canonical g6 integration envelope for the wire.
+
+    Field-for-field the vendored contract
+    (g6-monitoring-alerting-transport/envelope.schema.json): the
+    scheduling fields the contract pins to null are emitted as null
+    here — the table does not carry them."""
+    payload = row["encoded_payload"]
+    raw = (payload.tobytes() if isinstance(payload, memoryview)
+           else payload if isinstance(payload, bytes)
+           else str(payload).encode())
+    occurred = row["occurred_at"]
+    return {
+        "producer_message_scope": row["producer_message_scope"],
+        "message_id": row["message_id"],
+        "message_class": row["message_class"],
+        "contract_name": row["contract_name"],
+        "contract_version": row["contract_version"],
+        "producer": row["producer"],
+        "producer_generation": None,
+        "scope_class": row["scope"],
+        "tenant_id": row["tenant_id"],
+        "subject_type": row["subject_type"],
+        "subject_id": row["subject_id"],
+        "occurred_at": (occurred.isoformat()
+                        if hasattr(occurred, "isoformat") else occurred),
+        "created_at": None,
+        "operation_id": None,
+        "not_before": None,
+        "deadline": None,
+        "correlation_id": row["correlation_id"],
+        "causation_id": row["causation_id"],
+        "data_classification": row["data_classification"],
+        "serialization_profile_id": row["serialization_profile_id"],
+        "encoded_payload": base64.b64encode(raw).decode(),
+    }
+
+
 def _publish_durable(conn: psycopg.Connection) -> int:
     """Claim and publish pending durable outbox rows. Returns count."""
     webhook_url, httpx_kwargs = _webhook_request()
@@ -67,9 +106,11 @@ def _publish_durable(conn: psycopg.Connection) -> int:
 
     cur = conn.execute(
         """
-        SELECT record_id, tenant_id, message_id, contract_name,
-               contract_version, subject_type, subject_id, encoded_payload,
-               attempt_count
+        SELECT record_id, tenant_id, message_id, producer_message_scope,
+               message_class, contract_name, contract_version, producer,
+               scope, subject_type, subject_id, occurred_at,
+               correlation_id, causation_id, data_classification,
+               serialization_profile_id, encoded_payload, attempt_count
           FROM monitoring.monitoring_outbox
          WHERE dispatch_state = 'pending'
             OR (dispatch_state = 'claimed' AND claim_expires_at < %s)
@@ -79,11 +120,21 @@ def _publish_durable(conn: psycopg.Connection) -> int:
         """,
         (now,),
     )
-    rows = cur.fetchall()
+    keys = ("record_id", "tenant_id", "message_id",
+            "producer_message_scope", "message_class", "contract_name",
+            "contract_version", "producer", "scope", "subject_type",
+            "subject_id", "occurred_at", "correlation_id",
+            "causation_id", "data_classification",
+            "serialization_profile_id", "encoded_payload",
+            "attempt_count")
+    rows = [dict(zip(keys, r)) for r in cur.fetchall()]
     published = 0
 
-    for (record_id, tenant_id, message_id, contract, version,
-         subject_type, subject_id, payload, attempts) in rows:
+    for row in rows:
+        record_id = row["record_id"]
+        tenant_id = row["tenant_id"]
+        message_id = row["message_id"]
+        attempts = row["attempt_count"]
         telemetry.correlation_id_var.set(message_id)
         telemetry.tenant_id_var.set(tenant_id)
         conn.execute(
@@ -99,14 +150,7 @@ def _publish_durable(conn: psycopg.Connection) -> int:
              tenant_id, record_id),
         )
 
-        envelope = {
-            "message_id": message_id,
-            "contract_name": contract,
-            "contract_version": version,
-            "subject": {"type": subject_type, "id": subject_id},
-            "payload": payload.decode("utf-8") if isinstance(
-                payload, (bytes, memoryview)) else str(payload),
-        }
+        envelope = wire_envelope(row)
 
         error = None
         receipt_id = None

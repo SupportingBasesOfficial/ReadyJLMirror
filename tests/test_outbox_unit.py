@@ -46,10 +46,15 @@ class _FakeConn:
 
 
 def _row(record_id=1, attempts=0):
+    """18-field row matching _publish_durable's claim SELECT order."""
     return (
         record_id, "tenant:test", f"msg-{record_id}",
-        "monitoring.problem.state-change", "1",
-        "monitoring_problem", "prob-1", b"{}", attempts,
+        "monitoring:problem", "event",
+        "monitoring.problem-state.changed", "1.0.0",
+        "Monitoring", "tenant", "monitoring_problem", "prob-1",
+        "2026-01-01T00:00:00+00:00", "corr-1", "cause-1",
+        "internal", "jlmirror.monitoring.v1",
+        b"{}", attempts,
     )
 
 

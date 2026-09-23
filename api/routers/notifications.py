@@ -46,7 +46,7 @@ async def create_intent(alert_id: str, request: Request,
     """Immutable notification intent + durable dispatch enqueue.
     NEVER mutates alert lifecycle/action ownership."""
     tenant = _authoritative_tenant(request, tenant_id)
-    ctx = request.state.jlmirror_context or {}
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
     actor = ctx.get("principal_id", "dev-operator")
     if body.reason not in _REASONS:
         raise HTTPException(status_code=422,

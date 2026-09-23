@@ -212,7 +212,8 @@ async def verify_context(request: Request, call_next):
     # Dev sandbox routes stay open for local exploration in development
     sandbox_prefixes = (
         "/api/v1/auth/", "/api/v1/fence/", "/api/v1/monitoring/",
-        "/api/v1/async/", "/api/v1/observability/", "/api/v1/release/",
+        "/api/v1/alerting/", "/api/v1/async/", "/api/v1/observability/",
+        "/api/v1/release/",
     )
     ctx = _verify_bff_context(request)
     display_ctx = False

@@ -72,7 +72,7 @@ async def assign_alert_action(alert_id: str, request: Request,
                               body: AssignAction,
                               tenant_id: str | None = None) -> dict:
     tenant = _authoritative_tenant(request, tenant_id)
-    ctx = request.state.jlmirror_context or {}
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
     actor = ctx.get("principal_id", "dev-operator")
     if body.action_kind not in _ACTION_KINDS:
         raise HTTPException(status_code=422,
@@ -162,7 +162,7 @@ async def acknowledge_alert(alert_id: str, request: Request,
                             body: AckBody,
                             tenant_id: str | None = None) -> dict:
     tenant = _authoritative_tenant(request, tenant_id)
-    ctx = request.state.jlmirror_context or {}
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
     actor = ctx.get("principal_id", "dev-operator")
     logical_id = body.logical_action_id or f"ack_{secrets.token_urlsafe(12)}"
     ack_id = f"ack_{secrets.token_urlsafe(12)}"
@@ -219,7 +219,7 @@ async def assign_responsibility(request: Request,
                                 body: ResponsibilityCreate,
                                 tenant_id: str | None = None) -> dict:
     tenant = _authoritative_tenant(request, tenant_id)
-    ctx = request.state.jlmirror_context or {}
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
     actor = ctx.get("principal_id", "dev-operator")
     if body.responsibility_role not in _RESP_ROLES:
         raise HTTPException(status_code=422,
@@ -284,7 +284,7 @@ async def end_responsibility(request: Request, assignment_id: str,
                              body: EndResponsibility,
                              tenant_id: str | None = None) -> dict:
     tenant = _authoritative_tenant(request, tenant_id)
-    ctx = request.state.jlmirror_context or {}
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
     actor = ctx.get("principal_id", "dev-operator")
     async with db_tenant_connection(tenant) as conn:
         cur = await conn.execute(
@@ -333,7 +333,7 @@ async def create_visibility_requirement(
         body: VisibilityRequirementCreate,
         tenant_id: str | None = None) -> dict:
     tenant = _authoritative_tenant(request, tenant_id)
-    ctx = request.state.jlmirror_context or {}
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
     actor = ctx.get("principal_id", "dev-operator")
     if body.viewer_side not in ("internal", "customer"):
         raise HTTPException(status_code=422,
@@ -401,7 +401,7 @@ async def record_visibility_receipt(
     late (alert already resolved) — it is evidence, never a
     mutation of alert/action state."""
     tenant = _authoritative_tenant(request, tenant_id)
-    ctx = request.state.jlmirror_context or {}
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
     actor = ctx.get("principal_id", "dev-operator")
     session_evidence = {
         "session_generation":

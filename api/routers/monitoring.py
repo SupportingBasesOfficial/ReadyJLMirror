@@ -24,17 +24,20 @@ from shared.audit import record_audit_event
 from shared.db import db_tenant_connection
 from shared.monitoring_repo import (
     create_zabbix_source,
+    decode_cursor,
     enqueue_current_state_poll,
     enqueue_history_sync,
     enqueue_metric_definition_poll,
     enqueue_problem_state_sync,
     enqueue_sync_operation,
+    get_onboarding_view,
     get_source,
     list_current_states,
     list_health_projections,
     list_history_observations,
     list_history_streams,
     list_metric_definitions,
+    list_metric_history,
     list_problems,
     list_resources,
     list_sources,
@@ -68,6 +71,27 @@ def _authoritative_tenant(request: Request, body_tenant: str | None) -> str:
         status_code=status.HTTP_403_FORBIDDEN,
         detail="no tenant authority",
     )
+
+
+def _ser_rows(payload: dict) -> dict:
+    """ISO-serialize every datetime inside an {items, ...} envelope."""
+    for item in payload.get("items", []):
+        for k, v in item.items():
+            if hasattr(v, "isoformat"):
+                item[k] = v.isoformat()
+    return payload
+
+
+def _list_params(cursor: str | None, limit: int, view: str) -> dict:
+    if view not in ("contract", "operational"):
+        raise HTTPException(status_code=422,
+                            detail="view must be contract|operational")
+    if cursor:
+        try:
+            decode_cursor(cursor)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid cursor")
+    return {"cursor": cursor, "limit": limit, "view": view}
 
 
 # ---------------------------------------------------------------------------
@@ -183,18 +207,56 @@ async def derive_health_endpoint(body: HealthDeriveRequest) -> HealthDeriveRespo
 # ---------------------------------------------------------------------------
 
 
-class SourceCreateRequest(BaseModel):
-    tenant_id: str | None = None  # dev-sandbox only; BFF ctx wins when present
-    display_name: str
-    provider_instance_ref: str
-    provider_base_url: str
-    credential_binding_ref: str
+class ProviderConfiguration(BaseModel):
+    base_url: str
+
+
+class ConfiguredScope(BaseModel):
     host_group_refs: list[str]
+
+
+class SourceCreateRequest(BaseModel):
+    """Accepts the canonical create-source contract shape
+    (provider_configuration.base_url + configured_provider_scope) and
+    the legacy flat dev shape (provider_base_url + host_group_refs)."""
+    tenant_id: str | None = None  # dev-sandbox only; BFF ctx wins when present
+    provider_profile: str | None = None
+    display_name: str
+    provider_instance_ref: str | None = None
+    provider_configuration: ProviderConfiguration | None = None
+    configured_provider_scope: ConfiguredScope | None = None
+    provider_base_url: str | None = None   # legacy flat shape
+    host_group_refs: list[str] | None = None
+    credential_binding_ref: str
     idempotency_key: str | None = None
     # Optional: tenant supplies the provider token once — the API
     # writes it to the secrets store (0600, atomic) under the binding
     # ref. It is never logged and never reaches the database.
     api_token: str | None = None
+
+    def resolved_base_url(self) -> str:
+        url = (self.provider_configuration.base_url
+               if self.provider_configuration else self.provider_base_url)
+        if not url:
+            raise HTTPException(status_code=422,
+                                detail="provider_configuration.base_url required")
+        return url
+
+    def resolved_host_group_refs(self) -> list[str]:
+        refs = (self.configured_provider_scope.host_group_refs
+                if self.configured_provider_scope else self.host_group_refs)
+        if not refs:
+            raise HTTPException(
+                status_code=422,
+                detail="configured_provider_scope.host_group_refs required")
+        return refs
+
+    def resolved_instance_ref(self) -> str:
+        if self.provider_instance_ref:
+            return self.provider_instance_ref
+        from urllib.parse import urlparse
+        host = urlparse(self.resolved_base_url()).netloc or "provider"
+        return f"zabbix:{host}"
 
 
 class SourceResponse(BaseModel):
@@ -212,10 +274,21 @@ async def create_source(body: SourceCreateRequest, request: Request) -> SourceRe
     `validation_and_initial_sync` operation for the worker.
     """
     tenant_id = _authoritative_tenant(request, body.tenant_id)
+    if body.provider_profile is not None and body.provider_profile != "zabbix":
+        raise HTTPException(status_code=422,
+                            detail="provider_profile must be 'zabbix'")
+    base_url = body.resolved_base_url()
+    group_refs = body.resolved_host_group_refs()
+    # Contract pattern: base_url must be https:// — relaxed to http
+    # only under the development runtime (local Zabbix has no TLS).
+    if not settings.is_development and not base_url.startswith("https://"):
+        raise HTTPException(
+            status_code=422,
+            detail="provider_configuration.base_url must be https://")
     try:
         # Domain validation before persistence (canonical input shape)
-        ZabbixProviderConfiguration(base_url=body.provider_base_url)
-        ConfiguredProviderScope.from_refs(body.host_group_refs)
+        ZabbixProviderConfiguration(base_url=base_url)
+        ConfiguredProviderScope.from_refs(group_refs)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
@@ -246,10 +319,10 @@ async def create_source(body: SourceCreateRequest, request: Request) -> SourceRe
                 tenant_id=tenant_id,
                 idempotency_key=key,
                 display_name=body.display_name,
-                provider_instance_ref=body.provider_instance_ref,
-                provider_base_url=body.provider_base_url,
+                provider_instance_ref=body.resolved_instance_ref(),
+                provider_base_url=base_url,
                 credential_binding_ref=body.credential_binding_ref,
-                host_group_refs=body.host_group_refs,
+                host_group_refs=group_refs,
                 audit_ctx={
                     "actor_kind": "principal",
                     "actor_id": (getattr(
@@ -434,16 +507,29 @@ async def enqueue_inventory(source_id: str, request: Request,
 
 @router.get("/sources/{source_id}/resources")
 async def list_resources_endpoint(source_id: str, request: Request,
-                                  tenant_id: str | None = None) -> list[dict]:
-    """List canonical monitored resources for a source."""
+                                  tenant_id: str | None = None,
+                                  cursor: str | None = None,
+                                  limit: int = 500,
+                                  view: str = "contract") -> dict:
+    """G3 resource-list contract — {generation_state, items,
+    next_cursor}. `view=operational` adds internal extension fields."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    params = _list_params(cursor, limit, view)
+    async with db_tenant_connection(tenant) as conn:
+        payload = await list_resources(conn, tenant, source_id, **params)
+    return _ser_rows(payload)
+
+
+@router.get("/sources/{source_id}/onboarding")
+async def onboarding_view_endpoint(source_id: str, request: Request,
+                                   tenant_id: str | None = None) -> dict:
+    """G2 onboarding-view contract — validation state for the source."""
     tenant = _authoritative_tenant(request, tenant_id)
     async with db_tenant_connection(tenant) as conn:
-        rows = await list_resources(conn, tenant, source_id)
-    for r in rows:
-        for k in ("last_observed_at", "removed_at"):
-            if r.get(k) is not None:
-                r[k] = r[k].isoformat()
-    return rows
+        view = await get_onboarding_view(conn, tenant, source_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    return view
 
 
 @router.post("/inventory/run", status_code=200)
@@ -490,11 +576,17 @@ async def enqueue_metric_poll(source_id: str, request: Request,
 
 @router.get("/sources/{source_id}/metrics")
 async def list_metrics_endpoint(source_id: str, request: Request,
-                                tenant_id: str | None = None) -> list[dict]:
-    """List canonical metric definitions for a source."""
+                                tenant_id: str | None = None,
+                                cursor: str | None = None,
+                                limit: int = 500,
+                                view: str = "contract") -> dict:
+    """G4 metric-definitions contract — {items, next_cursor}."""
     tenant = _authoritative_tenant(request, tenant_id)
+    params = _list_params(cursor, limit, view)
     async with db_tenant_connection(tenant) as conn:
-        return await list_metric_definitions(conn, tenant, source_id)
+        payload = await list_metric_definitions(
+            conn, tenant, source_id, **params)
+    return _ser_rows(payload)
 
 
 @router.post("/metrics/run", status_code=200)
@@ -537,16 +629,17 @@ async def enqueue_current_poll(source_id: str, request: Request,
 
 @router.get("/sources/{source_id}/current")
 async def list_current_endpoint(source_id: str, request: Request,
-                                tenant_id: str | None = None) -> list[dict]:
-    """List current metric values for a source."""
+                                tenant_id: str | None = None,
+                                cursor: str | None = None,
+                                limit: int = 500,
+                                view: str = "contract") -> dict:
+    """G4 metric-current contract — {items, next_cursor}."""
     tenant = _authoritative_tenant(request, tenant_id)
+    params = _list_params(cursor, limit, view)
     async with db_tenant_connection(tenant) as conn:
-        rows = await list_current_states(conn, tenant, source_id)
-    for r in rows:
-        for k in ("observed_at", "accepted_at"):
-            if r.get(k) is not None:
-                r[k] = r[k].isoformat()
-    return rows
+        payload = await list_current_states(
+            conn, tenant, source_id, **params)
+    return _ser_rows(payload)
 
 
 @router.post("/current/run", status_code=200)
@@ -615,6 +708,38 @@ async def list_history_endpoint(source_id: str, request: Request,
     return rows
 
 
+@router.get("/sources/{source_id}/metrics/{metric_definition_id}/history")
+async def metric_history_endpoint(
+        source_id: str, metric_definition_id: str, request: Request,
+        tenant_id: str | None = None,
+        window_from: int | None = None,
+        window_till: int | None = None,
+        cursor: str | None = None,
+        limit: int = 500) -> dict:
+    """G4 metric-history contract — per-definition windowed view."""
+    import time as _time
+
+    tenant = _authoritative_tenant(request, tenant_id)
+    till = window_till if window_till is not None else int(_time.time())
+    frm = window_from if window_from is not None else till - 3600
+    if frm <= 0 or till < frm or till - frm > 86_400 * 30:
+        raise HTTPException(status_code=422, detail="invalid window")
+    if cursor:
+        try:
+            decode_cursor(cursor)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid cursor")
+    async with db_tenant_connection(tenant) as conn:
+        payload = await list_metric_history(
+            conn, tenant, source_id, metric_definition_id,
+            window_from=frm, window_till=till,
+            cursor=cursor, limit=limit)
+    if payload is None:
+        raise HTTPException(status_code=404,
+                            detail="metric definition not found")
+    return _ser_rows(payload)
+
+
 @router.get("/sources/{source_id}/history/streams")
 async def list_history_streams_endpoint(source_id: str, request: Request,
                                         tenant_id: str | None = None
@@ -668,17 +793,17 @@ async def enqueue_problem_poll(source_id: str, request: Request,
 @router.get("/sources/{source_id}/problems")
 async def list_problems_endpoint(source_id: str, request: Request,
                                  tenant_id: str | None = None,
-                                 active_only: bool = False) -> list[dict]:
-    """List canonical problem projections for a source."""
+                                 active_only: bool = False,
+                                 cursor: str | None = None,
+                                 limit: int = 500,
+                                 view: str = "contract") -> dict:
+    """G5 problems contract — {items, next_cursor}, severity-ordered."""
     tenant = _authoritative_tenant(request, tenant_id)
+    params = _list_params(cursor, limit, view)
     async with db_tenant_connection(tenant) as conn:
-        rows = await list_problems(
-            conn, tenant, source_id, active_only=active_only)
-    for r in rows:
-        for k in ("opened_at", "resolved_at", "last_confirmed_at"):
-            if r.get(k) is not None:
-                r[k] = r[k].isoformat()
-    return rows
+        payload = await list_problems(
+            conn, tenant, source_id, active_only=active_only, **params)
+    return _ser_rows(payload)
 
 
 @router.post("/problems/run", status_code=200)
@@ -754,16 +879,17 @@ async def requeue_operation_endpoint(
 
 @router.get("/sources/{source_id}/health")
 async def list_health_endpoint(source_id: str, request: Request,
-                               tenant_id: str | None = None) -> list[dict]:
-    """List canonical health projections per resource for a source."""
+                               tenant_id: str | None = None,
+                               cursor: str | None = None,
+                               limit: int = 500,
+                               view: str = "contract") -> dict:
+    """G5 health contract — {items, next_cursor} with problem_refs."""
     tenant = _authoritative_tenant(request, tenant_id)
+    params = _list_params(cursor, limit, view)
     async with db_tenant_connection(tenant) as conn:
-        rows = await list_health_projections(conn, tenant, source_id)
-    for r in rows:
-        for k in ("last_changed_at", "last_evidence_at"):
-            if r.get(k) is not None:
-                r[k] = r[k].isoformat()
-    return rows
+        payload = await list_health_projections(
+            conn, tenant, source_id, **params)
+    return _ser_rows(payload)
 
 
 @router.post("/health/run", status_code=200)

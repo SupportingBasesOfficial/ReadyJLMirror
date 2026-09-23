@@ -178,8 +178,8 @@ async def create_policy_version(request: Request,
             conn, tenant,
             action="alerting.policy_version.created",
             actor_kind="principal",
-            actor_id=(request.state.jlmirror_context or {})
-                .get("principal_id", "unknown"),
+            actor_id=(getattr(request.state, "jlmirror_context", None)
+                      or {}).get("principal_id", "unknown"),
             subject_type="alert_policy", subject_id=body.policy_id,
             detail={"policy_version": version,
                     "source_kind": body.source_kind,
@@ -239,8 +239,8 @@ async def set_effective_version(request: Request, policy_id: str,
             conn, tenant,
             action="alerting.policy_version.effective_set",
             actor_kind="principal",
-            actor_id=(request.state.jlmirror_context or {})
-                .get("principal_id", "unknown"),
+            actor_id=(getattr(request.state, "jlmirror_context", None)
+                      or {}).get("principal_id", "unknown"),
             subject_type="alert_policy", subject_id=policy_id,
             detail={"policy_version": body.policy_version,
                     "enabled": body.enabled})

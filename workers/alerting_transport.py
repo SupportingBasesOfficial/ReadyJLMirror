@@ -93,7 +93,7 @@ def _process_message(conn, msg: dict) -> str:
     if (msg["contract_name"] not in CONTRACTS
             or msg["contract_version"] != "1"
             or msg["message_class"] != "integration_event"
-            or not msg["producer"].startswith("monitoring")):
+            or msg["producer"].lower() != "monitoring"):
         conn.execute(
             """
             INSERT INTO alerting.inbox_receipt

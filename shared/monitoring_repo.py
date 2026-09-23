@@ -19,10 +19,12 @@ are preserved in the query predicates and domain dataclass validation.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
 import secrets
+from datetime import datetime, timezone
 from typing import Optional, Sequence
 
 from psycopg import AsyncConnection, Connection
@@ -283,6 +285,55 @@ async def get_source(
     return dict(zip(keys, row))
 
 
+async def get_onboarding_view(
+    conn: AsyncConnection, tenant_id: str, source_id: str
+) -> Optional[dict]:
+    """G2 onboarding-view contract shape.
+
+    state comes from the source's operational evidence plus whether a
+    validation op is still in flight; provider_connection_confirmed is
+    proven by a successful validation evidence row — never inferred."""
+    cur = await conn.execute(
+        """
+        SELECT s.operational_evidence_state, s.last_sync_operation_id,
+               EXISTS (
+                   SELECT 1 FROM monitoring.monitoring_sync_operation o
+                    WHERE o.tenant_id = s.tenant_id
+                      AND o.monitoring_source_id = s.monitoring_source_id
+                      AND o.responsibility_kind = 'validation_and_initial_sync'
+                      AND o.state IN ('pending', 'running')) AS validation_in_flight,
+               EXISTS (
+                   SELECT 1 FROM monitoring.monitoring_source_validation_evidence e
+                    WHERE e.tenant_id = s.tenant_id
+                      AND e.monitoring_source_id = s.monitoring_source_id
+                      AND e.operational_evidence_state = 'current')
+                   AS connection_confirmed
+          FROM monitoring.monitoring_source s
+         WHERE s.tenant_id = %s AND s.monitoring_source_id = %s
+        """,
+        (tenant_id, source_id),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return None
+    evidence, last_op, in_flight, confirmed = row
+    if in_flight:
+        state = "validation_pending"
+    else:
+        state = {
+            "current": "current",
+            "incomplete": "incomplete",
+            "reconciliation_required": "reconciliation_required",
+        }.get(evidence, "unavailable")
+    return {
+        "monitoring_source_id": source_id,
+        "monitoring_sync_operation_id": last_op,
+        "state": state,
+        "provider_connection_confirmed": bool(confirmed),
+        "can_recheck": not in_flight,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Validation repository (sync — worker path, implements
 # MonitoringValidationRepository invoked synchronously by the domain worker)
@@ -535,27 +586,100 @@ async def enqueue_sync_operation(
     return op_id
 
 
+# ---------------------------------------------------------------------------
+# Contract-shape read helpers (canonical view schemas under
+# vendor/ProjectJLMirror/contracts). List endpoints return
+# {items, next_cursor} envelopes with keyset cursors; the default
+# projection carries exactly the contract fields — `view="operational"`
+# adds internal extension fields used by the operator shell.
+# ---------------------------------------------------------------------------
+
+
+def _encode_cursor(payload: dict) -> str:
+    return base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode()).decode()
+
+
+def decode_cursor(cursor: str) -> dict:
+    """Decode an opaque keyset cursor; raises ValueError on garbage."""
+    try:
+        out = json.loads(base64.urlsafe_b64decode(cursor.encode()))
+    except Exception as exc:
+        raise ValueError("invalid cursor") from exc
+    if not isinstance(out, dict):
+        raise ValueError("invalid cursor")
+    return out
+
+
+def _generation_case(alias: str) -> str:
+    """SQL expression: active_generation vs historical_generation."""
+    return (
+        f"CASE WHEN {alias}.source_instance_generation = "
+        f"s.active_source_instance_generation "
+        f"THEN 'active_generation' ELSE 'historical_generation' END")
+
+
 async def list_resources(
-    conn: AsyncConnection, tenant_id: str, source_id: str
-) -> list[dict]:
+    conn: AsyncConnection, tenant_id: str, source_id: str,
+    *, cursor: str | None = None, limit: int = 500,
+    view: str = "contract",
+) -> dict:
+    """G3 resource-list — {items, next_cursor} contract envelope.
+
+    Contract view is the active-generation projection only (the schema
+    pins generation_state='active_generation'); operational view adds
+    provider refs, removal timestamps and host-group membership and
+    does not restrict the generation."""
+    after = decode_cursor(cursor)["k"] if cursor else None
+    limit = min(max(limit, 1), 500)
+    active_only = view != "operational"
     cur = await conn.execute(
-        """
-        SELECT monitoring_resource_id, provider_external_ref, display_name,
-               scope_state, presence_state, presence_evidence_state,
-               scope_evidence_state, last_observed_at, removed_at,
-               host_groups
-          FROM monitoring.monitoring_resource
-         WHERE tenant_id = %s AND monitoring_source_id = %s
-         ORDER BY provider_external_ref
+        f"""
+        SELECT r.monitoring_resource_id, r.monitoring_source_id,
+               r.source_instance_generation,
+               {_generation_case('r')} AS generation_state,
+               r.display_name, r.resource_kind,
+               r.scope_state, r.scope_projection_revision,
+               r.scope_evidence_state,
+               r.presence_state, r.presence_evidence_state,
+               r.last_observed_at, r.last_confirmed_present_at,
+               r.created_at, r.updated_at,
+               r.provider_external_ref, r.removed_at, r.host_groups
+          FROM monitoring.monitoring_resource r
+          JOIN monitoring.monitoring_source s
+            ON s.tenant_id = r.tenant_id
+           AND s.monitoring_source_id = r.monitoring_source_id
+         WHERE r.tenant_id = %s AND r.monitoring_source_id = %s
+           AND (NOT %s OR r.source_instance_generation =
+                    s.active_source_instance_generation)
+           AND (%s::text IS NULL OR r.monitoring_resource_id > %s)
+         ORDER BY r.monitoring_resource_id
+         LIMIT %s
         """,
-        (tenant_id, source_id),
+        (tenant_id, source_id, active_only, after, after, limit + 1),
     )
-    rows = await cur.fetchall()
-    keys = ("monitoring_resource_id", "provider_external_ref", "display_name",
-            "scope_state", "presence_state", "presence_evidence_state",
-            "scope_evidence_state", "last_observed_at", "removed_at",
-            "host_groups")
-    return [dict(zip(keys, r)) for r in rows]
+    keys = ("monitoring_resource_id", "monitoring_source_id",
+            "source_instance_generation", "generation_state",
+            "display_name", "resource_kind",
+            "scope_state", "scope_projection_revision",
+            "scope_evidence_state",
+            "presence_state", "presence_evidence_state",
+            "last_observed_at", "last_confirmed_present_at",
+            "created_at", "updated_at",
+            "provider_external_ref", "removed_at", "host_groups")
+    rows = [dict(zip(keys, r)) for r in await cur.fetchall()]
+    has_more = len(rows) > limit
+    items = rows[:limit]
+    if view != "operational":
+        for it in items:
+            it.pop("provider_external_ref")
+            it.pop("removed_at")
+            it.pop("host_groups")
+    next_cursor = (
+        _encode_cursor({"k": items[-1]["monitoring_resource_id"]})
+        if has_more else None)
+    return {"generation_state": "active_generation",
+            "items": items, "next_cursor": next_cursor}
 
 
 # ---------------------------------------------------------------------------
@@ -958,29 +1082,61 @@ async def enqueue_metric_definition_poll(
 
 
 async def list_metric_definitions(
-    conn: AsyncConnection, tenant_id: str, source_id: str
-) -> list[dict]:
+    conn: AsyncConnection, tenant_id: str, source_id: str,
+    *, cursor: str | None = None, limit: int = 500,
+    view: str = "contract",
+) -> dict:
+    """G4 metric-definitions — {items, next_cursor} contract envelope."""
+    after = decode_cursor(cursor)["k"] if cursor else None
+    limit = min(max(limit, 1), 500)
     cur = await conn.execute(
-        """
-        SELECT d.metric_definition_id, d.name, d.value_kind, d.unit,
-               d.scope_state, d.definition_state, d.definition_evidence_state,
-               b.provider_external_ref, b.provider_host_ref, b.provider_key,
-               b.native_value_type, b.provider_operational_state
+        f"""
+        SELECT d.metric_definition_id, d.monitoring_resource_id,
+               d.monitoring_source_id, d.source_instance_generation,
+               {_generation_case('d')} AS generation_state,
+               d.name, d.value_kind, NULLIF(d.unit, '') AS unit,
+               d.scope_state, d.scope_projection_revision,
+               d.scope_evidence_state, d.definition_state,
+               d.definition_evidence_state,
+               b.provider_external_ref, b.provider_host_ref,
+               b.provider_key, b.native_value_type,
+               b.provider_operational_state
           FROM monitoring.metric_definition d
           JOIN monitoring.metric_definition_provider_binding b
             ON b.tenant_id = d.tenant_id
            AND b.metric_definition_id = d.metric_definition_id
+          JOIN monitoring.monitoring_source s
+            ON s.tenant_id = d.tenant_id
+           AND s.monitoring_source_id = d.monitoring_source_id
          WHERE d.tenant_id = %s AND d.monitoring_source_id = %s
-         ORDER BY b.provider_external_ref
+           AND (%s::text IS NULL OR d.metric_definition_id > %s)
+         ORDER BY d.metric_definition_id
+         LIMIT %s
         """,
-        (tenant_id, source_id),
+        (tenant_id, source_id, after, after, limit + 1),
     )
-    rows = await cur.fetchall()
-    keys = ("metric_definition_id", "name", "value_kind", "unit",
-            "scope_state", "definition_state", "definition_evidence_state",
-            "provider_external_ref", "provider_host_ref", "provider_key",
-            "native_value_type", "provider_operational_state")
-    return [dict(zip(keys, r)) for r in rows]
+    keys = ("metric_definition_id", "monitoring_resource_id",
+            "monitoring_source_id", "source_instance_generation",
+            "generation_state", "name", "value_kind", "unit",
+            "scope_state", "scope_projection_revision",
+            "scope_evidence_state", "definition_state",
+            "definition_evidence_state",
+            "provider_external_ref", "provider_host_ref",
+            "provider_key", "native_value_type",
+            "provider_operational_state")
+    rows = [dict(zip(keys, r)) for r in await cur.fetchall()]
+    has_more = len(rows) > limit
+    items = rows[:limit]
+    if view != "operational":
+        for it in items:
+            for k in ("definition_evidence_state", "provider_external_ref",
+                      "provider_host_ref", "provider_key",
+                      "native_value_type", "provider_operational_state"):
+                it.pop(k)
+    next_cursor = (
+        _encode_cursor({"k": items[-1]["metric_definition_id"]})
+        if has_more else None)
+    return {"items": items, "next_cursor": next_cursor}
 
 
 class PgMetricDefinitionRepository:
@@ -1475,29 +1631,57 @@ async def enqueue_current_state_poll(
 
 
 async def list_current_states(
-    conn: AsyncConnection, tenant_id: str, source_id: str
-) -> list[dict]:
+    conn: AsyncConnection, tenant_id: str, source_id: str,
+    *, cursor: str | None = None, limit: int = 500,
+    view: str = "contract",
+) -> dict:
+    """G4 metric-current — {items, next_cursor} contract envelope."""
+    after = decode_cursor(cursor)["k"] if cursor else None
+    limit = min(max(limit, 1), 500)
     cur = await conn.execute(
-        """
-        SELECT c.metric_definition_id, d.name, c.value_kind,
-               c.canonical_value, c.evidence_state, c.observed_at,
-               c.accepted_at, c.projection_revision,
-               c.current_state_poll_epoch, c.current_state_poll_generation
+        f"""
+        SELECT c.metric_definition_id, c.monitoring_resource_id,
+               c.monitoring_source_id, c.source_instance_generation,
+               {_generation_case('c')} AS generation_state,
+               d.scope_state, d.scope_evidence_state,
+               c.current_observation_id, c.observed_at, c.accepted_at,
+               c.value_kind, c.canonical_value AS value,
+               c.evidence_state, c.projection_revision, c.last_changed_at,
+               d.name, c.current_state_poll_epoch,
+               c.current_state_poll_generation
           FROM monitoring.metric_current_state c
           JOIN monitoring.metric_definition d
             ON d.tenant_id = c.tenant_id
            AND d.metric_definition_id = c.metric_definition_id
+          JOIN monitoring.monitoring_source s
+            ON s.tenant_id = c.tenant_id
+           AND s.monitoring_source_id = c.monitoring_source_id
          WHERE c.tenant_id = %s AND c.monitoring_source_id = %s
-         ORDER BY d.name
+           AND (%s::text IS NULL OR c.metric_definition_id > %s)
+         ORDER BY c.metric_definition_id
+         LIMIT %s
         """,
-        (tenant_id, source_id),
+        (tenant_id, source_id, after, after, limit + 1),
     )
-    rows = await cur.fetchall()
-    keys = ("metric_definition_id", "name", "value_kind", "canonical_value",
-            "evidence_state", "observed_at", "accepted_at",
-            "projection_revision", "current_state_poll_epoch",
-            "current_state_poll_generation")
-    return [dict(zip(keys, r)) for r in rows]
+    keys = ("metric_definition_id", "monitoring_resource_id",
+            "monitoring_source_id", "source_instance_generation",
+            "generation_state", "scope_state", "scope_evidence_state",
+            "current_observation_id", "observed_at", "accepted_at",
+            "value_kind", "value", "evidence_state", "projection_revision",
+            "last_changed_at", "name",
+            "current_state_poll_epoch", "current_state_poll_generation")
+    rows = [dict(zip(keys, r)) for r in await cur.fetchall()]
+    has_more = len(rows) > limit
+    items = rows[:limit]
+    if view != "operational":
+        for it in items:
+            for k in ("name", "current_state_poll_epoch",
+                      "current_state_poll_generation"):
+                it.pop(k)
+    next_cursor = (
+        _encode_cursor({"k": items[-1]["metric_definition_id"]})
+        if has_more else None)
+    return {"items": items, "next_cursor": next_cursor}
 
 
 class PgMetricCurrentStateRepository:
@@ -2539,6 +2723,126 @@ async def list_history_streams(
     return [dict(zip(keys, r)) for r in await cur.fetchall()]
 
 
+async def list_metric_history(
+    conn: AsyncConnection, tenant_id: str, source_id: str,
+    metric_definition_id: str, *, window_from: int, window_till: int,
+    cursor: str | None = None, limit: int = 500,
+) -> dict | None:
+    """G4 metric-history — per-definition contract view.
+
+    Returns {metric_definition_id, source_instance_generation,
+    generation_state, window, completeness, items, next_cursor} or
+    None when the definition does not exist in this source. Items are
+    the immutable canonical observations inside [from, to], newest
+    first; completeness reflects the stream checkpoint plus recorded
+    gap evidence — never inferred positivity."""
+    after = decode_cursor(cursor) if cursor else {}
+    after_clock, after_oid = after.get("o"), after.get("i")
+    limit = min(max(limit, 1), 500)
+
+    cur = await conn.execute(
+        f"""
+        SELECT d.source_instance_generation,
+               {_generation_case('d')} AS generation_state
+          FROM monitoring.metric_definition d
+          JOIN monitoring.monitoring_source s
+            ON s.tenant_id = d.tenant_id
+           AND s.monitoring_source_id = d.monitoring_source_id
+         WHERE d.tenant_id = %s AND d.monitoring_source_id = %s
+           AND d.metric_definition_id = %s
+        """,
+        (tenant_id, source_id, metric_definition_id),
+    )
+    meta = await cur.fetchone()
+    if meta is None:
+        return None
+
+    cur = await conn.execute(
+        """
+        SELECT o.observation_id, o.metric_definition_id,
+               o.monitoring_resource_id, o.monitoring_source_id,
+               o.source_instance_generation, o.observed_at,
+               o.accepted_at, o.value_kind, o.canonical_value AS value
+          FROM monitoring.metric_observation o
+         WHERE o.tenant_id = %s AND o.monitoring_source_id = %s
+           AND o.metric_definition_id = %s
+           AND o.provider_clock >= %s AND o.provider_clock <= %s
+           AND (%s::bigint IS NULL OR (
+                o.observed_at < to_timestamp(%s::double precision)
+                OR (o.observed_at = to_timestamp(%s::double precision)
+                    AND o.observation_id < %s)))
+         ORDER BY o.observed_at DESC, o.observation_id DESC
+         LIMIT %s
+        """,
+        (tenant_id, source_id, metric_definition_id,
+         window_from, window_till,
+         after_clock, after_clock, after_clock, after_oid, limit + 1),
+    )
+    keys = ("observation_id", "metric_definition_id",
+            "monitoring_resource_id", "monitoring_source_id",
+            "source_instance_generation", "observed_at", "accepted_at",
+            "value_kind", "value")
+    rows = [dict(zip(keys, r)) for r in await cur.fetchall()]
+    has_more = len(rows) > limit
+    items = rows[:limit]
+    next_cursor = None
+    if has_more:
+        last = items[-1]
+        next_cursor = _encode_cursor({
+            "o": last["observed_at"].timestamp()
+                if hasattr(last["observed_at"], "timestamp")
+                else last["observed_at"],
+            "i": last["observation_id"]})
+
+    # Completeness from the stream checkpoint + immutable gap evidence.
+    cur = await conn.execute(
+        """
+        SELECT coverage_state, safe_clock
+          FROM monitoring.metric_history_stream_state
+         WHERE tenant_id = %s AND monitoring_source_id = %s
+           AND metric_definition_id = %s
+         ORDER BY updated_at DESC LIMIT 1
+        """,
+        (tenant_id, source_id, metric_definition_id),
+    )
+    stream = await cur.fetchone()
+    cur = await conn.execute(
+        """
+        SELECT history_gap_id
+          FROM monitoring.metric_history_gap_evidence
+         WHERE tenant_id = %s AND monitoring_source_id = %s
+           AND metric_definition_id = %s
+         ORDER BY detected_at DESC LIMIT 64
+        """,
+        (tenant_id, source_id, metric_definition_id),
+    )
+    gap_refs = [r[0] for r in await cur.fetchall()]
+    cov = stream[0] if stream else "open"
+    state = {"finalized": "complete", "open": "incomplete",
+             "gap": "gap_detected"}.get(cov, "reconciliation_required")
+    completeness = {
+        "state": state,
+        "covered_through": (
+            datetime.fromtimestamp(stream[1], tz=timezone.utc).isoformat()
+            if stream and stream[1] is not None else None),
+        "gap_refs": gap_refs,
+    }
+    return {
+        "metric_definition_id": metric_definition_id,
+        "source_instance_generation": meta[0],
+        "generation_state": meta[1],
+        "window": {
+            "from": datetime.fromtimestamp(
+                window_from, tz=timezone.utc).isoformat(),
+            "to": datetime.fromtimestamp(
+                window_till, tz=timezone.utc).isoformat(),
+        },
+        "completeness": completeness,
+        "items": items,
+        "next_cursor": next_cursor,
+    }
+
+
 def list_all_pending_history_syncs(conn: Connection) -> list[tuple[str, str]]:
     """All tenants' pending metric_history_sync ops — (tenant_id, op_id)."""
     cur = conn.execute(
@@ -3409,38 +3713,87 @@ async def enqueue_problem_state_sync(
     return op_id
 
 
+_PROBLEM_SEV_RANK = """CASE p.severity_class
+    WHEN 'critical' THEN 0 WHEN 'degraded' THEN 1
+    WHEN 'warning' THEN 2 WHEN 'informational' THEN 3
+    ELSE 4 END"""
+
+
 async def list_problems(
     conn: AsyncConnection, tenant_id: str, source_id: str,
-    *, active_only: bool = False,
-) -> list[dict]:
+    *, active_only: bool = False, cursor: str | None = None,
+    limit: int = 500, view: str = "contract",
+) -> dict:
+    """G5 problems — {items, next_cursor} contract envelope.
+
+    Ordering is operational: severity (critical first) then newest —
+    the cursor carries the (rank, opened_at, problem_id) keyset."""
+    limit = min(max(limit, 1), 500)
+    after_rank = after_opened = after_pid = None
+    if cursor:
+        c = decode_cursor(cursor)
+        after_rank, after_opened, after_pid = (
+            c.get("r"), c.get("o"), c.get("p"))
     cur = await conn.execute(
-        """
-        SELECT p.problem_id, p.problem_state, p.severity_class, p.summary,
+        f"""
+        SELECT p.problem_id, p.monitoring_source_id,
+               p.source_instance_generation,
+               {_generation_case('p')} AS generation_state,
+               ARRAY[p.monitoring_resource_id] AS monitoring_resource_ids,
+               p.summary, p.problem_state, p.severity_class,
                p.opened_at, p.resolved_at, p.last_confirmed_at,
                p.evidence_state, p.projection_revision,
                p.provider_acknowledged, p.monitoring_resource_id,
-               b.provider_external_ref AS provider_eventid
+               b.provider_external_ref AS provider_eventid,
+               {_PROBLEM_SEV_RANK} AS sev_rank
           FROM monitoring.monitoring_problem p
           JOIN monitoring.monitoring_problem_provider_binding b
             ON b.tenant_id = p.tenant_id AND b.problem_id = p.problem_id
+          JOIN monitoring.monitoring_source s
+            ON s.tenant_id = p.tenant_id
+           AND s.monitoring_source_id = p.monitoring_source_id
          WHERE p.tenant_id = %s AND p.monitoring_source_id = %s
            AND (NOT %s OR p.problem_state = 'active')
-         ORDER BY CASE p.severity_class
-                    WHEN 'critical'       THEN 0
-                    WHEN 'degraded'       THEN 1
-                    WHEN 'warning'        THEN 2
-                    WHEN 'informational'  THEN 3
-                    ELSE 4 END,
-                  p.opened_at DESC
+           AND (%s::int IS NULL OR (
+                {_PROBLEM_SEV_RANK} > %s
+                OR ({_PROBLEM_SEV_RANK} = %s
+                    AND p.opened_at < %s::timestamptz)
+                OR ({_PROBLEM_SEV_RANK} = %s
+                    AND p.opened_at = %s::timestamptz
+                    AND p.problem_id > %s)))
+         ORDER BY {_PROBLEM_SEV_RANK}, p.opened_at DESC, p.problem_id
+         LIMIT %s
         """,
-        (tenant_id, source_id, active_only),
+        (tenant_id, source_id, active_only,
+         after_rank, after_rank, after_rank, after_opened,
+         after_rank, after_opened, after_pid, limit + 1),
     )
-    keys = ("problem_id", "problem_state", "severity_class", "summary",
-            "opened_at", "resolved_at", "last_confirmed_at",
-            "evidence_state", "projection_revision",
+    keys = ("problem_id", "monitoring_source_id",
+            "source_instance_generation", "generation_state",
+            "monitoring_resource_ids", "summary", "problem_state",
+            "severity_class", "opened_at", "resolved_at",
+            "last_confirmed_at", "evidence_state", "projection_revision",
             "provider_acknowledged", "monitoring_resource_id",
-            "provider_eventid")
-    return [dict(zip(keys, r)) for r in await cur.fetchall()]
+            "provider_eventid", "sev_rank")
+    rows = [dict(zip(keys, r)) for r in await cur.fetchall()]
+    has_more = len(rows) > limit
+    items = rows[:limit]
+    next_cursor = None
+    if has_more:
+        last = items[-1]
+        next_cursor = _encode_cursor({
+            "r": last["sev_rank"],
+            "o": last["opened_at"].isoformat()
+                if hasattr(last["opened_at"], "isoformat")
+                else last["opened_at"],
+            "p": last["problem_id"]})
+    if view != "operational":
+        for it in items:
+            for k in ("projection_revision", "provider_acknowledged",
+                      "monitoring_resource_id", "provider_eventid",
+                      "sev_rank"):
+                it.pop(k)
+    return {"items": items, "next_cursor": next_cursor}
 
 
 def list_all_pending_problem_syncs(conn: Connection) -> list[tuple[str, str]]:
@@ -3751,20 +4104,62 @@ async def requeue_sync_operation(
 
 
 async def list_health_projections(
-    conn: AsyncConnection, tenant_id: str, source_id: str
-) -> list[dict]:
+    conn: AsyncConnection, tenant_id: str, source_id: str,
+    *, cursor: str | None = None, limit: int = 500,
+    view: str = "contract",
+) -> dict:
+    """G5 health — {items, next_cursor} contract envelope.
+
+    problem_refs is the contract field: the active canonical problems
+    currently backing the resource's health derivation (≤64)."""
+    after = decode_cursor(cursor)["k"] if cursor else None
+    limit = min(max(limit, 1), 500)
     cur = await conn.execute(
-        """
-        SELECT h.monitoring_resource_id, h.health_class, h.evidence_state,
-               h.projection_revision, h.last_changed_at, h.last_evidence_at,
+        f"""
+        SELECT h.monitoring_resource_id, h.monitoring_source_id,
+               h.source_instance_generation,
+               {_generation_case('h')} AS generation_state,
+               r.scope_state, r.scope_evidence_state,
+               h.health_class, h.evidence_state, h.projection_revision,
+               h.last_changed_at, h.last_evidence_at,
+               COALESCE((
+                   SELECT array_agg(t.problem_id) FROM (
+                       SELECT p.problem_id
+                         FROM monitoring.monitoring_problem p
+                        WHERE p.tenant_id = h.tenant_id
+                          AND p.monitoring_resource_id
+                              = h.monitoring_resource_id
+                          AND p.problem_state = 'active'
+                        ORDER BY p.opened_at DESC
+                        LIMIT 64) t), '{{}}') AS problem_refs,
                h.reason_refs
           FROM monitoring.health_projection h
+          JOIN monitoring.monitoring_resource r
+            ON r.tenant_id = h.tenant_id
+           AND r.monitoring_resource_id = h.monitoring_resource_id
+          JOIN monitoring.monitoring_source s
+            ON s.tenant_id = h.tenant_id
+           AND s.monitoring_source_id = h.monitoring_source_id
          WHERE h.tenant_id = %s AND h.monitoring_source_id = %s
+           AND (%s::text IS NULL OR h.monitoring_resource_id > %s)
          ORDER BY h.monitoring_resource_id
+         LIMIT %s
         """,
-        (tenant_id, source_id),
+        (tenant_id, source_id, after, after, limit + 1),
     )
-    keys = ("monitoring_resource_id", "health_class", "evidence_state",
-            "projection_revision", "last_changed_at", "last_evidence_at",
+    keys = ("monitoring_resource_id", "monitoring_source_id",
+            "source_instance_generation", "generation_state",
+            "scope_state", "scope_evidence_state",
+            "health_class", "evidence_state", "projection_revision",
+            "last_changed_at", "last_evidence_at", "problem_refs",
             "reason_refs")
-    return [dict(zip(keys, r)) for r in await cur.fetchall()]
+    rows = [dict(zip(keys, r)) for r in await cur.fetchall()]
+    has_more = len(rows) > limit
+    items = rows[:limit]
+    if view != "operational":
+        for it in items:
+            it.pop("reason_refs")
+    next_cursor = (
+        _encode_cursor({"k": items[-1]["monitoring_resource_id"]})
+        if has_more else None)
+    return {"items": items, "next_cursor": next_cursor}

@@ -73,7 +73,7 @@ def _snapshot(tenant: str, actor: str, action: str) -> str:
 
 
 def _actor(request: Request) -> str:
-    ctx = request.state.jlmirror_context or {}
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
     return ctx.get("principal_id", "dev-operator")
 
 

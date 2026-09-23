@@ -358,7 +358,12 @@ async def api_session(request: Request) -> JSONResponse:
         return JSONResponse(
             {
                 "state": "ready",
+                # g1 shell-view contract fields
+                "tenant_id": tenant["tenant_id"],
                 "principal_id": session["principal_id"],
+                "admission_revision": session.get("session_generation")
+                    or session.get("credential_generation"),
+                # operational extensions (membership picker etc.)
                 "tenant": tenant,
                 "memberships": memberships,
                 "authenticated_at": session["authenticated_at"].isoformat(),

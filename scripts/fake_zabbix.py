@@ -119,24 +119,39 @@ class FakeZabbixServer:
                 if any(g["groupid"] in groupids
                        for g in h.get("groups") or [])
             ]
-        if p.get("selectInterfaces"):
-            for h in rows:
-                h.setdefault("interfaces", [])
-        if p.get("selectGroups"):
-            pass  # groups already embedded
-        if p.get("selectParentTemplates"):
-            for h in rows:
-                h.setdefault("parentTemplates", [])
-        if p.get("selectTags"):
-            for h in rows:
-                h.setdefault("tags", [])
-        if p.get("selectInventory"):
-            for h in rows:
-                h.setdefault("inventory", {})
         limit = p.get("limit")
         if limit is not None:
             rows = rows[: int(limit)]
-        return [_project(h, p.get("output")) for h in rows]
+        # Sub-select results are extra row keys alongside `output` —
+        # Zabbix 7.x renamed selectGroups -> selectHostGroups and the
+        # response key `groups` -> `hostgroups`.
+        out = []
+        for h in rows:
+            row = _project(h, p.get("output"))
+            if p.get("selectInterfaces"):
+                row["interfaces"] = [
+                    _project(i, p["selectInterfaces"])
+                    for i in h.get("interfaces") or []]
+            if p.get("selectHostGroups"):
+                row["hostgroups"] = [
+                    _project(g, p["selectHostGroups"])
+                    for g in h.get("groups") or []]
+            if p.get("selectGroups"):
+                row["groups"] = [
+                    _project(g, p["selectGroups"])
+                    for g in h.get("groups") or []]
+            if p.get("selectParentTemplates"):
+                row["parentTemplates"] = [
+                    _project(t, p["selectParentTemplates"])
+                    for t in h.get("parentTemplates") or []]
+            if p.get("selectTags"):
+                row["tags"] = [
+                    _project(t, p["selectTags"])
+                    for t in h.get("tags") or []]
+            if p.get("selectInventory"):
+                row["inventory"] = dict(h.get("inventory") or {})
+            out.append(row)
+        return out
 
     def _m_item_get(self, p: dict) -> list:
         rows = self.items
@@ -185,23 +200,33 @@ class FakeZabbixServer:
             rows = [r for r in rows if r.get("object", "0") == "0"]
         if p.get("sortfield") == "eventid":
             rows.sort(key=lambda r: int(r["eventid"]))
-        if p.get("selectTags"):
-            for r in rows:
-                r.setdefault("tags", [])
         limit = p.get("limit")
         if limit is not None:
             rows = rows[: int(limit)]
-        return [_project(r, p.get("output")) for r in rows]
+        out = []
+        for r in rows:
+            row = _project(r, p.get("output"))
+            if p.get("selectTags"):
+                row["tags"] = [
+                    _project(t, p["selectTags"])
+                    for t in r.get("tags") or []]
+            out.append(row)
+        return out
 
     def _m_trigger_get(self, p: dict) -> list:
         rows = self.triggers
-        if p.get("selectHosts"):
-            for t in rows:
-                t.setdefault("hosts", [])
         limit = p.get("limit")
         if limit is not None:
             rows = rows[: int(limit)]
-        return [_project(t, p.get("output")) for t in rows]
+        out = []
+        for t in rows:
+            row = _project(t, p.get("output"))
+            if p.get("selectHosts"):
+                row["hosts"] = [
+                    _project(h, p["selectHosts"])
+                    for h in t.get("hosts") or []]
+            out.append(row)
+        return out
 
 
 class FakeZabbixError(Exception):

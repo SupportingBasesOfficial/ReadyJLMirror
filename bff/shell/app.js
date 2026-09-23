@@ -448,18 +448,24 @@ async function loadSourceDetail(sourceId, tid, seq) {
   const det = root;
   const scrollY = window.scrollY;
   if (!bg) det.innerHTML = '<div class="spinner"></div>';
-  const [source, health, problems, current, ops, alerts, resources] =
+  // Contract list endpoints return {items, next_cursor}; the shell
+  // uses view=operational for internal fields (groups, provider refs).
+  const [source, healthR, problemsR, currentR, ops, alerts, resourcesR] =
     await Promise.all([
       api(`/sources/${sourceId}?tenant_id=${tid}`),
-      api(`/sources/${sourceId}/health?tenant_id=${tid}`),
-      api(`/sources/${sourceId}/problems?tenant_id=${tid}&active_only=true`),
-      api(`/sources/${sourceId}/current?tenant_id=${tid}`),
+      api(`/sources/${sourceId}/health?tenant_id=${tid}&view=operational`),
+      api(`/sources/${sourceId}/problems?tenant_id=${tid}&active_only=true&view=operational`),
+      api(`/sources/${sourceId}/current?tenant_id=${tid}&view=operational`),
       api(`/sources/${sourceId}/operations?tenant_id=${tid}`),
       fetch(`/api/v1/alerting/alerts?tenant_id=${tid}&source_id=${sourceId}&limit=200`,
             { credentials: "same-origin" })
           .then(r => r.ok ? r.json() : []),
-      api(`/sources/${sourceId}/resources?tenant_id=${tid}`),
+      api(`/sources/${sourceId}/resources?tenant_id=${tid}&view=operational`),
     ]);
+  const health = healthR && healthR.items;
+  const problems = problemsR && problemsR.items;
+  const current = currentR && currentR.items;
+  const resources = resourcesR && resourcesR.items;
   if (seq !== detailSeq) return;
   if (detailFilterSource !== sourceId) {
     detailFilters = {};
@@ -579,7 +585,8 @@ async function loadSourceDetail(sourceId, tid, seq) {
   const cur = Array.isArray(current) ? current : [];
   const metricRowHtml = c =>
     `<tr><td>${esc(c.name || c.metric_definition_id)}</td>` +
-    `<td><code>${esc(c.canonical_value)}</code></td>` +
+    `<td><code>${esc(typeof c.value === "object"
+        ? JSON.stringify(c.value) : c.value)}</code></td>` +
     `<td>${esc(c.evidence_state)}</td></tr>`;
   tabHtml.metrics =
     `<div class="section"><div class="filterbar">` +
