@@ -15,6 +15,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
@@ -35,6 +36,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 30
+    restart: unless-stopped
 
   openbao:
     image: openbao/openbao:latest
@@ -45,6 +47,7 @@ services:
     ports:
       - "8200:8200"
     command: server -dev
+    restart: unless-stopped
     profiles:
       - secrets
 
@@ -60,6 +63,8 @@ services:
       db:
         condition: service_healthy
     command: python -m scripts.migrate
+    # One-shot — must not restart-loop on failure.
+    restart: "no"
 
   api:
     build: .
@@ -101,6 +106,7 @@ services:
       migrate:
         condition: service_completed_successfully
     command: python -m api.main
+    restart: unless-stopped
     # Internal only — the BFF is the public boundary.
 
   bff:
@@ -140,7 +146,15 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL",
+             "python -c \"import httpx,sys; sys.exit(0 if httpx.get('http://localhost:8080/health',timeout=3).status_code==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     command: python -m bff.main
+    restart: unless-stopped
 
   worker:
     build: .
@@ -188,7 +202,17 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    healthcheck:
+      # Durable heartbeat written each tick — a wedged loop stops
+      # beating even while the process stays alive.
+      test: ["CMD-SHELL",
+             "python -c \"import os,psycopg,sys; c=psycopg.connect(host=os.environ['DB_HOST'],port=int(os.environ['DB_PORT']),dbname=os.environ['DB_NAME'],user=os.environ['DB_USER'],password=os.environ['DB_PASSWORD'],connect_timeout=5); r=c.execute(\\\"SELECT count(*) FROM monitoring.worker_heartbeat WHERE last_seen_at > now() - interval '120 seconds'\\\").fetchone(); sys.exit(0 if r and r[0]>0 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     command: python -m workers.run_all
+    restart: unless-stopped
     profiles:
       - worker
 
