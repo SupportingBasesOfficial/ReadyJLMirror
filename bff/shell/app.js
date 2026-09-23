@@ -455,7 +455,7 @@ async function loadSourceDetail(sourceId, tid, seq) {
       api(`/sources/${sourceId}/problems?tenant_id=${tid}&active_only=true`),
       api(`/sources/${sourceId}/current?tenant_id=${tid}`),
       api(`/sources/${sourceId}/operations?tenant_id=${tid}`),
-      fetch(`/api/v1/alerting/alerts?tenant_id=${tid}&source_id=${sourceId}`,
+      fetch(`/api/v1/alerting/alerts?tenant_id=${tid}&source_id=${sourceId}&limit=200`,
             { credentials: "same-origin" })
           .then(r => r.ok ? r.json() : []),
       api(`/sources/${sourceId}/resources?tenant_id=${tid}`),
@@ -590,6 +590,7 @@ async function loadSourceDetail(sourceId, tid, seq) {
   const alertRowHtml = a =>
     `<tr class="clickable" data-alert="${esc(a.alert_id)}">` +
     `<td class="a-${esc(a.lifecycle_state)}">${esc(a.lifecycle_state)}</td>` +
+    `<td>${esc(resNames[a.monitoring_resource_id] || "—")}</td>` +
     `<td><code>${esc((a.alert_id || "").slice(0, 18))}</code></td>` +
     `<td>${esc(a.source_kind)}</td>` +
     `<td>${esc(a.policy_id)} v${esc(a.policy_version)}</td>` +
@@ -597,11 +598,11 @@ async function loadSourceDetail(sourceId, tid, seq) {
   const lifecycles = [...new Set(alertList.map(a => a.lifecycle_state))].sort();
   tabHtml.alerts =
     `<div class="section"><div class="filterbar">` +
-    `<input id="flt-text" placeholder="filter policy / alert…">` +
+    `<input id="flt-text" placeholder="filter host / policy / alert…">` +
     `<select id="flt-sel"><option value="">all states</option>` +
     lifecycles.map(l => `<option>${esc(l)}</option>`).join("") +
-    `</select><span class="hint" id="flt-count"></span></div>` +
-    `<table><thead><tr><th>State</th>` +
+    `</select>${groupSel}<span class="hint" id="flt-count"></span></div>` +
+    `<table><thead><tr><th>State</th><th>Host</th>` +
     `<th>Alert</th><th>Source kind</th><th>Policy</th><th>Rev</th>` +
     `</tr></thead><tbody id="flt-body"></tbody></table></div>`;
 
@@ -722,9 +723,13 @@ async function loadSourceDetail(sourceId, tid, seq) {
       (c, q) => !q || (c.name || "").toLowerCase().includes(q),
       metricRowHtml, "No metrics match", 200),
     alerts: el => paintFiltered(el, alertList,
-      (a, q, sel) =>
+      (a, q, sel, sel2) =>
         (!sel || a.lifecycle_state === sel) &&
-        (!q || (a.policy_id || "").toLowerCase().includes(q) ||
+        (!sel2 || (resGroups[a.monitoring_resource_id] || [])
+            .some(g => g.ref === sel2)) &&
+        (!q || (resNames[a.monitoring_resource_id] || "")
+            .toLowerCase().includes(q) ||
+              (a.policy_id || "").toLowerCase().includes(q) ||
               (a.alert_id || "").toLowerCase().includes(q)),
       alertRowHtml, "No alerts match"),
   };
