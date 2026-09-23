@@ -593,17 +593,9 @@ async function loadSourceDetail(sourceId, tid, seq) {
           `</td></tr>` : "")
     : `<tr><td colspan="6" class="empty">No operations</td></tr>`;
   tabHtml.operations =
-    `<div class="section"><table><thead><tr><th>State</th>` +
-    `<th>Kind</th><th>Op</th><th>Error class</th><th>Created</th>` +
-    `<th></th></tr></thead><tbody>${opRows}</tbody></table></div>`;
-
-  det.innerHTML =
-    `<div class="viewhead"><button class="backbtn" id="backMon">` +
-    `&#8592; monitoring</button>` +
-    `<h2>${esc(src.display_name || sourceId.slice(0, 24))} ` +
-    `<span class="dim">${esc(sourceId.slice(0, 24))}</span></h2></div>` +
-    `<div class="actions">` +
-    `<span class="hint">sync:</span>` +
+    `<div class="section"><div class="actions opsync">` +
+    `<span class="hint">sync now (operator override — the scheduler ` +
+    `runs these on cadence automatically):</span>` +
     `<button class="secondary" data-p="inventory" ` +
     `title="Enqueue provider inventory sync">inventory</button>` +
     `<button class="secondary" data-p="metrics/poll" ` +
@@ -613,8 +605,16 @@ async function loadSourceDetail(sourceId, tid, seq) {
     `<button class="secondary" data-p="history/poll" ` +
     `title="Enqueue metric history sync">history</button>` +
     `<button class="secondary" data-p="problems/poll" ` +
-    `title="Enqueue problem state sync">problems</button>` +
-    `<button class="secondary" id="monRefresh">refresh</button></div>` +
+    `title="Enqueue problem state sync">problems</button></div>` +
+    `<table><thead><tr><th>State</th>` +
+    `<th>Kind</th><th>Op</th><th>Error class</th><th>Created</th>` +
+    `<th></th></tr></thead><tbody>${opRows}</tbody></table></div>`;
+
+  det.innerHTML =
+    `<div class="viewhead"><button class="backbtn" id="backMon">` +
+    `&#8592; monitoring</button>` +
+    `<h2>${esc(src.display_name || sourceId.slice(0, 24))} ` +
+    `<span class="dim">${esc(sourceId.slice(0, 24))}</span></h2></div>` +
     `<div class="tabbar">` +
     ["overview", "hosts", "problems", "metrics", "alerts", "operations"]
       .map(t => `<button class="tabbtn${t === detailTab
@@ -644,6 +644,14 @@ async function loadSourceDetail(sourceId, tid, seq) {
         .forEach(r => r.classList.remove("hidden"));
       sa.closest("tr").remove();
     });
+    tabBody.querySelectorAll("[data-p]").forEach(b =>
+      b.addEventListener("click", async () => {
+        b.disabled = true;
+        const opId = await poll(sourceId, b.dataset.p, tid);
+        b.textContent = opId ? "queued" : "failed";
+        if (!opId) { b.disabled = false; return; }
+        watchSourceOps(sourceId, tid, seq, opId);
+      }));
   };
   det.querySelectorAll(".tabbtn").forEach(b =>
     b.addEventListener("click", () => {
@@ -654,18 +662,8 @@ async function loadSourceDetail(sourceId, tid, seq) {
     }));
   paintTab();
 
-  det.querySelectorAll("[data-p]").forEach(b =>
-    b.addEventListener("click", async () => {
-      b.disabled = true;
-      const opId = await poll(sourceId, b.dataset.p, tid);
-      b.textContent = opId ? "queued" : "failed";
-      if (!opId) { b.disabled = false; return; }
-      watchSourceOps(sourceId, tid, seq, opId);
-    }));
   if (bg) window.scrollTo(0, scrollY);
 
-  document.getElementById("monRefresh").addEventListener("click", () =>
-    loadSourceDetail(sourceId, tid));
   document.getElementById("backMon").addEventListener("click", () =>
     showView("monitoring"));
 
