@@ -66,7 +66,7 @@ Services:
 | `openbao` | 8200 | Dev secret backend (`--profile secrets`) |
 | `prometheus` | 9090 | Metrics + alert rules (`--profile observability`) |
 | `grafana` | 3300 | Provisioned dashboards, admin/admin (`--profile observability`) |
-| `backup` | — | Scheduled pg_dump + retention (`--profile backup`) |
+| `backup` | — | Scheduled pg_dump + basebackup + WAL retention (`--profile backup`) |
 
 ### Local development (without Docker)
 
@@ -244,7 +244,16 @@ Real persistence + real Zabbix adapter, implementing the accepted
 - **Backup/DR** — `python -m scripts.backup` (dump + watermark
   manifest), `python -m scripts.restore_verify` (restores into an
   isolated scratch DB, checks invariants, drops it — never touches
-  live). Runbook: `docs/runbooks/disaster-recovery.md`
+  live). Runbook: `docs/runbooks/disaster-recovery.md`.
+  The `backup` profile runs the loop with retention; the db archives
+  WAL continuously (`wal_archive` volume, `archive_timeout=300`) and
+  each cycle also takes a `pg_basebackup` (-Ft -z -X stream) —
+  `base/` + `dump.pg_dump` + `manifest.json` with a `wal_anchor`
+  per snapshot, and `pg_archivecleanup` prunes WAL older than the
+  oldest retained anchor. PITR restore: unpack `base/base.tar.gz`
+  into a fresh data dir, set `restore_command` to read the WAL
+  archive plus a `recovery_target_time` in `postgresql.auto.conf`,
+  then start postgres
 - **Alerting (G7)** — `POST/GET /api/v1/alerting/policies[/versions]`
   + `/effective` for the immutable policy lifecycle;
   `GET /api/v1/alerting/alerts[/{id}[/timeline]]` for alerts pinned

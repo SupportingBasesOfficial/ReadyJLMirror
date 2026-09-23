@@ -13,3 +13,19 @@ os.environ["DEV_TENANT_ID"] = "tenant:test"
 os.environ.setdefault("DB_HOST", "localhost")
 os.environ.setdefault("DB_PORT", "5434")
 os.environ.setdefault("DB_NAME", "jlmirror")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Purge fixture rows leaked into the dev database.
+
+    Tests share the development DB; left behind, `tenant:test`
+    sources get scheduled by the worker forever. A failed purge
+    must never fail the suite — the DB may simply be absent.
+    """
+    try:
+        from scripts.purge_test_tenant import purge
+        counts = purge()
+        if counts:
+            print(f"\nfixture purge: {sum(counts.values())} rows")
+    except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+        print(f"\nfixture purge skipped: {exc}")

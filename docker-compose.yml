@@ -1,6 +1,26 @@
 services:
+  # Fixes ownership of the WAL archive volume before postgres starts —
+  # a fresh named volume is root-owned and postgres runs as uid 70.
+  wal-init:
+    image: alpine:3.20
+    command:
+      - sh
+      - -c
+      - mkdir -p /wal_archive && chown -R 70:70 /wal_archive
+    volumes:
+      - wal_archive:/wal_archive
+    restart: "no"
+
   db:
     image: timescale/timescaledb:latest-pg16
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -f /wal_archive/%f && cp %p /wal_archive/%f
+      - -c
+      - archive_timeout=300
     environment:
       POSTGRES_DB: jlmirror
       POSTGRES_USER: jlmirror_owner
@@ -9,7 +29,11 @@ services:
       - "5434:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+      - wal_archive:/wal_archive
       - ./docker/db-init:/docker-entrypoint-initdb.d:ro
+    depends_on:
+      wal-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U jlmirror_owner -d jlmirror"]
       interval: 5s
@@ -278,10 +302,24 @@ services:
           ts=$$(date -u +%Y%m%dT%H%M%SZ)
           dest=/backups/$$ts
           mkdir -p "$$dest"
+          # WAL anchor BEFORE basebackup — pg_archivecleanup uses the
+          # oldest retained anchor to prune WAL no backup needs.
+          wal_anchor=$$(docker exec readyjlmirror-db-1 \
+            psql -U jlmirror_owner -d jlmirror -tA -c \
+            "SELECT pg_walfile_name(pg_current_wal_insert_lsn())")
+          if [ "$${BACKUP_BASEBACKUP:-1}" = "1" ]; then
+            docker exec readyjlmirror-db-1 \
+              pg_basebackup -U jlmirror_owner -D /tmp/bb -Ft -z -X stream \
+            && docker cp readyjlmirror-db-1:/tmp/bb "$$dest/base" \
+            && docker exec readyjlmirror-db-1 rm -rf /tmp/bb \
+            || echo "basebackup $$ts failed"
+          fi
           docker exec readyjlmirror-db-1 psql -U jlmirror_owner \
             -d jlmirror -tA -c \
             "SELECT jsonb_build_object(
                'recovery_point_utc', '$$ts',
+               'wal_anchor', '$$wal_anchor',
+               'archiver', (SELECT row_to_json(a) FROM pg_stat_archiver a),
                'outbox_states', (SELECT jsonb_object_agg(dispatch_state, n)
                  FROM (SELECT dispatch_state, count(*) n
                        FROM monitoring.monitoring_outbox GROUP BY 1) s),
@@ -303,11 +341,21 @@ services:
           # Retention — keep newest BACKUP_RETAIN dirs
           ls -1dt /backups/*/ | tail -n +$$((BACKUP_RETAIN + 1)) \
             | xargs -r rm -rf
+          # Prune WAL older than the oldest retained basebackup anchor
+          oldest=$$(ls -1dt /backups/*/ | tail -1)
+          anchor=$$(grep -o '"wal_anchor": *"[^"]*"' \
+            "$$oldest/manifest.json" 2>/dev/null | sed 's/.*"\([^"]*\)"$$/\1/')
+          if [ -n "$$anchor" ]; then
+            docker exec readyjlmirror-db-1 \
+              pg_archivecleanup /wal_archive "$$anchor" \
+              2>/dev/null || true
+          fi
           sleep "$${BACKUP_INTERVAL:-3600}"
         done
     environment:
       BACKUP_INTERVAL: ${BACKUP_INTERVAL:-3600}
       BACKUP_RETAIN: ${BACKUP_RETAIN:-48}
+      BACKUP_BASEBACKUP: ${BACKUP_BASEBACKUP:-1}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./backups:/backups
@@ -371,3 +419,4 @@ services:
 
 volumes:
   db_data:
+  wal_archive:

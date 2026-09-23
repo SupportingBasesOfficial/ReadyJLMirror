@@ -122,6 +122,36 @@ def main() -> int:
         checks.append(("sync operations match manifest", n_ops == exp,
                        f"{n_ops} vs manifest {exp}"))
 
+    # PITR artifacts: when the backup cycle produced a base backup,
+    # verify the tarballs are readable and carry a manifest. The WAL
+    # needed to reach consistency ships inside pg_wal.tar.gz
+    # (-X stream); WAL beyond that lives in the wal_archive volume.
+    base = target.parent / "base"
+    if base.is_dir():
+        import tarfile
+        for name in ("base.tar.gz", "pg_wal.tar.gz"):
+            p = base / name
+            ok = p.exists()
+            detail = "present" if ok else "missing"
+            if ok:
+                try:
+                    with tarfile.open(p, "r:gz") as tf:
+                        ok = tf.next() is not None
+                    detail = "readable gzip tar"
+                except (tarfile.TarError, OSError) as exc:
+                    ok = False
+                    detail = f"corrupt: {exc}"
+            checks.append((f"base backup {name} intact", ok, detail))
+        manifest_file = base / "backup_manifest"
+        checks.append(("base backup manifest present",
+                       manifest_file.exists()
+                       and manifest_file.stat().st_size > 0,
+                       "checksums file"))
+        anchor_ok = bool(manifest.get("wal_anchor"))
+        checks.append(("wal_anchor recorded in manifest",
+                       anchor_ok,
+                       manifest.get("wal_anchor", "absent")))
+
     failed = [name for name, ok, _ in checks if not ok]
     for name, ok, detail in checks:
         print(f"  {'PASS' if ok else 'FAIL'} {name} ({detail})")
