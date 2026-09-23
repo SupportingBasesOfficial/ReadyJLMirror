@@ -533,7 +533,10 @@ async function loadSourceDetail(sourceId, tid, seq) {
   for (const r of resList) {
     const gs = Array.isArray(r.host_groups) ? r.host_groups : [];
     resGroups[r.monitoring_resource_id] = gs;
-    for (const g of gs) groupUnion[g.ref] = g.name || g.ref;
+    // Removed hosts keep their membership recorded but must not feed
+    // the group filter — a group with only ghosts is a dead option.
+    if (r.presence_state !== "removed")
+      for (const g of gs) groupUnion[g.ref] = g.name || g.ref;
   }
   const groupOpts = Object.entries(groupUnion)
     .sort((a, b) => a[1].localeCompare(b[1]))

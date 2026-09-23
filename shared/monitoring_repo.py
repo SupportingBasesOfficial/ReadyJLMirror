@@ -57,6 +57,7 @@ from jlmirror_monitoring.metric_history import (
 from jlmirror_monitoring.problem_state import (
     ProblemAssociationTarget,
     ProblemStateClaim,
+    ProblemStateFailureClass,
     ProblemStateResult,
     ZabbixProblemEvidence,
     ZabbixRecoveryEvidence,
@@ -2975,6 +2976,37 @@ class PgProblemStateRepository:
                 claim.tenant_id, claim.monitoring_sync_operation_id,
             ),
         )
+
+        if (result.failure_class
+                is ProblemStateFailureClass.ASSOCIATION_RECONCILIATION_REQUIRED):
+            # A problem referenced a trigger/host the inventory has not
+            # imported yet (new provider objects). Rather than stall all
+            # problem updates until the next inventory cadence, enqueue
+            # the refresh now — the recovered inventory restores the
+            # association evidence and problem sync resumes claimable.
+            self._conn.execute(
+                """
+                INSERT INTO monitoring.monitoring_sync_operation
+                    (tenant_id, monitoring_sync_operation_id,
+                     monitoring_source_id, source_instance_generation,
+                     configuration_revision, scope_revision,
+                     responsibility_kind, state)
+                SELECT %s, %s, %s, %s, %s, %s,
+                       'host_inventory_sync', 'pending'
+                 WHERE NOT EXISTS (
+                    SELECT 1 FROM monitoring.monitoring_sync_operation o
+                     WHERE o.tenant_id = %s
+                       AND o.monitoring_source_id = %s
+                       AND o.responsibility_kind = 'host_inventory_sync'
+                       AND o.state IN ('pending','running'))
+                """,
+                (claim.tenant_id, _opaque("mon-op"),
+                 claim.monitoring_source_id,
+                 claim.source_instance_generation,
+                 claim.configuration_revision, claim.scope_revision,
+                 claim.tenant_id, claim.monitoring_source_id),
+            )
+
         self._conn.commit()
         return result
 
