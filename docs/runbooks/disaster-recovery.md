@@ -38,9 +38,51 @@ never over the live database — then validates:
 On PASS the scratch DB is dropped; on FAIL it is also dropped and
 the rehearsal reports which invariant failed.
 
+## PITR (WAL archive + base backups)
+
+The db archives WAL continuously into the `wal_archive` volume
+(`archive_timeout=300` bounds the exposure window to 5 min). The
+`backup` profile takes a `pg_basebackup` every cycle alongside the
+logical dump, producing `backups/<ts>/base/`:
+
+- `base.tar.gz` — the data directory at backup start (with checksum
+  manifest in `backup_manifest`);
+- `pg_wal.tar.gz` — WAL needed to reach a consistent state
+  (`-X stream`).
+
+`manifest.json` records `wal_anchor` (WAL file current when the
+cycle started) and `pg_stat_archiver` stats. After retention prunes
+old snapshots, `pg_archivecleanup` removes archived WAL older than
+the oldest retained anchor — the archive holds exactly what the
+retained base backups need.
+
+### Point-in-time restore (operator)
+
+1. Stop the stack: `docker compose stop api bff worker db`.
+2. Extract `backups/<ts>/base/base.tar.gz` into a fresh data dir
+   (or a scratch volume for rehearsal — never over live data).
+3. Extract `backups/<ts>/base/pg_wal.tar.gz` into `<datadir>/pg_wal/`.
+4. Copy the archived WAL you want to replay into a restore area —
+   files from the `wal_anchor` in the manifest up to the target time.
+5. Append to `postgresql.auto.conf`:
+   ```
+   restore_command = 'cp /restore_area/%f %p'
+   recovery_target_time = '2026-09-23 08:00:00+00'
+   recovery_target_action = 'promote'
+   ```
+   (or `recovery_target_lsn`/`recovery_target_xid` for a tighter cut;
+   omit `recovery_target_*` to replay all available WAL)
+6. `touch <datadir>/recovery.signal` and start postgres — it replays
+   to the target and promotes. Run the `restore_verify` invariants
+   before treating it as authoritative.
+
+This procedure was rehearsed live: a base backup restored into a
+scratch container, WAL replayed from `wal_archive`, and a marker row
+created after the backup was recovered — full pipeline verified
+end-to-end.
+
 ## What this does NOT cover yet (canonical gaps)
 
-- Real PITR (WAL archiving) — dev uses dump-level recovery points.
 - Revocation/governance continuity reconciliation in `(R, F]` —
   the watermark manifest records the state needed; merge rules are
   the canonical PITR procedure, not yet automated.
