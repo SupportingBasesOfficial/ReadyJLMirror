@@ -296,10 +296,17 @@ async def create_source(body: SourceCreateRequest, request: Request) -> SourceRe
         # Write the token to the secrets store BEFORE the source is
         # created — a failed write aborts onboarding cleanly. The
         # binding ref is validated (strict charset, no traversal).
-        from providers.credentials import write_binding_token
+        # When OpenBao is configured it is the authoritative store;
+        # the mounted-file write stays as the worker fallback.
+        from providers.credentials import (
+            BaoCredentialResolver, write_binding_token)
         from jlmirror_monitoring.validation_worker import (
             CredentialResolutionError)
         try:
+            bao = BaoCredentialResolver()
+            if bao.available:
+                bao.store_zabbix_api_token(
+                    body.credential_binding_ref, body.api_token)
             write_binding_token(
                 body.credential_binding_ref, body.api_token)
         except CredentialResolutionError as exc:

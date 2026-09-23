@@ -234,3 +234,44 @@ def test_chain_skips_bao_when_unconfigured(monkeypatch, tmp_path):
     assert kinds == ["FileSecretsResolver", "EnvCredentialResolver"]
     cred = chain.resolve_zabbix_api_token("cred-a")
     assert cred.api_token == "env-token"
+
+
+# --- OpenBao write path (onboarding) ------------------------------------------
+
+def test_bao_store_merges_into_document():
+    """Store preserves existing keys and writes the merged doc back."""
+    r, _ = _bao({"existing": "tok-old"})
+    written = {}
+    r._put_document = lambda doc: written.update(doc)
+    r.store_zabbix_api_token("cred-new", "  tok-new  ")
+    assert written == {"existing": "tok-old", "cred-new": "tok-new"}
+
+
+def test_bao_store_invalidates_cache():
+    r, _ = _bao({"cred-a": "old"})
+    r.resolve_zabbix_api_token("cred-a")  # populate cache
+    r._put_document = lambda doc: None
+    r.store_zabbix_api_token("cred-a", "rotated")
+    # Next resolve re-fetches rather than serving the stale entry.
+    r._fetch_document = lambda: {"cred-a": "rotated"}
+    cred = r.resolve_zabbix_api_token("cred-a")
+    assert cred.api_token == "rotated"
+
+
+def test_bao_store_rejects_unsafe_ref():
+    r, _ = _bao({})
+    with pytest.raises(CredentialResolutionError):
+        r.store_zabbix_api_token("../traversal", "tok")
+
+
+def test_bao_store_rejects_empty_token():
+    r, _ = _bao({})
+    with pytest.raises(CredentialResolutionError):
+        r.store_zabbix_api_token("cred-a", "   ")
+
+
+def test_bao_store_unconfigured():
+    from providers.credentials import BaoCredentialResolver
+    r = BaoCredentialResolver(addr="", token="")
+    with pytest.raises(CredentialResolutionError):
+        r.store_zabbix_api_token("cred-a", "tok")

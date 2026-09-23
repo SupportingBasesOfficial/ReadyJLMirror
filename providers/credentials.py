@@ -2,11 +2,15 @@
 
 Resolution order (chained):
 
-1. **Mounted secrets directory** (`CREDENTIALS_DIR`, default
+1. **OpenBao KV v2** (when ``BAO_ADDR`` + ``BAO_TOKEN`` set):
+   ``secret/data/jlmirror/credentials`` holds ``<binding-ref>:
+   <token>`` keys; resolved live with a short cache so rotation
+   propagates without a remount.
+2. **Mounted secrets directory** (`CREDENTIALS_DIR`, default
    ``/run/secrets``): ``<dir>/<binding-ref>.token`` — the
    Kubernetes/docker-secrets pattern; works against a real secrets
    backend that syncs files (Vault Agent, OpenBao injector, CSI).
-2. **Environment variables** (development fallback):
+3. **Environment variables** (development fallback):
    ``ZABBIX_CRED_<REF>`` where REF is the ref uppercased with
    non-alphanumerics as ``_``.
 
@@ -15,8 +19,9 @@ resolver, never logged. A missing credential raises
 ``CredentialResolutionError`` so the worker emits
 ``credential.unavailable`` evidence instead of failing silently.
 
-Production: OpenBao/Vault Agent injecting the same mounted files
-keeps this interface unchanged — only the sync mechanism differs.
+Onboarding dual-writes: the token goes to OpenBao when configured
+(authoritative store) and to the mounted directory (worker
+fallback). Only the binding ref reaches PostgreSQL.
 """
 
 from __future__ import annotations
@@ -178,6 +183,49 @@ class BaoCredentialResolver:
             credential_generation_ref=f"cred-gen-bao:{credential_binding_ref}")
         self._cache[credential_binding_ref] = (now, resolved)
         return resolved
+
+    def store_zabbix_api_token(
+        self, credential_binding_ref: str, token: str
+    ) -> None:
+        """Merge a provider token into the KV credentials document.
+
+        KV v2 has no per-key patch — the document is read, the ref
+        merged in, and the whole document written back. Used by
+        onboarding so the token lands in the authoritative store
+        (not just the mounted-file fallback). Invalidates the local
+        cache entry so the next resolve sees the new token.
+        """
+        if not self.available:
+            raise CredentialResolutionError(
+                "credential store unavailable (bao not configured)")
+        if not _REF_SAFE.match(credential_binding_ref):
+            raise CredentialResolutionError(
+                "credential binding ref is not a safe KV key")
+        token = token.strip()
+        if not token:
+            raise CredentialResolutionError("credential token is empty")
+        document = self._fetch_document()
+        document[credential_binding_ref] = token
+        self._put_document(document)
+        self._cache.pop(credential_binding_ref, None)
+
+    def _put_document(self, document: dict) -> None:
+        import urllib.error
+        import urllib.request
+        import json as _json
+        req = urllib.request.Request(
+            f"{self._addr}/v1/secret/data/jlmirror/credentials",
+            data=_json.dumps({"data": document}).encode("utf-8"),
+            headers={"X-Vault-Token": self._token,
+                     "Content-Type": "application/json"},
+            method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                resp.read()
+        except (urllib.error.URLError, OSError) as exc:
+            raise CredentialResolutionError(
+                f"credential store unavailable (bao write: {exc})"
+            ) from exc
 
 
 class EnvCredentialResolver:
