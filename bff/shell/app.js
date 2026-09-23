@@ -443,6 +443,7 @@ async function loadSourceDetail(sourceId, tid, seq) {
   if (seq === undefined) seq = ++detailSeq;
   else detailSeq = seq;
   const det = root;
+  const scrollY = window.scrollY;
   if (!bg) det.innerHTML = '<div class="spinner"></div>';
   const [source, health, problems, current, ops, alerts, resources] =
     await Promise.all([
@@ -661,10 +662,20 @@ async function loadSourceDetail(sourceId, tid, seq) {
       if (!opId) { b.disabled = false; return; }
       watchSourceOps(sourceId, tid, seq, opId);
     }));
+  if (bg) window.scrollTo(0, scrollY);
+
   document.getElementById("monRefresh").addEventListener("click", () =>
     loadSourceDetail(sourceId, tid));
   document.getElementById("backMon").addEventListener("click", () =>
     showView("monitoring"));
+
+  // Near-real-time: silent refresh while the detail is on screen —
+  // swaps in fresh data without spinner or scroll reset. Dies when
+  // the user navigates (seq changes).
+  setTimeout(() => {
+    if (seq === detailSeq && currentView === "monitoring")
+      loadSourceDetail(sourceId, tid, seq);
+  }, 15000);
 }
 
 // ---------------------------------------------------------------------------

@@ -45,6 +45,7 @@ from jlmirror_monitoring.metric_definitions import (
     canonical_value_kind,
 )
 from jlmirror_monitoring.metric_history import (
+    MAX_HISTORY_ITEMS_PER_REQUEST,
     HistoryCoverageState,
     HistoryMetricTarget,
     MetricHistoryClaim,
@@ -1966,6 +1967,7 @@ class PgMetricHistoryRepository:
             SELECT o.monitoring_source_id, o.source_instance_generation,
                    o.configuration_revision, o.scope_revision,
                    o.history_time_from, o.history_time_till,
+                   o.history_item_cursor,
                    s.provider_scope_tenant_binding_id,
                    g.provider_instance_ref, g.provider_base_url,
                    s.credential_binding_ref
@@ -1995,7 +1997,8 @@ class PgMetricHistoryRepository:
             raise ValueError("monitoring.metric_history_not_claimable")
 
         (source_id, generation, config_rev, scope_rev, time_from, time_till,
-         _binding, provider_instance_ref, base_url, cred_ref) = row
+         item_cursor, _binding, provider_instance_ref, base_url,
+         cred_ref) = row
 
         cur = self._conn.execute(
             """
@@ -2026,9 +2029,12 @@ class PgMetricHistoryRepository:
                AND d.definition_evidence_state = 'current'
                AND d.scope_state = 'in_scope'
                AND b.evidence_state = 'current'
+               AND b.provider_external_ref > %s
              ORDER BY b.provider_external_ref
+             LIMIT %s
             """,
-            (self._tenant_id, source_id, generation),
+            (self._tenant_id, source_id, generation, item_cursor,
+             MAX_HISTORY_ITEMS_PER_REQUEST),
         )
         targets: list[HistoryMetricTarget] = []
         for r in cur.fetchall():
@@ -2044,6 +2050,25 @@ class PgMetricHistoryRepository:
                     history_value_type=history_value_type,
                 )
             )
+
+        if not targets:
+            # Chain exhausted (cursor past the last eligible item, or
+            # defs retired mid-chain): an empty page is a successful
+            # no-op, not a protocol failure — the domain would degrade
+            # an empty claim to protocol_invalid.
+            self._conn.execute(
+                """
+                UPDATE monitoring.monitoring_sync_operation
+                   SET state = 'succeeded',
+                       completed_at = transaction_timestamp()
+                 WHERE tenant_id = %s
+                   AND monitoring_sync_operation_id = %s
+                   AND state = 'running' AND claim_token = %s
+                """,
+                (self._tenant_id, monitoring_sync_operation_id, claim_token),
+            )
+            self._conn.commit()
+            raise ValueError("monitoring.metric_history_no_targets")
 
         self._conn.commit()
         return MetricHistoryClaim(
@@ -2190,6 +2215,54 @@ class PgMetricHistoryRepository:
                 claim.tenant_id, claim.monitoring_sync_operation_id,
             ),
         )
+
+        if (result.succeeded and claim.targets
+                and len(claim.targets) == MAX_HISTORY_ITEMS_PER_REQUEST):
+            # A full page means the item space may continue past the
+            # last processed ref — chain the next op for this window.
+            next_cursor = max(
+                t.provider_external_ref for t in claim.targets)
+            remaining = self._conn.execute(
+                """
+                SELECT 1
+                  FROM monitoring.metric_definition d
+                  JOIN monitoring.metric_definition_provider_binding b
+                    ON b.tenant_id = d.tenant_id
+                   AND b.metric_definition_id = d.metric_definition_id
+                 WHERE d.tenant_id = %s AND d.monitoring_source_id = %s
+                   AND d.source_instance_generation = %s
+                   AND d.definition_state = 'active'
+                   AND d.definition_evidence_state = 'current'
+                   AND d.scope_state = 'in_scope'
+                   AND b.evidence_state = 'current'
+                   AND b.provider_external_ref > %s
+                 LIMIT 1
+                """,
+                (claim.tenant_id, claim.monitoring_source_id,
+                 claim.source_instance_generation, next_cursor),
+            ).fetchone()
+            if remaining is not None:
+                self._conn.execute(
+                    """
+                    INSERT INTO monitoring.monitoring_sync_operation
+                        (tenant_id, monitoring_sync_operation_id,
+                         monitoring_source_id, source_instance_generation,
+                         configuration_revision, scope_revision,
+                         responsibility_kind, state,
+                         history_time_from, history_time_till,
+                         history_item_cursor)
+                    VALUES (%s, %s, %s, %s, %s, %s,
+                            'metric_history_sync', 'pending',
+                            %s, %s, %s)
+                    """,
+                    (claim.tenant_id, _opaque("mon-op"),
+                     claim.monitoring_source_id,
+                     claim.source_instance_generation,
+                     claim.configuration_revision, claim.scope_revision,
+                     claim.window.time_from, claim.window.time_till,
+                     next_cursor),
+                )
+
         self._conn.commit()
         return result
 
@@ -2349,7 +2422,7 @@ class PgMetricHistoryRepository:
                 (
                     self._tenant_id, r[0], monitoring_source_id, r[1],
                     r[2], r[3], r[4], r[5], r[6], r[7], r[8],
-                    r[9] if isinstance(r[9], str) else json.dumps(r[9]),
+                    json.dumps(r[9]),
                 ),
             )
             self._conn.execute(

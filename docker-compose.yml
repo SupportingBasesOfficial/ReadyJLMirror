@@ -171,6 +171,13 @@ services:
       # (deterministic dev-ticket-* refs). Prod: governed ITSM bridge
       # URL; the token goes through a credential binding.
       ITSM_PROVIDER_URL: ${ITSM_PROVIDER_URL:-}
+      # Sync cadences (seconds) — the scheduler enqueues due ops per
+      # source; manual poll buttons are operator overrides.
+      SCHED_PROBLEM_SECONDS: ${SCHED_PROBLEM_SECONDS:-60}
+      SCHED_CURRENT_SECONDS: ${SCHED_CURRENT_SECONDS:-300}
+      SCHED_INVENTORY_SECONDS: ${SCHED_INVENTORY_SECONDS:-1800}
+      SCHED_METRICS_SECONDS: ${SCHED_METRICS_SECONDS:-3600}
+      SCHED_HISTORY_SECONDS: ${SCHED_HISTORY_SECONDS:-3600}
       # Provider egress (dev Zabbix profile / intranet deployments)
       EGRESS_ALLOW_HOSTS: ${EGRESS_ALLOW_HOSTS:-}
       EGRESS_ALLOW_PRIVATE_IPS: ${EGRESS_ALLOW_PRIVATE_IPS:-}

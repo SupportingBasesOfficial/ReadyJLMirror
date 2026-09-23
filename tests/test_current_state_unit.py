@@ -104,9 +104,29 @@ def test_read_current_values_translates():
     assert rows[0].lastns == 123456789
 
 
-def test_read_current_values_zero_clock_rejected():
+def test_read_current_values_zero_clock_skipped():
+    # Items never sampled (lastclock=0) carry no observation — the
+    # adapter drops them so one unpolled item cannot poison the batch.
     client = ZabbixClient()
-    row = {"itemid": "1", "lastvalue": "5", "lastclock": "0", "lastns": "0"}
+    rows = [
+        {"itemid": "1", "lastvalue": "5", "lastclock": "0",
+         "lastns": "0"},
+        {"itemid": "2", "lastvalue": "9", "lastclock": "1700000000",
+         "lastns": "1"},
+    ]
+    with patch("providers.zabbix.httpx.Client") as mock_client_cls:
+        mock_client = mock_client_cls.return_value.__enter__.return_value
+        mock_client.post.return_value = _rpc_response(rows)
+        result = client.read_current_values(
+            _endpoint(), _credential(), ["1", "2"], max_items=10
+        )
+    assert [r.itemid for r in result] == ["2"]
+
+
+def test_read_current_values_malformed_row_rejected():
+    client = ZabbixClient()
+    row = {"itemid": "1", "lastvalue": "5", "lastclock": "not-a-ts",
+           "lastns": "0"}
     with patch("providers.zabbix.httpx.Client") as mock_client_cls:
         mock_client = mock_client_cls.return_value.__enter__.return_value
         mock_client.post.return_value = _rpc_response([row])

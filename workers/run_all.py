@@ -30,11 +30,13 @@ from workers.notification_dispatch import (
     _process_pending as notification_dispatch)
 from workers.itsm_sync import _process_pending as itsm_sync
 from workers.problem_state import _process_pending as problem_state
+from workers.scheduler import _process_pending as scheduler
 from workers.validation import _process_pending as validation
 
 logger = logging.getLogger("workers.run_all")
 
 _PROCESSORS = (
+    ("scheduler", scheduler),   # enqueue due ops first — same tick picks them up
     ("validation", validation),
     ("inventory", inventory),
     ("metrics", metrics),

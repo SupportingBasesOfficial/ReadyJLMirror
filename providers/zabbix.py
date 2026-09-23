@@ -422,7 +422,9 @@ class ZabbixClient:
 
         Zabbix `lastvalue`/`lastclock`/`lastns` is the provider's newest
         sample per item. Items whose value has never been collected
-        (lastclock = 0) are rejected by domain validation.
+        (lastclock = 0) carry no observation — they are skipped here so
+        one never-sampled item cannot poison the whole batch; the
+        domain simply records no observation for them.
         """
         result = _rpc(
             endpoint.api_url,
@@ -442,11 +444,19 @@ class ZabbixClient:
             if not isinstance(item, dict) or "itemid" not in item:
                 raise ProviderProtocolError("item.get malformed entry")
             try:
+                lastclock = int(item.get("lastclock", 0) or 0)
+            except (TypeError, ValueError) as exc:
+                raise ProviderProtocolError(
+                    f"item.get current value failed normalization: {exc}"
+                ) from exc
+            if lastclock <= 0:
+                continue
+            try:
                 rows.append(
                     ZabbixCurrentValueEvidence(
                         itemid=str(item["itemid"]),
                         raw_value=str(item.get("lastvalue", "")),
-                        lastclock=int(item.get("lastclock", 0)),
+                        lastclock=lastclock,
                         lastns=int(item.get("lastns", 0)),
                     )
                 )
