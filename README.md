@@ -64,6 +64,9 @@ Services:
 | `migrate` | — | Applies `sql/` migrations, exits |
 | `worker` | — | Continuous pipeline (`--profile worker`) |
 | `openbao` | 8200 | Dev secret backend (`--profile secrets`) |
+| `prometheus` | 9090 | Metrics + alert rules (`--profile observability`) |
+| `grafana` | 3300 | Provisioned dashboards, admin/admin (`--profile observability`) |
+| `backup` | — | Scheduled pg_dump + retention (`--profile backup`) |
 
 ### Local development (without Docker)
 

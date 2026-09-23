@@ -9,15 +9,22 @@ Requires the compose db container (pg_dump runs inside it so versions
 always match) unless `--local` is passed — then pg_dump runs directly
 against DB_* env (the CI shape, where psql/pg_dump are on the host).
 
-Usage: python -m scripts.backup [--local]
+`--loop SECONDS` runs forever (the compose `backup` service shape);
+`--retain N` prunes all but the newest N timestamped backup dirs
+after each successful run.
+
+Usage: python -m scripts.backup [--local] [--loop SECONDS]
+       [--retain N]
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -54,7 +61,20 @@ def _watermarks(dsn: str) -> dict:
     return wm
 
 
-def main() -> int:
+def _retain(keep: int) -> None:
+    """Prune all but the newest `keep` timestamped backup dirs."""
+    if keep <= 0 or not OUT.is_dir():
+        return
+    dirs = sorted(
+        (d for d in OUT.iterdir()
+         if d.is_dir() and (d / "dump.pg_dump").exists()),
+        key=lambda d: d.name)
+    for stale in dirs[:-keep]:
+        shutil.rmtree(stale, ignore_errors=True)
+        print(f"retention: pruned {stale}")
+
+
+def _once(local: bool) -> int:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     dest = OUT / ts
     dest.mkdir(parents=True, exist_ok=True)
@@ -71,7 +91,7 @@ def main() -> int:
 
     dump = dest / "dump.pg_dump"
     print(f"pg_dump -> {dump}")
-    if "--local" in sys.argv:
+    if local:
         r = subprocess.run(
             ["pg_dump", "-h", settings.db_host, "-p", str(settings.db_port),
              "-U", settings.db_user, "-d", settings.db_name,
@@ -101,6 +121,29 @@ def main() -> int:
           f"({dump.stat().st_size / 1024:.0f} KiB)")
     print("watermarks:", json.dumps(wm))
     return 0
+
+
+def _arg(flag: str, default: str) -> str:
+    return (sys.argv[sys.argv.index(flag) + 1]
+            if flag in sys.argv else default)
+
+
+def main() -> int:
+    local = "--local" in sys.argv
+    loop = int(_arg("--loop", "0"))
+    retain = int(_arg("--retain", "0"))
+    if loop <= 0:
+        rc = _once(local)
+        if rc == 0:
+            _retain(retain)
+        return rc
+    while True:
+        try:
+            if _once(local) == 0:
+                _retain(retain)
+        except Exception as exc:
+            print(f"backup tick failed: {exc}", file=sys.stderr)
+        time.sleep(loop)
 
 
 if __name__ == "__main__":

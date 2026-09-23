@@ -263,6 +263,62 @@ services:
       - observability
 
   # ------------------------------------------------------------------
+  # Scheduled backups — runs scripts.backup in a loop with retention.
+  # pg_dump executes inside the db container via the Docker socket so
+  # the dump binary always matches the server version. Dev profile
+  # only; production uses managed snapshots/PITR instead.
+  # ------------------------------------------------------------------
+  backup:
+    image: docker:27-cli
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          ts=$$(date -u +%Y%m%dT%H%M%SZ)
+          dest=/backups/$$ts
+          mkdir -p "$$dest"
+          docker exec readyjlmirror-db-1 psql -U jlmirror_owner \
+            -d jlmirror -tA -c \
+            "SELECT jsonb_build_object(
+               'recovery_point_utc', '$$ts',
+               'outbox_states', (SELECT jsonb_object_agg(dispatch_state, n)
+                 FROM (SELECT dispatch_state, count(*) n
+                       FROM monitoring.monitoring_outbox GROUP BY 1) s),
+               'sync_operation_states', (SELECT jsonb_object_agg(state, n)
+                 FROM (SELECT state, count(*) n
+                       FROM monitoring.monitoring_sync_operation GROUP BY 1) s),
+               'sources', (SELECT count(*) FROM monitoring.monitoring_source),
+               'sessions', (SELECT count(*) FROM g1.browser_sessions),
+               'max_outbox_record', (SELECT max(record_id)
+                                     FROM monitoring.monitoring_outbox))" \
+            > "$$dest/manifest.json"
+          docker exec readyjlmirror-db-1 \
+            pg_dump -U jlmirror_owner -d jlmirror -Fc \
+            -f /tmp/dump.pg_dump \
+          && docker cp readyjlmirror-db-1:/tmp/dump.pg_dump \
+               "$$dest/dump.pg_dump" \
+          && echo "backup $$ts complete" \
+          || echo "backup $$ts failed"
+          # Retention — keep newest BACKUP_RETAIN dirs
+          ls -1dt /backups/*/ | tail -n +$$((BACKUP_RETAIN + 1)) \
+            | xargs -r rm -rf
+          sleep "$${BACKUP_INTERVAL:-3600}"
+        done
+    environment:
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-3600}
+      BACKUP_RETAIN: ${BACKUP_RETAIN:-48}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - backup
+
+  # ------------------------------------------------------------------
   # Dev Zabbix provider profile — a REAL Zabbix server + web API +
   # agent so the whole monitoring pipeline exercises real provider
   # traffic (docker compose --profile zabbix up -d).
