@@ -216,6 +216,21 @@ services:
     profiles:
       - worker
 
+  # Optional: dev metrics stack — docker compose --profile observability up -d
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./secrets/tls:/run/secrets/tls:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+    profiles:
+      - observability
+
   # ------------------------------------------------------------------
   # Dev Zabbix provider profile — a REAL Zabbix server + web API +
   # agent so the whole monitoring pipeline exercises real provider

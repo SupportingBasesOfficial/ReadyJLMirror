@@ -23,9 +23,9 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
 
 from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
-from shared import access, slo as _slo
+from shared import access, metrics as _metrics, slo as _slo
 from shared.config import settings
 from shared.db import check_db_ready, close_pool, db_connection, init_pool
 from shared import telemetry
@@ -349,6 +349,23 @@ app.include_router(itsm.router)
 app.include_router(notifications.router)
 app.include_router(platform.router)
 app.include_router(tenant.router)
+
+
+@app.get("/metrics", tags=["health"])
+async def prometheus_metrics() -> Response:
+    """Prometheus-compatible scrape endpoint (internal-only — the BFF
+    is the public boundary and does not proxy this path)."""
+    db: dict = {}
+    try:
+        async with db_connection() as conn:
+            cur = await conn.execute(
+                "SELECT monitoring.ops_metrics()")
+            row = await cur.fetchone()
+            db = row[0] if row and row[0] else {}
+    except Exception:
+        logger.exception("metrics: ops_metrics query failed")
+    return Response(content=_metrics.render(db),
+                    media_type=_metrics.CONTENT_TYPE)
 
 
 @app.get("/health", tags=["health"])
