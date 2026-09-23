@@ -46,6 +46,17 @@ let alertFilter = "active";
 let lastAlerts = [];
 let detailSeq = 0;
 
+// Effective permissions projected to UI capabilities. The API is the
+// authoritative gate — this only decides which controls to render.
+function caps() {
+  const p = (sessionState && sessionState.permissions) || [];
+  return {
+    monitorOp: p.includes("monitoring:operate"),
+    alertOp: p.includes("alerting:operate"),
+    admin: p.includes("tenant:admin"),
+  };
+}
+
 function renderCenter(html) {
   render(`<div class="centerwrap"><div class="card">${html}</div></div>`);
 }
@@ -216,9 +227,13 @@ async function loadMonitoring(s) {
   render(
     `<div class="viewhead"><h2>Monitoring sources</h2>` +
     `<span class="spacer"></span>` +
-    `<button class="secondary small" id="addSource">+ add source</button>` +
+    (caps().monitorOp
+      ? `<button class="secondary small" id="addSource">` +
+        `+ add source</button>`
+      : "") +
     `</div><div id="monBody"><div class="spinner"></div></div>`);
-  document.getElementById("addSource").addEventListener(
+  const addBtn = document.getElementById("addSource");
+  if (addBtn) addBtn.addEventListener(
     "click", () => renderOnboardForm(tid));
   const mon = document.getElementById("monBody");
   let sources;
@@ -625,7 +640,7 @@ async function loadSourceDetail(sourceId, tid, seq) {
     `<td><code>${esc((o.monitoring_sync_operation_id || "").slice(0, 20))}</code></td>` +
     `<td>${esc(o.last_error_class)}</td>` +
     `<td>${fmtTs(o.created_at)}</td>` +
-    `<td>${badStates.has(o.state)
+    `<td>${badStates.has(o.state) && caps().monitorOp
         ? `<button class="secondary op-requeue" ` +
           `data-op="${esc(o.monitoring_sync_operation_id)}">retry</button>`
         : ""}</td></tr>`;
@@ -639,20 +654,23 @@ async function loadSourceDetail(sourceId, tid, seq) {
           ? `<tr><td colspan="6"><button class="secondary" ` +
             `id="showAllOps">show all ${opList.length} operations</button>` +
             `</td></tr>` : "");
+  const syncBar = caps().monitorOp
+    ? `<div class="actions opsync">` +
+      `<span class="hint">sync now (operator override — the scheduler ` +
+      `runs these on cadence automatically):</span>` +
+      `<button class="secondary" data-p="inventory" ` +
+      `title="Enqueue provider inventory sync">inventory</button>` +
+      `<button class="secondary" data-p="metrics/poll" ` +
+      `title="Enqueue metric definition poll">metrics</button>` +
+      `<button class="secondary" data-p="current/poll" ` +
+      `title="Enqueue current state poll">current</button>` +
+      `<button class="secondary" data-p="history/poll" ` +
+      `title="Enqueue metric history sync">history</button>` +
+      `<button class="secondary" data-p="problems/poll" ` +
+      `title="Enqueue problem state sync">problems</button></div>`
+    : "";
   tabHtml.operations =
-    `<div class="section"><div class="actions opsync">` +
-    `<span class="hint">sync now (operator override — the scheduler ` +
-    `runs these on cadence automatically):</span>` +
-    `<button class="secondary" data-p="inventory" ` +
-    `title="Enqueue provider inventory sync">inventory</button>` +
-    `<button class="secondary" data-p="metrics/poll" ` +
-    `title="Enqueue metric definition poll">metrics</button>` +
-    `<button class="secondary" data-p="current/poll" ` +
-    `title="Enqueue current state poll">current</button>` +
-    `<button class="secondary" data-p="history/poll" ` +
-    `title="Enqueue metric history sync">history</button>` +
-    `<button class="secondary" data-p="problems/poll" ` +
-    `title="Enqueue problem state sync">problems</button></div>` +
+    `<div class="section">${syncBar}` +
     `<table><thead><tr><th>State</th>` +
     `<th>Kind</th><th>Op</th><th>Error class</th><th>Created</th>` +
     `<th></th></tr></thead><tbody>${opRows}</tbody></table></div>`;
@@ -896,11 +914,13 @@ async function loadAlertDetail(alertId, tid) {
 
     `<div class="section"><h2>Human operations</h2>${curHtml}` +
     `<ul class="timeline">${events}</ul>` +
-    `<div class="actions">` +
-    `<button class="secondary" id="btnAck">acknowledge</button>` +
-    `<button class="secondary" id="btnAssign">assign action</button>` +
-    `<button class="secondary" id="btnVis">require native view</button>` +
-    `</div>` +
+    (caps().alertOp
+      ? `<div class="actions">` +
+        `<button class="secondary" id="btnAck">acknowledge</button>` +
+        `<button class="secondary" id="btnAssign">assign action</button>` +
+        `<button class="secondary" id="btnVis">require native view` +
+        `</button></div>`
+      : "") +
     `<p class="note">ACK is evidence only — it never changes alert ` +
     `lifecycle or action ownership.</p>` +
     `<div id="opsForm"></div></div>` +
@@ -910,7 +930,10 @@ async function loadAlertDetail(alertId, tid) {
     `<th>Destination</th><th>Attempts</th></tr></thead>` +
     `<tbody>${notifRows}</tbody></table>` +
     `<div class="actions">` +
-    `<button class="secondary" id="btnNotify">notify via WhatsApp</button>` +
+    (caps().alertOp
+      ? `<button class="secondary" id="btnNotify">` +
+        `notify via WhatsApp</button>`
+      : "") +
     `<button class="secondary" id="btnAlertRefresh">refresh</button></div>` +
     `<p class="note">provider accepted ≠ delivered ≠ read. External read ` +
     `evidence is supplementary — it is not the authoritative native view.` +
@@ -920,9 +943,10 @@ async function loadAlertDetail(alertId, tid) {
     `<table><thead><tr><th>Incident</th><th>Title</th>` +
     `<th>State</th></tr></thead>` +
     `<tbody>${incRows}</tbody></table>` +
-    `<div class="actions">` +
-    `<button class="secondary" id="btnNewIncident">` +
-    `create incident</button></div>` +
+    (caps().alertOp
+      ? `<div class="actions"><button class="secondary" ` +
+        `id="btnNewIncident">create incident</button></div>`
+      : "") +
     `<div id="incidentDetail"></div></div>`;
 
   document.getElementById("backAlerts").addEventListener(
@@ -931,13 +955,20 @@ async function loadAlertDetail(alertId, tid) {
   document.getElementById("btnAlertRefresh")
     .addEventListener("click", reload);
 
-  document.getElementById("btnAck").addEventListener("click", async () => {
+  // Mutation controls exist only for alerting:operate — guard every
+  // binding so viewer sessions render the detail without them.
+  const on = (id, fn) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("click", fn);
+  };
+
+  on("btnAck", async () => {
     const note = prompt("ACK note (optional)") || null;
     const r = await post(`/alerts/${alertId}/ack`, tid, { note });
     if (!r.ok) fail("Acknowledge denied."); else reload();
   });
 
-  document.getElementById("btnAssign").addEventListener("click", () => {
+  on("btnAssign", () => {
     document.getElementById("opsForm").innerHTML =
       `<form id="assignForm">` +
       `<label>Owner principal<input name="owner" required ` +
@@ -959,7 +990,7 @@ async function loadAlertDetail(alertId, tid) {
       });
   });
 
-  document.getElementById("btnVis").addEventListener("click", () => {
+  on("btnVis", () => {
     document.getElementById("opsForm").innerHTML =
       `<form id="visForm">` +
       `<label>Required viewer principal<input name="viewer" required ` +
@@ -982,7 +1013,7 @@ async function loadAlertDetail(alertId, tid) {
       });
   });
 
-  document.getElementById("btnNotify").addEventListener("click", () => {
+  on("btnNotify", () => {
     document.getElementById("notifyForm").innerHTML =
       `<form id="notifyFormEl">` +
       `<label>Destination reference<input name="dest" required ` +
@@ -1005,8 +1036,7 @@ async function loadAlertDetail(alertId, tid) {
       });
   });
 
-  document.getElementById("btnNewIncident")
-    .addEventListener("click", () => {
+  on("btnNewIncident", () => {
       document.getElementById("incidentDetail").innerHTML =
         `<form id="incForm">` +
         `<label>Title<input name="title" required maxlength="240" ` +
@@ -1081,13 +1111,16 @@ async function loadIncidentDetail(incidentId, tid, alertId, reload) {
     `<h4>Transitions</h4><ul class="timeline">${trs}</ul>` +
     `<h4>Assignments</h4><ul class="timeline">${asg}</ul>` +
     `<h4>Comments</h4><ul class="timeline">${cmts}</ul>` +
-    `<div class="actions">` +
-    next.map(s =>
-      `<button class="secondary" data-tr="${esc(s)}">${esc(s)}</button>`
-    ).join("") +
-    `<button class="secondary" id="btnIncAssign">assign</button>` +
-    `<button class="secondary" id="btnIncComment">comment</button>` +
-    `</div><div id="incForm2"></div>`;
+    (caps().alertOp
+      ? `<div class="actions">` +
+        next.map(s =>
+          `<button class="secondary" data-tr="${esc(s)}">${esc(s)}` +
+          `</button>`).join("") +
+        `<button class="secondary" id="btnIncAssign">assign</button>` +
+        `<button class="secondary" id="btnIncComment">comment</button>` +
+        `</div>`
+      : "") +
+    `<div id="incForm2"></div>`;
 
   document.querySelectorAll("[data-tr]").forEach(b =>
     b.addEventListener("click", async () => {
@@ -1096,22 +1129,22 @@ async function loadIncidentDetail(incidentId, tid, alertId, reload) {
       if (!r.ok) fail("Transition denied.");
       else reload();
     }));
-  document.getElementById("btnIncAssign").addEventListener(
-    "click", async () => {
-      const p = prompt("Assignee principal id");
-      if (!p) return;
-      const r = await post(`/incidents/${incidentId}/assignments`,
-                           tid, {assignee_principal_id: p.trim()});
-      if (!r.ok) fail("Assign denied."); else reload();
-    });
-  document.getElementById("btnIncComment").addEventListener(
-    "click", async () => {
-      const body = prompt("Comment");
-      if (!body) return;
-      const r = await post(`/incidents/${incidentId}/comments`,
-                           tid, {body});
-      if (!r.ok) fail("Comment denied."); else reload();
-    });
+  const incAssign = document.getElementById("btnIncAssign");
+  if (incAssign) incAssign.addEventListener("click", async () => {
+    const p = prompt("Assignee principal id");
+    if (!p) return;
+    const r = await post(`/incidents/${incidentId}/assignments`,
+                         tid, {assignee_principal_id: p.trim()});
+    if (!r.ok) fail("Assign denied."); else reload();
+  });
+  const incComment = document.getElementById("btnIncComment");
+  if (incComment) incComment.addEventListener("click", async () => {
+    const body = prompt("Comment");
+    if (!body) return;
+    const r = await post(`/incidents/${incidentId}/comments`,
+                         tid, {body});
+    if (!r.ok) fail("Comment denied."); else reload();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1156,11 +1189,12 @@ async function loadAdmin(s) {
     return;
   }
 
+  const isAdmin = caps().admin;
   const memberRows = members.length
     ? members.map(m =>
         `<tr><td><code>${esc(m.principal_id)}</code></td>` +
         `<td>${esc(m.role)}</td><td>${esc(m.state)}</td>` +
-        `<td>${m.state === "active"
+        `<td>${m.state === "active" && isAdmin
           ? `<button class="link" data-revoke="${esc(m.membership_id)}">` +
             `revoke</button>` : ""}</td></tr>`).join("")
     : `<tr><td colspan="4" class="empty">no members</td></tr>`;
@@ -1170,7 +1204,7 @@ async function loadAdmin(s) {
         `<tr><td><code>${esc(r.role_name)}</code></td>` +
         `<td>${esc((r.permissions || []).join(", "))}</td>` +
         `<td>${esc(r.state)}</td>` +
-        `<td>${r.state === "active"
+        `<td>${r.state === "active" && isAdmin
           ? `<button class="link" data-retire="${esc(r.role_name)}">` +
             `retire</button>` : ""}</td></tr>`).join("")
     : `<tr><td colspan="4" class="empty">no custom roles</td></tr>`;
@@ -1212,19 +1246,24 @@ async function loadAdmin(s) {
     `<div class="panel"><h4>Members</h4>` +
     `<table><thead><tr><th>Principal</th><th>Role</th><th>State</th>` +
     `<th></th></tr></thead><tbody>${memberRows}</tbody></table>` +
-    `<form id="memberForm"><div style="display:flex;gap:.5rem">` +
-    `<input name="principal" required placeholder="principal.…" ` +
-    `style="flex:1"><select name="role" style="width:auto">` +
-    `${roleOptions}</select>` +
-    `<button type="submit">add / update</button></div></form>` +
+    (isAdmin
+      ? `<form id="memberForm"><div style="display:flex;gap:.5rem">` +
+        `<input name="principal" required placeholder="principal.…" ` +
+        `style="flex:1"><select name="role" style="width:auto">` +
+        `${roleOptions}</select>` +
+        `<button type="submit">add / update</button></div></form>`
+      : '<p class="hint">tenant:admin required to change ' +
+        'memberships.</p>') +
 
     `<h4>Custom roles</h4>` +
     `<table><thead><tr><th>Role</th><th>Permissions</th>` +
     `<th>State</th><th></th></tr></thead>` +
     `<tbody>${roleRows}</tbody></table>` +
-    `<form id="roleForm"><input name="name" required ` +
-    `placeholder="role name"><div>${permBoxes}</div>` +
-    `<button type="submit">create role</button></form>` +
+    (isAdmin
+      ? `<form id="roleForm"><input name="name" required ` +
+        `placeholder="role name"><div>${permBoxes}</div>` +
+        `<button type="submit">create role</button></form>`
+      : "") +
 
     `</div><div class="panel"><h4>Platform</h4>${platformHtml}</div>`;
 
@@ -1241,7 +1280,8 @@ async function loadAdmin(s) {
       if (!r.ok) fail("Retire denied."); else loadAdmin(s);
     }));
 
-  document.getElementById("memberForm").addEventListener(
+  const memberForm = document.getElementById("memberForm");
+  if (memberForm) memberForm.addEventListener(
     "submit", async (ev) => {
       ev.preventDefault();
       const r = await tapi("/tenant/members", "POST", {
@@ -1251,7 +1291,8 @@ async function loadAdmin(s) {
       if (!r.ok) fail("Member grant denied (tenant:admin required).");
       else loadAdmin(s);
     });
-  document.getElementById("roleForm").addEventListener(
+  const roleForm = document.getElementById("roleForm");
+  if (roleForm) roleForm.addEventListener(
     "submit", async (ev) => {
       ev.preventDefault();
       const perms = [...ev.target.querySelectorAll(

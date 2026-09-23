@@ -355,6 +355,9 @@ async def api_session(request: Request) -> JSONResponse:
         if tenant is None:
             # Bound tenant no longer authorized — fail closed
             return JSONResponse({"state": "forbidden"})
+        async with db_connection() as conn:
+            permissions = sorted(await access.effective_permissions(
+                conn, session["principal_id"], bound))
         return JSONResponse(
             {
                 "state": "ready",
@@ -363,6 +366,10 @@ async def api_session(request: Request) -> JSONResponse:
                 "principal_id": session["principal_id"],
                 "admission_revision": session.get("session_generation")
                     or session.get("credential_generation"),
+                # Effective permissions — the shell projects these to
+                # decide which mutation controls to render. The API
+                # remains the authoritative gate; this is UX-only.
+                "permissions": permissions,
                 # operational extensions (membership picker etc.)
                 "tenant": tenant,
                 "memberships": memberships,
