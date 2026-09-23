@@ -1,14 +1,19 @@
 services:
-  # Fixes ownership of the WAL archive volume before postgres starts —
-  # a fresh named volume is root-owned and postgres runs as uid 70.
+  # Fixes ownership of the WAL archive + vault data volumes before the
+  # consumers start — fresh named volumes are root-owned while postgres
+  # runs as uid 70 and openbao as uid 100.
   wal-init:
     image: alpine:3.20
     command:
       - sh
       - -c
-      - mkdir -p /wal_archive && chown -R 70:70 /wal_archive
+      - |
+        mkdir -p /wal_archive /bao_data
+        chown -R 70:70 /wal_archive
+        chown -R 100:1000 /bao_data
     volumes:
       - wal_archive:/wal_archive
+      - bao_data:/bao_data
     restart: "no"
 
   db:
@@ -66,12 +71,35 @@ services:
     image: openbao/openbao:latest
     cap_add:
       - IPC_LOCK
-    environment:
-      BAO_DEV_ROOT_TOKEN_ID: dev-root-token
+    command: server -config=/openbao/config/openbao.hcl
+    volumes:
+      - ./docker/openbao:/openbao/config:ro
+      - ./docker/openbao/unseal.key:/openbao/keys/unseal.key:ro
+      - bao_data:/openbao/raft
     ports:
       - "8200:8200"
-    command: server -dev
+    depends_on:
+      wal-init:
+        condition: service_completed_successfully
     restart: unless-stopped
+    profiles:
+      - secrets
+
+  # One-shot: initializes the persistent vault, mounts KV v2 at
+  # secret/, writes the root token to ./secrets/bao_token (the file
+  # BaoCredentialResolver reads when BAO_TOKEN is unset).
+  bao-init:
+    image: openbao/openbao:latest
+    command: ["sh", "/config/init.sh"]
+    environment:
+      BAO_ADDR: http://openbao:8200
+    volumes:
+      - ./docker/openbao:/config:ro
+      - ./secrets:/secrets
+    depends_on:
+      openbao:
+        condition: service_started
+    restart: "no"
     profiles:
       - secrets
 
@@ -420,3 +448,4 @@ services:
 volumes:
   db_data:
   wal_archive:
+  bao_data:

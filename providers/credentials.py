@@ -156,6 +156,12 @@ class BaoCredentialResolver:
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 body = _json.loads(resp.read() or b"{}")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return {}  # empty credentials document
+            raise CredentialResolutionError(
+                f"credential unavailable (bao unreachable: {exc})"
+            ) from exc
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise CredentialResolutionError(
                 f"credential unavailable (bao unreachable: {exc})"

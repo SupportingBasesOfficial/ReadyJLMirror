@@ -42,10 +42,15 @@ _HISTORY_WINDOW_SECONDS = int(
 # gated to 'current' by its claim fence (alert evaluation must never
 # see degraded scope evidence); the other kinds also run on degraded
 # sources — a successful pass is what restores evidence to 'current'.
+# 'unavailable' is included only on the lightest probe (host.get) so a
+# source lost to a transient failure self-heals within the inventory
+# cadence, while a deterministically-broken source costs at most one
+# probe per cadence instead of churning on every poll kind.
 _SCHEDULABLE = {
     "problem_state_sync": ("current",),
     "current_state_poll": ("current", "stale", "reconciliation_required"),
-    "host_inventory_sync": ("current", "stale", "reconciliation_required"),
+    "host_inventory_sync": (
+        "current", "stale", "reconciliation_required", "unavailable"),
     "metric_definition_poll": ("current", "stale", "reconciliation_required"),
     "metric_history_sync": ("current", "stale", "reconciliation_required"),
 }

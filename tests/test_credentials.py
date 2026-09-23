@@ -275,3 +275,20 @@ def test_bao_store_unconfigured():
     r = BaoCredentialResolver(addr="", token="")
     with pytest.raises(CredentialResolutionError):
         r.store_zabbix_api_token("cred-a", "tok")
+
+
+def test_bao_fetch_document_404_is_empty(monkeypatch):
+    """A missing credentials document resolves as {} so the store
+    path can create it and reads report a plain missing-ref error."""
+    import urllib.error
+    from providers.credentials import BaoCredentialResolver
+    r = BaoCredentialResolver(addr="http://bao.test", token="tok")
+
+    def raise_404(req, timeout=None):
+        raise urllib.error.HTTPError(
+            req.full_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", raise_404)
+    assert r._fetch_document() == {}
+    with pytest.raises(CredentialResolutionError):
+        r.resolve_zabbix_api_token("cred-a")

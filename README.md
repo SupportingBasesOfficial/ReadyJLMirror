@@ -63,7 +63,7 @@ Services:
 | `db` | 5434 | PostgreSQL 16 + TimescaleDB |
 | `migrate` | — | Applies `sql/` migrations, exits |
 | `worker` | — | Continuous pipeline (`--profile worker`) |
-| `openbao` | 8200 | Dev secret backend (`--profile secrets`) |
+| `openbao` | 8200 | Secret backend — raft + static auto-unseal (`--profile secrets`) |
 | `prometheus` | 9090 | Metrics + alert rules (`--profile observability`) |
 | `grafana` | 3300 | Provisioned dashboards, admin/admin (`--profile observability`) |
 | `backup` | — | Scheduled pg_dump + basebackup + WAL retention (`--profile backup`) |
@@ -218,8 +218,11 @@ Real persistence + real Zabbix adapter, implementing the accepted
   SKIP LOCKED), publishes to `ALERTING_WEBHOOK_URL` (or dev-log receipt
   when unset), and quarantines after 5 attempts — publication can never
   diverge from platform truth
-- `providers/credentials.py` — env-based dev resolver
-  (`ZABBIX_CRED_<REF>`); production = OpenBao/secret manager
+- `providers/credentials.py` — chained resolver: OpenBao KV v2
+  (`BAO_ADDR`, persistent raft + static auto-unseal dev server under
+  `--profile secrets`), then mounted `<binding-ref>.token` files,
+  then `ZABBIX_CRED_<REF>` env fallback; onboarding writes the token
+  to OpenBao + file, only the binding ref reaches PostgreSQL
 - `providers/egress.py` — fail-closed egress admission: https +
   required `EGRESS_ALLOW_HOSTS` allowlist + DNS screen blocking
   non-public targets (`EGRESS_ALLOW_PRIVATE_IPS` for intranet);
