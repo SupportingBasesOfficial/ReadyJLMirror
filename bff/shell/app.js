@@ -436,6 +436,8 @@ function renderOnboardForm(tid) {
 
 let detailTab = "overview";   // active source-detail tab
 let showAllOps = false;       // ops table expanded — survives silent refresh
+let detailFilters = {};       // per-tab filter state — survives refresh
+let detailFilterSource = "";  // filters reset when another source opens
 
 async function loadSourceDetail(sourceId, tid, seq) {
   // Watcher-triggered reloads pass seq — keep the current DOM until
@@ -459,6 +461,10 @@ async function loadSourceDetail(sourceId, tid, seq) {
       api(`/sources/${sourceId}/resources?tenant_id=${tid}`),
     ]);
   if (seq !== detailSeq) return;
+  if (detailFilterSource !== sourceId) {
+    detailFilters = {};
+    detailFilterSource = sourceId;
+  }
 
   const resNames = {}, healthByRes = {};
   if (Array.isArray(resources)) for (const r of resources)
@@ -505,72 +511,84 @@ async function loadSourceDetail(sourceId, tid, seq) {
     kv("last attempt", fmtTs(src.last_attempt_at)) +
     `</tbody></table></div>`;
 
-  const hostRows = nRes
-    ? resources.map(r => {
-        const h = healthByRes[r.monitoring_resource_id] || {};
-        const hc = h.health_class || "unknown";
-        return `<tr><td>${esc(r.display_name
-              || r.monitoring_resource_id)}` +
-          `<div class="dim">${esc(r.monitoring_resource_id.slice(0, 20))}` +
-          `</div></td>` +
-          `<td><code>${esc(r.provider_external_ref)}</code></td>` +
-          `<td class="h-${esc(hc)}">${esc(hc)}</td>` +
-          `<td>${esc(r.scope_state)}</td>` +
-          `<td>${esc(r.presence_state)}</td>` +
-          `<td>${fmtTs(r.last_observed_at)}</td></tr>`;
-      }).join("")
-    : `<tr><td colspan="6" class="empty">No resources — ` +
-      `run an inventory sync</td></tr>`;
+  const hostRowHtml = r => {
+    const h = healthByRes[r.monitoring_resource_id] || {};
+    const hc = h.health_class || "unknown";
+    return `<tr><td>${esc(r.display_name
+          || r.monitoring_resource_id)}` +
+      `<div class="dim">${esc(r.monitoring_resource_id.slice(0, 20))}` +
+      `</div></td>` +
+      `<td><code>${esc(r.provider_external_ref)}</code></td>` +
+      `<td class="h-${esc(hc)}">${esc(hc)}</td>` +
+      `<td>${esc(r.scope_state)}</td>` +
+      `<td>${esc(r.presence_state)}</td>` +
+      `<td>${fmtTs(r.last_observed_at)}</td></tr>`;
+  };
+  const resList = Array.isArray(resources) ? resources : [];
+  const probList = Array.isArray(problems) ? problems : [];
+  const hostHealths = [...new Set(resList.map(r =>
+    (healthByRes[r.monitoring_resource_id] || {}).health_class
+      || "unknown"))].sort();
   tabHtml.hosts =
-    `<div class="section"><table><thead><tr><th>Host</th>` +
+    `<div class="section"><div class="filterbar">` +
+    `<input id="flt-text" placeholder="filter host / provider ref…">` +
+    `<select id="flt-sel"><option value="">all health</option>` +
+    hostHealths.map(h => `<option>${esc(h)}</option>`).join("") +
+    `</select><span class="hint" id="flt-count"></span></div>` +
+    `<table><thead><tr><th>Host</th>` +
     `<th>Provider ref</th><th>Health</th><th>Scope</th>` +
     `<th>Presence</th><th>Last seen</th></tr></thead>` +
-    `<tbody>${hostRows}</tbody></table></div>`;
+    `<tbody id="flt-body"></tbody></table></div>`;
 
-  const problemRows = nProb
-    ? problems.map(p =>
-        `<tr><td class="sev-${esc(p.severity_class)}">` +
-        `${esc(p.severity_class)}</td>` +
-        `<td>${esc(resNames[p.monitoring_resource_id] || "—")}</td>` +
-        `<td>${esc(p.summary)}</td>` +
-        `<td><code>${esc(p.provider_eventid)}</code></td>` +
-        `<td>${esc(p.evidence_state)}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="empty">No active problems</td></tr>`;
+  const problemRowHtml = p =>
+    `<tr><td class="sev-${esc(p.severity_class)}">` +
+    `${esc(p.severity_class)}</td>` +
+    `<td>${esc(resNames[p.monitoring_resource_id] || "—")}</td>` +
+    `<td>${esc(p.summary)}</td>` +
+    `<td><code>${esc(p.provider_eventid)}</code></td>` +
+    `<td>${esc(p.evidence_state)}</td></tr>`;
+  const sevs = [...new Set(probList.map(p => p.severity_class))].sort();
   tabHtml.problems =
-    `<div class="section"><table><thead><tr><th>Severity</th>` +
+    `<div class="section"><div class="filterbar">` +
+    `<input id="flt-text" placeholder="filter host / summary…">` +
+    `<select id="flt-sel"><option value="">all severities</option>` +
+    sevs.map(s => `<option>${esc(s)}</option>`).join("") +
+    `</select><span class="hint" id="flt-count"></span></div>` +
+    `<table><thead><tr><th>Severity</th>` +
     `<th>Host</th><th>Summary</th><th>Event</th><th>Evidence</th>` +
-    `</tr></thead><tbody>${problemRows}</tbody></table></div>`;
+    `</tr></thead><tbody id="flt-body"></tbody></table></div>`;
 
   const cur = Array.isArray(current) ? current : [];
-  const currentRows = cur.length
-    ? cur.slice(0, 50).map(c =>
-        `<tr><td>${esc(c.name || c.metric_definition_id)}</td>` +
-        `<td><code>${esc(c.canonical_value)}</code></td>` +
-        `<td>${esc(c.evidence_state)}</td></tr>`).join("")
-    : `<tr><td colspan="3" class="empty">No current state — ` +
-      `run a current poll</td></tr>`;
+  const metricRowHtml = c =>
+    `<tr><td>${esc(c.name || c.metric_definition_id)}</td>` +
+    `<td><code>${esc(c.canonical_value)}</code></td>` +
+    `<td>${esc(c.evidence_state)}</td></tr>`;
   tabHtml.metrics =
-    `<div class="section"><table><thead><tr><th>Metric</th>` +
+    `<div class="section"><div class="filterbar">` +
+    `<input id="flt-text" placeholder="filter metric name…">` +
+    `<span class="hint" id="flt-count"></span></div>` +
+    `<table><thead><tr><th>Metric</th>` +
     `<th>Value</th><th>Evidence</th></tr></thead>` +
-    `<tbody>${currentRows}</tbody></table>` +
-    (cur.length > 50
-      ? `<p class="hint">showing 50 of ${cur.length}</p>` : "") +
-    `</div>`;
+    `<tbody id="flt-body"></tbody></table></div>`;
 
-  const alertRows = Array.isArray(alerts) && alerts.length
-    ? alerts.map(a =>
-        `<tr class="clickable" data-alert="${esc(a.alert_id)}">` +
-        `<td class="a-${esc(a.lifecycle_state)}">${esc(a.lifecycle_state)}</td>` +
-        `<td><code>${esc((a.alert_id || "").slice(0, 18))}</code></td>` +
-        `<td>${esc(a.source_kind)}</td>` +
-        `<td>${esc(a.policy_id)} v${esc(a.policy_version)}</td>` +
-        `<td>r${esc(a.source_occurrence_revision)}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="empty">No alerts — policies ` +
-      `create them from matching problems</td></tr>`;
+  const alertList = Array.isArray(alerts) ? alerts : [];
+  const alertRowHtml = a =>
+    `<tr class="clickable" data-alert="${esc(a.alert_id)}">` +
+    `<td class="a-${esc(a.lifecycle_state)}">${esc(a.lifecycle_state)}</td>` +
+    `<td><code>${esc((a.alert_id || "").slice(0, 18))}</code></td>` +
+    `<td>${esc(a.source_kind)}</td>` +
+    `<td>${esc(a.policy_id)} v${esc(a.policy_version)}</td>` +
+    `<td>r${esc(a.source_occurrence_revision)}</td></tr>`;
+  const lifecycles = [...new Set(alertList.map(a => a.lifecycle_state))].sort();
   tabHtml.alerts =
-    `<div class="section"><table><thead><tr><th>State</th>` +
+    `<div class="section"><div class="filterbar">` +
+    `<input id="flt-text" placeholder="filter policy / alert…">` +
+    `<select id="flt-sel"><option value="">all states</option>` +
+    lifecycles.map(l => `<option>${esc(l)}</option>`).join("") +
+    `</select><span class="hint" id="flt-count"></span></div>` +
+    `<table><thead><tr><th>State</th>` +
     `<th>Alert</th><th>Source kind</th><th>Policy</th><th>Rev</th>` +
-    `</tr></thead><tbody>${alertRows}</tbody></table></div>`;
+    `</tr></thead><tbody id="flt-body"></tbody></table></div>`;
 
   const badStates = new Set(["reconciliation_required", "failed_terminal"]);
   const opList = Array.isArray(ops) ? ops : [];
@@ -625,8 +643,72 @@ async function loadSourceDetail(sourceId, tid, seq) {
     `</div><div id="tabBody"></div>`;
 
   const tabBody = det.querySelector("#tabBody");
+  // Alert rows re-render on every filter keystroke — bind once via
+  // delegation (det persists across silent re-renders) instead of
+  // per-row listeners.
+  if (!det._alertBound) {
+    det._alertBound = true;
+    det.addEventListener("click", e => {
+      const tr = e.target.closest("[data-alert]");
+      if (tr) loadAlertDetail(tr.dataset.alert, tid);
+    });
+  }
+
+  // Live per-tab filtering: painters fill #flt-body from the already
+  // fetched arrays; filter state lives in detailFilters so a silent
+  // refresh keeps what the operator typed/selected.
+  const paintFiltered = (el, items, match, rowHtml, emptyMsg, cap) => {
+    const f = detailFilters[detailTab] ||= { text: "", sel: "" };
+    const txt = el.querySelector("#flt-text");
+    const sel = el.querySelector("#flt-sel");
+    if (txt && txt.value !== f.text) txt.value = f.text;
+    if (sel && sel.value !== f.sel) sel.value = f.sel;
+    const render = () => {
+      const q = f.text.trim().toLowerCase();
+      const rows = items.filter(i => match(i, q, f.sel));
+      const shown = cap ? rows.slice(0, cap) : rows;
+      el.querySelector("#flt-body").innerHTML = shown.length
+        ? shown.map(rowHtml).join("")
+        : `<tr><td colspan="9" class="empty">${emptyMsg}</td></tr>`;
+      const cnt = el.querySelector("#flt-count");
+      if (cnt) cnt.textContent = `${rows.length} of ${items.length}` +
+        (cap && rows.length > cap ? ` — first ${cap}` : "");
+    };
+    if (txt) txt.addEventListener("input",
+        () => { f.text = txt.value; render(); });
+    if (sel) sel.addEventListener("change",
+        () => { f.sel = sel.value; render(); });
+    render();
+  };
+  const painters = {
+    hosts: el => paintFiltered(el, resList,
+      (r, q, sel) =>
+        (!sel || ((healthByRes[r.monitoring_resource_id] || {})
+            .health_class || "unknown") === sel) &&
+        (!q || (r.display_name || "").toLowerCase().includes(q) ||
+              (r.provider_external_ref || "").includes(q)),
+      hostRowHtml, "No resources match"),
+    problems: el => paintFiltered(el, probList,
+      (p, q, sel) =>
+        (!sel || p.severity_class === sel) &&
+        (!q || (resNames[p.monitoring_resource_id] || "")
+            .toLowerCase().includes(q) ||
+              (p.summary || "").toLowerCase().includes(q)),
+      problemRowHtml, "No problems match"),
+    metrics: el => paintFiltered(el, cur,
+      (c, q) => !q || (c.name || "").toLowerCase().includes(q),
+      metricRowHtml, "No metrics match", 200),
+    alerts: el => paintFiltered(el, alertList,
+      (a, q, sel) =>
+        (!sel || a.lifecycle_state === sel) &&
+        (!q || (a.policy_id || "").toLowerCase().includes(q) ||
+              (a.alert_id || "").toLowerCase().includes(q)),
+      alertRowHtml, "No alerts match"),
+  };
+
   const paintTab = () => {
     tabBody.innerHTML = tabHtml[detailTab];
+    if (painters[detailTab]) painters[detailTab](tabBody);
     tabBody.querySelectorAll(".op-requeue").forEach(b =>
       b.addEventListener("click", async () => {
         b.disabled = true; b.textContent = "queued";
@@ -638,9 +720,6 @@ async function loadSourceDetail(sourceId, tid, seq) {
         if (!r.ok) { b.textContent = "failed"; b.disabled = false; }
         else { await loadSourceDetail(sourceId, tid); }
       }));
-    tabBody.querySelectorAll("[data-alert]").forEach(row =>
-      row.addEventListener("click", () =>
-        loadAlertDetail(row.dataset.alert, tid)));
     const sa = tabBody.querySelector("#showAllOps");
     if (sa) sa.addEventListener("click", () => {
       showAllOps = true;
