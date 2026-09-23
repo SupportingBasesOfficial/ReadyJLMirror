@@ -3393,7 +3393,13 @@ async def list_problems(
             ON b.tenant_id = p.tenant_id AND b.problem_id = p.problem_id
          WHERE p.tenant_id = %s AND p.monitoring_source_id = %s
            AND (NOT %s OR p.problem_state = 'active')
-         ORDER BY p.opened_at DESC
+         ORDER BY CASE p.severity_class
+                    WHEN 'critical'       THEN 0
+                    WHEN 'degraded'       THEN 1
+                    WHEN 'warning'        THEN 2
+                    WHEN 'informational'  THEN 3
+                    ELSE 4 END,
+                  p.opened_at DESC
         """,
         (tenant_id, source_id, active_only),
     )
