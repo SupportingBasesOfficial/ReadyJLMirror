@@ -274,7 +274,8 @@ async def list_alerts(request: Request,
               FROM alerting.alert
              WHERE (%s::text IS NULL OR lifecycle_state = %s)
                AND (%s::text IS NULL OR monitoring_source_id = %s)
-             ORDER BY opened_at DESC LIMIT %s
+             ORDER BY (lifecycle_state = 'resolved'),
+                      opened_at DESC LIMIT %s
             """, (lifecycle_state, lifecycle_state,
                   source_id, source_id, min(limit, 200)))
         cols = [d.name for d in cur.description]
