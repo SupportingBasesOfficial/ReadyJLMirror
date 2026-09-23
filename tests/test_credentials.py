@@ -148,3 +148,91 @@ def test_discover_groups_requires_token():
         json={"provider_base_url": "https://zbx.example.com",
               "api_token": "   "})
     assert r.status_code == 400
+
+# --- OpenBao runtime resolver -------------------------------------------------
+
+def _bao(document, monkeypatch=None):
+    """Resolver backed by a canned KV document."""
+    from providers.credentials import BaoCredentialResolver
+
+    class FakeClock:
+        t = 0.0
+        def monotonic(self):
+            return self.t
+
+    r = BaoCredentialResolver(
+        addr="http://bao.test", token="tok", cache_seconds=30)
+    r._time = FakeClock()
+    calls = {"n": 0}
+
+    def fake_fetch():
+        calls["n"] += 1
+        return document
+
+    r._fetch_document = fake_fetch
+    return r, calls
+
+
+def test_bao_resolver_reads_kv_document():
+    from providers.credentials import BaoCredentialResolver  # noqa
+    r, calls = _bao({"cred-a": "bao-token-1"})
+    cred = r.resolve_zabbix_api_token("cred-a")
+    assert cred.api_token == "bao-token-1"
+    assert cred.credential_generation_ref == "cred-gen-bao:cred-a"
+    assert calls["n"] == 1
+
+
+def test_bao_resolver_caches_within_ttl():
+    r, calls = _bao({"cred-a": "tok"})
+    r.resolve_zabbix_api_token("cred-a")
+    r.resolve_zabbix_api_token("cred-a")
+    assert calls["n"] == 1
+    r._time.t += 31  # past TTL
+    r.resolve_zabbix_api_token("cred-a")
+    assert calls["n"] == 2
+
+
+def test_bao_resolver_missing_ref():
+    r, _ = _bao({"other": "tok"})
+    with pytest.raises(CredentialResolutionError):
+        r.resolve_zabbix_api_token("cred-missing")
+
+
+def test_bao_resolver_unconfigured():
+    from providers.credentials import BaoCredentialResolver
+    r = BaoCredentialResolver(addr="", token="")
+    assert not r.available
+    with pytest.raises(CredentialResolutionError):
+        r.resolve_zabbix_api_token("cred-a")
+
+
+def test_chain_prefers_bao_when_configured(monkeypatch, tmp_path):
+    """BAO_ADDR+token present -> bao wins over files and env."""
+    from providers.credentials import (
+        BaoCredentialResolver, ChainedCredentialResolver)
+    monkeypatch.setenv("BAO_ADDR", "http://bao.test")
+    monkeypatch.setenv("BAO_TOKEN", "tok")
+    monkeypatch.setenv("ZABBIX_CRED_CRED_A", "env-token")
+    (tmp_path / "cred-a.token").write_text("file-token")
+    monkeypatch.setenv("CREDENTIALS_DIR", str(tmp_path))
+    chain = ChainedCredentialResolver()
+    bao = chain._resolvers[0]
+    assert isinstance(bao, BaoCredentialResolver)
+    bao._fetch_document = lambda: {"cred-a": "bao-token"}
+    cred = chain.resolve_zabbix_api_token("cred-a")
+    assert cred.api_token == "bao-token"
+
+
+def test_chain_skips_bao_when_unconfigured(monkeypatch, tmp_path):
+    monkeypatch.delenv("BAO_ADDR", raising=False)
+    monkeypatch.delenv("BAO_TOKEN", raising=False)
+    monkeypatch.setenv("SECRETS_DIR", str(tmp_path))
+    monkeypatch.setenv("ZABBIX_CRED_CRED_A", "env-token")
+    from providers.credentials import (
+        ChainedCredentialResolver, FileSecretsResolver,
+        EnvCredentialResolver)
+    chain = ChainedCredentialResolver()
+    kinds = [type(r).__name__ for r in chain._resolvers]
+    assert kinds == ["FileSecretsResolver", "EnvCredentialResolver"]
+    cred = chain.resolve_zabbix_api_token("cred-a")
+    assert cred.api_token == "env-token"

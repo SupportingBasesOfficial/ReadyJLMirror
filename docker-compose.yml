@@ -86,6 +86,8 @@ services:
       EGRESS_ALLOW_HOSTS: ${EGRESS_ALLOW_HOSTS:-}
       EGRESS_ALLOW_PRIVATE_IPS: ${EGRESS_ALLOW_PRIVATE_IPS:-}
       PROVIDER_CA_FILE: ${PROVIDER_CA_FILE:-}
+      BAO_ADDR: ${BAO_ADDR:-}
+      BAO_TOKEN: ${BAO_TOKEN:-}
       # Opt-in mTLS: python -m scripts.dev_tls, then set API_MTLS=1
       # plus the cert paths in .env (see .env.example).
       API_MTLS: ${API_MTLS:-}
@@ -196,6 +198,12 @@ services:
       EGRESS_ALLOW_HOSTS: ${EGRESS_ALLOW_HOSTS:-}
       EGRESS_ALLOW_PRIVATE_IPS: ${EGRESS_ALLOW_PRIVATE_IPS:-}
       PROVIDER_CA_FILE: ${PROVIDER_CA_FILE:-}
+      # OpenBao runtime credential resolution (opt-in): when set, the
+      # resolver chain reads the KV document live before falling back
+      # to mounted files/env — rotation propagates without remount.
+      BAO_ADDR: ${BAO_ADDR:-}
+      BAO_TOKEN: ${BAO_TOKEN:-}
+      BAO_CACHE_SECONDS: ${BAO_CACHE_SECONDS:-30}
     volumes:
       - ./secrets:/run/secrets:ro
       - ./secrets-tokens:/run/secret-bindings:ro

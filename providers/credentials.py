@@ -101,6 +101,85 @@ def write_binding_token(
     return target
 
 
+class BaoCredentialResolver:
+    """OpenBao KV v2 credential resolver (runtime injection).
+
+    Reads ``secret/data/jlmirror/credentials`` and picks
+    ``<credential_binding_ref>`` from the versioned KV document —
+    the same layout ``scripts.bao_sync`` materializes to files, but
+    resolved live so rotation propagates without a remount.
+
+    Enabled only when ``BAO_ADDR`` is set; the token comes from
+    ``BAO_TOKEN`` or the ``$SECRETS_DIR/bao_token`` file. Responses
+    are cached for ``BAO_CACHE_SECONDS`` (default 30s) so a poll
+    burst does not hammer the vault — staleness beyond that is a
+    rotation delay, not a correctness risk (old tokens still work
+    until revoked at the provider).
+    """
+
+    def __init__(self, addr: str | None = None, token: str | None = None,
+                 cache_seconds: float | None = None) -> None:
+        import time as _time
+        self._addr = (addr or os.environ.get("BAO_ADDR", "")).rstrip("/")
+        self._token = token or os.environ.get("BAO_TOKEN") or self._read_token_file()
+        self._cache_seconds = float(
+            cache_seconds
+            if cache_seconds is not None
+            else os.environ.get("BAO_CACHE_SECONDS", "30"))
+        self._time = _time
+        self._cache: dict[str, tuple[float, ResolvedZabbixCredential]] = {}
+
+    @staticmethod
+    def _read_token_file() -> str | None:
+        path = Path(os.environ.get("SECRETS_DIR", "/run/secrets")) / "bao_token"
+        try:
+            return path.read_text(encoding="utf-8").strip() or None
+        except OSError:
+            return None
+
+    @property
+    def available(self) -> bool:
+        return bool(self._addr and self._token)
+
+    def _fetch_document(self) -> dict:
+        import urllib.error
+        import urllib.request
+        import json as _json
+        req = urllib.request.Request(
+            f"{self._addr}/v1/secret/data/jlmirror/credentials",
+            headers={"X-Vault-Token": self._token})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                body = _json.loads(resp.read() or b"{}")
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise CredentialResolutionError(
+                f"credential unavailable (bao unreachable: {exc})"
+            ) from exc
+        return body.get("data", {}).get("data", {})
+
+    def resolve_zabbix_api_token(
+        self, credential_binding_ref: str
+    ) -> ResolvedZabbixCredential:
+        if not self.available:
+            raise CredentialResolutionError(
+                "credential unavailable (bao resolver not configured)")
+        now = self._time.monotonic()
+        hit = self._cache.get(credential_binding_ref)
+        if hit and now - hit[0] < self._cache_seconds:
+            return hit[1]
+        document = self._fetch_document()
+        token = str(document.get(credential_binding_ref, "")).strip()
+        if not token:
+            raise CredentialResolutionError(
+                "credential unavailable for binding ref "
+                "(not present in bao KV)")
+        resolved = ResolvedZabbixCredential(
+            api_token=token,
+            credential_generation_ref=f"cred-gen-bao:{credential_binding_ref}")
+        self._cache[credential_binding_ref] = (now, resolved)
+        return resolved
+
+
 class EnvCredentialResolver:
     """Environment-variable credential resolver (development)."""
 
@@ -128,8 +207,17 @@ class ChainedCredentialResolver:
     """
 
     def __init__(self, *resolvers) -> None:
-        self._resolvers = resolvers or (
-            FileSecretsResolver(), EnvCredentialResolver())
+        if resolvers:
+            self._resolvers = resolvers
+            return
+        # Default chain: OpenBao runtime first when configured, then
+        # the mounted-secrets directory, then env as dev fallback.
+        chain: list = []
+        bao = BaoCredentialResolver()
+        if bao.available:
+            chain.append(bao)
+        chain += [FileSecretsResolver(), EnvCredentialResolver()]
+        self._resolvers = tuple(chain)
 
     def resolve_zabbix_api_token(
         self, credential_binding_ref: str
