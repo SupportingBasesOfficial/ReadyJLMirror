@@ -74,10 +74,11 @@ services:
     command: server -config=/openbao/config/openbao.hcl
     volumes:
       - ./docker/openbao:/openbao/config:ro
-      - ./docker/openbao/unseal.key:/openbao/keys/unseal.key:ro
+      - ${OPENBAO_UNSEAL_KEY_PATH:-./docker/openbao/unseal.key}:/openbao/keys/unseal.key:ro
       - bao_data:/openbao/raft
-    ports:
-      - "8200:8200"
+    # No host port binding — OpenBao is accessed only by containers on the
+    # Docker internal network. External exposure was removed: unseal.key
+    # must never be reachable from outside the Docker network.
     depends_on:
       wal-init:
         condition: service_completed_successfully
