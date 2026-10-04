@@ -485,23 +485,48 @@ async def rotate_source_credential(
     Writes the new token to OpenBao (authoritative) and to the mounted
     secrets file (worker fallback). Does NOT revoke the old token at the
     provider — that must be done in Zabbix Administration → API tokens.
+    Enqueues a validation pass so evidence state updates without waiting
+    for the next scheduled worker cycle.
     """
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_tenant_connection(tenant) as conn:
-        row = await get_source(conn, tenant, source_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="source not found")
-    cred_ref = row["credential_binding_ref"]
     from providers.credentials import BaoCredentialResolver, write_binding_token
     from jlmirror_monitoring.validation_worker import CredentialResolutionError
-    try:
-        bao = BaoCredentialResolver()
-        if bao.available:
-            await asyncio.to_thread(
-                bao.store_zabbix_api_token, cred_ref, body.api_token)
-        write_binding_token(cred_ref, body.api_token)
-    except CredentialResolutionError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    async with db_tenant_connection(tenant) as conn:
+        row = await get_source(conn, tenant, source_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="source not found")
+        cred_ref = row["credential_binding_ref"]
+        try:
+            bao = BaoCredentialResolver()
+            if bao.available:
+                await asyncio.to_thread(
+                    bao.store_zabbix_api_token, cred_ref, body.api_token)
+            write_binding_token(cred_ref, body.api_token)
+        except CredentialResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        except OSError:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="credential store unavailable")
+        ctx = getattr(request.state, "jlmirror_context", {}) or {}
+        await record_audit_event(
+            conn, tenant,
+            action="monitoring.credential.rotated",
+            actor_kind="principal",
+            actor_id=ctx.get("principal_id"),
+            subject_type="monitoring_source",
+            subject_id=source_id,
+            detail={"credential_binding_ref": cred_ref},
+            correlation_id=ctx.get("correlation_id"),
+        )
+        try:
+            await enqueue_sync_operation(
+                conn, tenant_id=tenant, source_id=source_id,
+                responsibility_kind="validation_and_initial_sync",
+            )
+        except ValueError:
+            pass  # source state doesn't allow enqueueing; rotation still succeeded
+        await conn.commit()
     return {"credential_binding_ref": cred_ref, "updated": True}
 
 
@@ -514,24 +539,36 @@ async def revoke_source_credential(
     """Remove the stored provider token for a monitoring source.
 
     Deletes the token from OpenBao and from the mounted secrets file.
-    The monitoring source will fail credential resolution until a new
-    token is supplied via PUT /sources/{source_id}/credential.
+    The monitoring source will emit credential.unavailable evidence on
+    the next worker cycle until a new token is supplied via PUT.
     """
     tenant = _authoritative_tenant(request, tenant_id)
-    async with db_tenant_connection(tenant) as conn:
-        row = await get_source(conn, tenant, source_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="source not found")
-    cred_ref = row["credential_binding_ref"]
     from providers.credentials import BaoCredentialResolver, delete_binding_token
     from jlmirror_monitoring.validation_worker import CredentialResolutionError
-    try:
-        bao = BaoCredentialResolver()
-        if bao.available:
-            await asyncio.to_thread(bao.delete_zabbix_api_token, cred_ref)
-        delete_binding_token(cred_ref)
-    except CredentialResolutionError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    async with db_tenant_connection(tenant) as conn:
+        row = await get_source(conn, tenant, source_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="source not found")
+        cred_ref = row["credential_binding_ref"]
+        try:
+            bao = BaoCredentialResolver()
+            if bao.available:
+                await asyncio.to_thread(bao.delete_zabbix_api_token, cred_ref)
+            delete_binding_token(cred_ref)
+        except CredentialResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        ctx = getattr(request.state, "jlmirror_context", {}) or {}
+        await record_audit_event(
+            conn, tenant,
+            action="monitoring.credential.revoked",
+            actor_kind="principal",
+            actor_id=ctx.get("principal_id"),
+            subject_type="monitoring_source",
+            subject_id=source_id,
+            detail={"credential_binding_ref": cred_ref},
+            correlation_id=ctx.get("correlation_id"),
+        )
+        await conn.commit()
     return {"credential_binding_ref": cred_ref, "revoked": True}
 
 
