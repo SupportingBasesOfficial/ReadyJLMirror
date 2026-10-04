@@ -63,19 +63,23 @@ def _process_pending(conn: psycopg.Connection) -> int:
 
 
 def run_current_state_worker(poll_interval: int = 10, once: bool = False) -> None:
-    """Run the metric current-state worker loop (blocking)."""
+    """Run the metric current-state worker loop (blocking).
+
+    A fresh connection is opened every tick so a DB restart does not
+    permanently kill the worker — psycopg3 does not auto-reconnect.
+    """
     dsn = settings.db_dsn
     logger.info("Starting metric current-state worker (poll=%ss)", poll_interval)
-    with psycopg.connect(dsn, autocommit=False) as conn:
-        while True:
-            try:
+    while True:
+        try:
+            with psycopg.connect(dsn, autocommit=False, connect_timeout=10) as conn:
                 n = _process_pending(conn)
                 if once:
                     logger.info("Processed %s pending current-state polls", n)
                     return
-            except Exception:
-                logger.exception("current-state worker tick failed")
-            time.sleep(poll_interval)
+        except Exception:
+            logger.exception("current-state worker tick failed")
+        time.sleep(poll_interval)
 
 
 if __name__ == "__main__":

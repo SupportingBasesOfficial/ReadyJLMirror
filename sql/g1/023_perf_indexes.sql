@@ -3,5 +3,5 @@
 --       finding expired non-retired sessions requires a full table scan.
 
 CREATE INDEX IF NOT EXISTS idx_browser_session_expires
-    ON g1_identity.browser_session (expires_at)
-    WHERE retired_at IS NULL;
+    ON g1.browser_sessions (expires_at)
+    WHERE retired = FALSE;

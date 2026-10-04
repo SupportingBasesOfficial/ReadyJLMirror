@@ -172,55 +172,62 @@ def _publish_durable(conn: psycopg.Connection) -> int:
             error = exc
         results.append((row, receipt_id, error))
 
-    # Phase 3: record outcomes in a new transaction
+    # Phase 3: record outcomes — one savepoint per row so a DB error on one
+    # row does not roll back the entire batch and cause double-publish of
+    # the rows that were already successfully updated.
     published = 0
     for row, receipt_id, error in results:
         tenant_id = row["tenant_id"]
         record_id = row["record_id"]
         message_id = row["message_id"]
         attempts = row["attempt_count"]
-        if error is None:
-            conn.execute(
-                """
-                UPDATE monitoring.monitoring_outbox
-                   SET dispatch_state = 'published',
-                       published_receipt_id = %s,
-                       published_at = transaction_timestamp(),
-                       claim_owner = NULL, claim_expires_at = NULL,
-                       last_error_class = NULL
-                 WHERE tenant_id = %s AND record_id = %s
-                """,
-                (receipt_id, tenant_id, record_id),
-            )
-            published += 1
-            logger.info("outbox %s/%s published (%s)",
-                        tenant_id, message_id, receipt_id)
-        elif attempts + 1 >= _MAX_ATTEMPTS:
-            conn.execute(
-                """
-                UPDATE monitoring.monitoring_outbox
-                   SET dispatch_state = 'quarantined', claim_owner = NULL,
-                       claim_expires_at = NULL,
-                       last_error_class = 'publication_exhausted'
-                 WHERE tenant_id = %s AND record_id = %s
-                """,
-                (tenant_id, record_id),
-            )
-            logger.warning("outbox %s/%s quarantined after %s attempts: %s",
-                           tenant_id, message_id, attempts + 1, error)
-        else:
-            conn.execute(
-                """
-                UPDATE monitoring.monitoring_outbox
-                   SET dispatch_state = 'pending', claim_owner = NULL,
-                       claim_expires_at = NULL,
-                       last_error_class = 'publication_failed'
-                 WHERE tenant_id = %s AND record_id = %s
-                """,
-                (tenant_id, record_id),
-            )
-            logger.warning("outbox %s/%s publish failed (retry): %s",
-                           tenant_id, message_id, error)
+        try:
+            with conn.transaction():
+                if error is None:
+                    conn.execute(
+                        """
+                        UPDATE monitoring.monitoring_outbox
+                           SET dispatch_state = 'published',
+                               published_receipt_id = %s,
+                               published_at = transaction_timestamp(),
+                               claim_owner = NULL, claim_expires_at = NULL,
+                               last_error_class = NULL
+                         WHERE tenant_id = %s AND record_id = %s
+                        """,
+                        (receipt_id, tenant_id, record_id),
+                    )
+                    published += 1
+                    logger.info("outbox %s/%s published (%s)",
+                                tenant_id, message_id, receipt_id)
+                elif attempts + 1 >= _MAX_ATTEMPTS:
+                    conn.execute(
+                        """
+                        UPDATE monitoring.monitoring_outbox
+                           SET dispatch_state = 'quarantined', claim_owner = NULL,
+                               claim_expires_at = NULL,
+                               last_error_class = 'publication_exhausted'
+                         WHERE tenant_id = %s AND record_id = %s
+                        """,
+                        (tenant_id, record_id),
+                    )
+                    logger.warning("outbox %s/%s quarantined after %s attempts: %s",
+                                   tenant_id, message_id, attempts + 1, error)
+                else:
+                    conn.execute(
+                        """
+                        UPDATE monitoring.monitoring_outbox
+                           SET dispatch_state = 'pending', claim_owner = NULL,
+                               claim_expires_at = NULL,
+                               last_error_class = 'publication_failed'
+                         WHERE tenant_id = %s AND record_id = %s
+                        """,
+                        (tenant_id, record_id),
+                    )
+                    logger.warning("outbox %s/%s publish failed (retry): %s",
+                                   tenant_id, message_id, error)
+        except Exception:
+            logger.warning("outbox Phase 3 update failed for record %s/%s — "
+                           "will be retried on next tick", tenant_id, record_id)
     conn.commit()
     return published
 

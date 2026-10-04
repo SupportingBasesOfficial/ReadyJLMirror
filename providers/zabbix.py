@@ -651,5 +651,6 @@ class ZabbixClient:
             hosts = item.get("hosts") or []
             if not hosts:
                 continue
-            pairs.append((str(item["triggerid"]), str(hosts[0]["hostid"])))
+            for host in hosts:
+                pairs.append((str(item["triggerid"]), str(host["hostid"])))
         return pairs

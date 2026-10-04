@@ -189,6 +189,7 @@ def _process_pending(conn: psycopg.Connection) -> int:
         try:
             total += _process_tenant(conn, tenant_id)
         except Exception:
+            conn.rollback()
             logger.exception("g11 worker error tenant=%s", tenant_id)
     conn.commit()
     return total

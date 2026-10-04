@@ -26,10 +26,13 @@ deny-by-default CIDR/DNS rules, audit logging) binds this same
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 import secrets
 import socket
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 from jlmirror_monitoring.source import ZabbixProviderConfiguration
 from jlmirror_monitoring.validation_worker import (
@@ -95,10 +98,16 @@ class DevOutboundAdmission:
         except EgressAdmissionError:
             if not private_mode:
                 raise
-            # Intranet mode already accepts the operator-declared
-            # private target; an unresolvable-at-admission host is
-            # admitted without a pin (same posture as before).
+            # Intranet mode: admit the operator-declared host even when DNS
+            # is unavailable at admission time (e.g. slow intranet resolver
+            # at startup). Admitted without an IP pin, so DNS-rebinding
+            # protection is inactive for this request.
             ips = []
+            logger.warning(
+                "egress: DNS resolution failed for %s in private-IP mode — "
+                "admitted without IP pin; DNS-rebinding protection inactive",
+                host,
+            )
         if not private_mode:
             self._screen_ips(host, ips)
         # DNS pinning: the transport connects to the admitted IP

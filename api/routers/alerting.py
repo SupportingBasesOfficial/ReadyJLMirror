@@ -126,6 +126,13 @@ async def create_policy_version(request: Request,
             "INSERT INTO alerting.alert_policy (tenant_id, policy_id) "
             "VALUES (%s, %s) ON CONFLICT DO NOTHING",
             (tenant, body.policy_id))
+        # Lock the policy row to serialize concurrent version creation —
+        # prevents two requests from reading the same MAX and inserting
+        # duplicate policy_version values.
+        await conn.execute(
+            "SELECT 1 FROM alerting.alert_policy "
+            "WHERE tenant_id = %s AND policy_id = %s FOR UPDATE",
+            (tenant, body.policy_id))
         cur = await conn.execute(
             """
             SELECT COALESCE(MAX(policy_version), 0) + 1
