@@ -100,10 +100,23 @@ def wire_envelope(row: dict) -> dict:
 
 
 def _publish_durable(conn: psycopg.Connection) -> int:
-    """Claim and publish pending durable outbox rows. Returns count."""
+    """Claim and publish pending durable outbox rows. Returns count.
+
+    Two-phase: claim+commit first, then HTTP outside any transaction,
+    then record outcomes in a second transaction. This prevents long-held
+    row locks while waiting for network I/O.
+    """
     webhook_url, httpx_kwargs = _webhook_request()
     now = datetime.now(timezone.utc)
+    keys = ("record_id", "tenant_id", "message_id",
+            "producer_message_scope", "message_class", "contract_name",
+            "contract_version", "producer", "scope", "subject_type",
+            "subject_id", "occurred_at", "correlation_id",
+            "causation_id", "data_classification",
+            "serialization_profile_id", "encoded_payload",
+            "attempt_count")
 
+    # Phase 1: claim rows and commit immediately (no HTTP inside txn)
     cur = conn.execute(
         """
         SELECT record_id, tenant_id, message_id, producer_message_scope,
@@ -120,23 +133,14 @@ def _publish_durable(conn: psycopg.Connection) -> int:
         """,
         (now,),
     )
-    keys = ("record_id", "tenant_id", "message_id",
-            "producer_message_scope", "message_class", "contract_name",
-            "contract_version", "producer", "scope", "subject_type",
-            "subject_id", "occurred_at", "correlation_id",
-            "causation_id", "data_classification",
-            "serialization_profile_id", "encoded_payload",
-            "attempt_count")
     rows = [dict(zip(keys, r)) for r in cur.fetchall()]
-    published = 0
+    if not rows:
+        conn.rollback()
+        return 0
 
+    lease_expires = datetime.fromtimestamp(
+        now.timestamp() + _CLAIM_LEASE_SECONDS, tz=timezone.utc)
     for row in rows:
-        record_id = row["record_id"]
-        tenant_id = row["tenant_id"]
-        message_id = row["message_id"]
-        attempts = row["attempt_count"]
-        telemetry.correlation_id_var.set(message_id)
-        telemetry.tenant_id_var.set(tenant_id)
         conn.execute(
             """
             UPDATE monitoring.monitoring_outbox
@@ -144,27 +148,37 @@ def _publish_durable(conn: psycopg.Connection) -> int:
                    claim_expires_at = %s, attempt_count = attempt_count + 1
              WHERE tenant_id = %s AND record_id = %s
             """,
-            ("worker-outbox-dispatcher",
-             datetime.fromtimestamp(
-                 now.timestamp() + _CLAIM_LEASE_SECONDS, tz=timezone.utc),
-             tenant_id, record_id),
+            ("worker-outbox-dispatcher", lease_expires,
+             row["tenant_id"], row["record_id"]),
         )
+    conn.commit()
 
+    # Phase 2: HTTP dispatch outside any DB transaction
+    results: list[tuple[dict, str | None, Exception | None]] = []
+    for row in rows:
+        telemetry.correlation_id_var.set(row["message_id"])
+        telemetry.tenant_id_var.set(row["tenant_id"])
         envelope = wire_envelope(row)
-
-        error = None
-        receipt_id = None
+        error: Exception | None = None
+        receipt_id: str | None = None
         try:
             if webhook_url:
-                resp = httpx.post(
-                    webhook_url, json=envelope, **httpx_kwargs)
+                resp = httpx.post(webhook_url, json=envelope, **httpx_kwargs)
                 resp.raise_for_status()
-                receipt_id = f"webhook:{resp.status_code}:{message_id}"
+                receipt_id = f"webhook:{resp.status_code}:{row['message_id']}"
             else:
-                receipt_id = f"dev-log:{message_id}"
-        except Exception as exc:  # publish failure — retry or quarantine
+                receipt_id = f"dev-log:{row['message_id']}"
+        except Exception as exc:
             error = exc
+        results.append((row, receipt_id, error))
 
+    # Phase 3: record outcomes in a new transaction
+    published = 0
+    for row, receipt_id, error in results:
+        tenant_id = row["tenant_id"]
+        record_id = row["record_id"]
+        message_id = row["message_id"]
+        attempts = row["attempt_count"]
         if error is None:
             conn.execute(
                 """
@@ -179,9 +193,8 @@ def _publish_durable(conn: psycopg.Connection) -> int:
                 (receipt_id, tenant_id, record_id),
             )
             published += 1
-            logger.info(
-                "outbox %s/%s published (%s)", tenant_id, message_id,
-                receipt_id)
+            logger.info("outbox %s/%s published (%s)",
+                        tenant_id, message_id, receipt_id)
         elif attempts + 1 >= _MAX_ATTEMPTS:
             conn.execute(
                 """
@@ -193,9 +206,8 @@ def _publish_durable(conn: psycopg.Connection) -> int:
                 """,
                 (tenant_id, record_id),
             )
-            logger.warning(
-                "outbox %s/%s quarantined after %s attempts: %s",
-                tenant_id, message_id, attempts + 1, error)
+            logger.warning("outbox %s/%s quarantined after %s attempts: %s",
+                           tenant_id, message_id, attempts + 1, error)
         else:
             conn.execute(
                 """
@@ -207,10 +219,8 @@ def _publish_durable(conn: psycopg.Connection) -> int:
                 """,
                 (tenant_id, record_id),
             )
-            logger.warning(
-                "outbox %s/%s publish failed (retry): %s",
-                tenant_id, message_id, error)
-
+            logger.warning("outbox %s/%s publish failed (retry): %s",
+                           tenant_id, message_id, error)
     conn.commit()
     return published
 
@@ -246,7 +256,8 @@ def run_outbox_dispatcher(
     while True:
         processed = 0
         try:
-            with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
+            with psycopg.connect(settings.db_dsn, autocommit=False,
+                             connect_timeout=10) as conn:
                 processed += _publish_durable(conn)
         except Exception:
             logger.debug("durable outbox sweep skipped (DB unavailable)")

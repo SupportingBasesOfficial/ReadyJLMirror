@@ -17,7 +17,7 @@ services:
     restart: "no"
 
   db:
-    image: timescale/timescaledb:latest-pg16
+    image: timescale/timescaledb:2.17.2-pg16
     command:
       - postgres
       - -c
@@ -25,11 +25,25 @@ services:
       - -c
       - archive_command=test ! -f /wal_archive/%f && cp %p /wal_archive/%f
       - -c
+      - restore_command=cp /wal_archive/%f %p
+      - -c
       - archive_timeout=300
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_compression=on
+      - -c
+      - max_wal_size=1GB
     environment:
       POSTGRES_DB: jlmirror
       POSTGRES_USER: jlmirror_owner
-      POSTGRES_PASSWORD: jlmirror_dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jlmirror_dev}
     ports:
       - "5434:5432"
     volumes:
@@ -51,7 +65,7 @@ services:
     command: start-dev --import-realm
     environment:
       KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
       KC_HTTP_ENABLED: "true"
       KC_HOSTNAME: localhost
       KC_HOSTNAME_PORT: "8180"
@@ -111,7 +125,7 @@ services:
       DB_PORT: "5432"
       DB_NAME: jlmirror
       DB_USER: jlmirror_owner
-      DB_PASSWORD: jlmirror_dev
+      DB_PASSWORD: ${DB_PASSWORD:-jlmirror_dev}
     depends_on:
       db:
         condition: service_healthy
@@ -123,13 +137,13 @@ services:
     build: .
     environment:
       NOTIFICATION_CALLBACK_SECRET: ${NOTIFICATION_CALLBACK_SECRET:-dev-callback-secret}
-      APP_ENVIRONMENT: development
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: jlmirror
       DB_USER: jlmirror_app
-      DB_PASSWORD: jlmirror_dev
-      BFF_INTERNAL_SECRET: dev-internal-secret-change-me
+      DB_PASSWORD: ${DB_PASSWORD:-jlmirror_dev}
+      BFF_INTERNAL_SECRET: ${BFF_INTERNAL_SECRET:-dev-internal-secret-change-me}
       SECRETS_DIR: /run/secrets
       # Provider tokens supplied at onboarding land here (write-only
       # for the API; the worker mounts it read-only).
@@ -169,12 +183,12 @@ services:
     ports:
       - "8080:8080"
     environment:
-      APP_ENVIRONMENT: development
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: jlmirror
       DB_USER: jlmirror_app
-      DB_PASSWORD: jlmirror_dev
+      DB_PASSWORD: ${DB_PASSWORD:-jlmirror_dev}
       BFF_PUBLIC_URL: http://localhost:8080
       API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
       BFF_CLIENT_CERT_FILE: ${BFF_CLIENT_CERT_FILE:-}
@@ -184,8 +198,10 @@ services:
       KEYCLOAK_PUBLIC_URL: http://localhost:8180
       KEYCLOAK_REALM: jlmirror
       KEYCLOAK_CLIENT_ID: jlmirror-bff
-      KEYCLOAK_CLIENT_SECRET: dev-bff-secret-change-me
-      BFF_INTERNAL_SECRET: dev-internal-secret-change-me
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-dev-bff-secret-change-me}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-}
+      BFF_INTERNAL_SECRET: ${BFF_INTERNAL_SECRET:-dev-internal-secret-change-me}
       DEV_AUTH_BYPASS: "true"
       SECRETS_DIR: /run/secrets
       # Opt-in TLS: python -m scripts.dev_tls generates
@@ -214,12 +230,12 @@ services:
   worker:
     build: .
     environment:
-      APP_ENVIRONMENT: development
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: jlmirror
       DB_USER: jlmirror_worker
-      DB_PASSWORD: jlmirror_dev
+      DB_PASSWORD: ${DB_PASSWORD:-jlmirror_dev}
       CREDENTIALS_DIR: /run/secret-bindings
       SECRETS_DIR: /run/secrets
       # Dev webhook: real HTTP delivery to the API sink — leave
@@ -229,7 +245,7 @@ services:
       API_CA_FILE: ${API_CA_FILE:-}
       WORKER_CLIENT_CERT_FILE: ${WORKER_CLIENT_CERT_FILE:-/run/secrets/tls/worker-cert.pem}
       WORKER_CLIENT_KEY_FILE: ${WORKER_CLIENT_KEY_FILE:-/run/secrets/tls/worker-key.pem}
-      ALERTING_WEBHOOK_URL: ${ALERTING_WEBHOOK_URL:-http://api:8000/dev/outbox-sink}
+      ALERTING_WEBHOOK_URL: ${ALERTING_WEBHOOK_URL-http://api:8000/dev/outbox-sink}
       # G9 WhatsApp adapter — dev points at the API's dev sink
       # (returns provider-shaped wamid). Prod: Meta Graph URL +
       # token via credential binding.
@@ -257,6 +273,8 @@ services:
       BAO_ADDR: ${BAO_ADDR:-}
       BAO_TOKEN: ${BAO_TOKEN:-}
       BAO_CACHE_SECONDS: ${BAO_CACHE_SECONDS:-30}
+      # G12 AIOps — set to enable AI analysis (advisory findings only)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - ./secrets:/run/secrets:ro
       - ./secrets-tokens:/run/secret-bindings:ro
@@ -299,7 +317,7 @@ services:
       # Dev-only admin credential; Grafana forces a password change
       # prompt but does not require it.
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
@@ -337,8 +355,11 @@ services:
             psql -U jlmirror_owner -d jlmirror -tA -c \
             "SELECT pg_walfile_name(pg_current_wal_insert_lsn())")
           if [ "$${BACKUP_BASEBACKUP:-1}" = "1" ]; then
-            docker exec readyjlmirror-db-1 \
-              pg_basebackup -U jlmirror_owner -D /tmp/bb -Ft -z -X stream \
+            docker exec \
+              -e PGPASSWORD="$${POSTGRES_PASSWORD:-jlmirror_dev}" \
+              readyjlmirror-db-1 \
+              pg_basebackup -h 127.0.0.1 -U jlmirror_owner \
+                -D /tmp/bb -Ft -z -X stream \
             && docker cp readyjlmirror-db-1:/tmp/bb "$$dest/base" \
             && docker exec readyjlmirror-db-1 rm -rf /tmp/bb \
             || echo "basebackup $$ts failed"
@@ -385,6 +406,7 @@ services:
       BACKUP_INTERVAL: ${BACKUP_INTERVAL:-3600}
       BACKUP_RETAIN: ${BACKUP_RETAIN:-48}
       BACKUP_BASEBACKUP: ${BACKUP_BASEBACKUP:-1}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jlmirror_dev}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./backups:/backups
@@ -406,7 +428,7 @@ services:
       DB_SERVER_HOST: db
       POSTGRES_DB: zabbix
       POSTGRES_USER: jlmirror_owner
-      POSTGRES_PASSWORD: jlmirror_dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jlmirror_dev}
     depends_on:
       db:
         condition: service_healthy
@@ -419,7 +441,7 @@ services:
       DB_SERVER_HOST: db
       POSTGRES_DB: zabbix
       POSTGRES_USER: jlmirror_owner
-      POSTGRES_PASSWORD: jlmirror_dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jlmirror_dev}
       PHP_TZ: UTC
       ZBX_SERVER_NAME: zabbix-web
       ZBX_SERVER_HOST: zabbix-server
@@ -445,6 +467,21 @@ services:
         condition: service_started
     profiles:
       - zabbix
+
+  # Site institucional JL Informática — nginx servindo HTML estático.
+  # Acesso: http://localhost:3000
+  jl-site:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/jl-site:/usr/share/nginx/html:ro
+      - ./docker/jl-site/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - bff
+    restart: unless-stopped
+    profiles:
+      - site
 
 volumes:
   db_data:

@@ -1,0 +1,97 @@
+# docker-compose.prod.yml — production overrides
+# Usage: docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d
+# All ${VAR} values must be set in .env.prod (never commit real values).
+
+services:
+
+  # ------------------------------------------------------------------ db
+  db:
+    # Pin to exact version — never use latest in production.
+    image: timescale/timescaledb:2.17.2-pg16
+    # Remove host port exposure: Postgres must not be reachable from
+    # outside the Docker network in production.
+    ports: []
+    environment:
+      # Pass role-specific passwords so db-init creates them correctly
+      # on a fresh volume. Existing volumes: ALTER ROLE already applied.
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      WORKER_DB_PASSWORD: ${WORKER_DB_PASSWORD}
+
+  # ------------------------------------------------------------------ keycloak
+  # start-dev --db postgres: PostgreSQL backend so session/user data
+  # survives container restarts. H2 (default start-dev) loses all data
+  # on every restart.
+  # Migrate to `start` (full KC prod mode) when domain + TLS are ready:
+  #   command: start --import-realm
+  #   add KC_PROXY=edge if nginx terminates TLS
+  keycloak:
+    command: start-dev --import-realm --db postgres
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://db:5432/jlmirror?currentSchema=keycloak
+      KC_DB_USERNAME: jlmirror_owner
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: "8180"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_PORT: "8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ------------------------------------------------------------------ api
+  api:
+    environment:
+      APP_ENVIRONMENT: production
+      DB_USER: jlmirror_app
+      DB_PASSWORD: ${APP_DB_PASSWORD}
+
+  # ------------------------------------------------------------------ bff
+  bff:
+    environment:
+      APP_ENVIRONMENT: production
+      DB_USER: jlmirror_app
+      DB_PASSWORD: ${APP_DB_PASSWORD}
+      DEV_AUTH_BYPASS: "false"
+    # Wait for Keycloak to be healthy before starting BFF.
+    # Base compose uses service_started which allows BFF to start while
+    # KC is still initialising its PostgreSQL schema (~30s).
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+  # ------------------------------------------------------------------ worker
+  worker:
+    profiles: []   # always on in production
+    environment:
+      APP_ENVIRONMENT: production
+      DB_USER: jlmirror_worker
+      DB_PASSWORD: ${WORKER_DB_PASSWORD}
+      # Clear the dev outbox sink URL — in production the dev endpoint
+      # is blocked (403). Leave empty for dev-log receipts until a real
+      # broker is wired. Set ALERTING_WEBHOOK_URL in .env.prod when
+      # a real downstream consumer (Kafka, etc.) is configured.
+      ALERTING_WEBHOOK_URL: ${ALERTING_WEBHOOK_URL:-}
+
+  # ------------------------------------------------------------------ backup
+  # WAL archive cleanup + pg_dump. Always on in production so the
+  # wal_archive volume does not grow without bound.
+  # BACKUP_RETAIN=48 keeps 48 hourly snapshots (2 days of coverage).
+  backup:
+    profiles: []
+    environment:
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-3600}
+      BACKUP_RETAIN: ${BACKUP_RETAIN:-48}
+      BACKUP_BASEBACKUP: ${BACKUP_BASEBACKUP:-1}
+
+  # ------------------------------------------------------------------ jl-site
+  # Marketing site + nginx reverse-proxy to BFF. Always on in production.
+  jl-site:
+    profiles: []

@@ -30,16 +30,35 @@ from shared.config import settings
 from shared.db import check_db_ready, close_pool, db_connection, init_pool
 from shared import telemetry
 from api.routers import (
+    aiops,
     alerting,
+    alertmanager_ingest,
+    api_keys,
+    automation,
+    reports,
+    billing,
+    branding,
+    changes,
+    escalation,
+    finops,
     authority,
     async_ops,
     human_ops,
+    incident_response,
+    infra,
     itsm,
+    kb,
+    maintenance,
     monitoring,
+    msp,
+    noc_stream,
     notifications,
     observability,
+    onboarding,
     platform,
     release,
+    sla,
+    status_page,
     tenant,
 )
 
@@ -47,6 +66,51 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=settings.log_level)
 
 _CONTEXT_MAX_SKEW_SECONDS = 60
+
+# ---------------------------------------------------------------------------
+# G27 API key rate limiter — PostgreSQL-backed sliding window, cross-replica
+# ---------------------------------------------------------------------------
+
+_RATE_LIMIT_RPM = 60
+
+
+async def _rate_ok(key_digest: str) -> bool:
+    """True when the key is within the 60 req/min window.
+
+    Uses a PostgreSQL UPSERT so the limit is enforced correctly when
+    multiple API replicas run in parallel. Falls back to allowing the
+    request if the DB is temporarily unavailable — fail-open is safer
+    than rejecting legitimate traffic during a DB blip.
+    """
+    window = int(time.time() // 60)
+    try:
+        async with db_connection() as conn:
+            cur = await conn.execute(
+                """
+                INSERT INTO g1.api_rate_limit (key_digest, window_min, req_count)
+                VALUES (%s, %s, 1)
+                ON CONFLICT (key_digest, window_min)
+                DO UPDATE SET req_count = g1.api_rate_limit.req_count + 1
+                RETURNING req_count
+                """,
+                (key_digest, window),
+            )
+            row = await cur.fetchone()
+            count = row[0] if row else 1
+            # Prune windows older than 5 minutes — fire-and-forget
+            try:
+                await conn.execute(
+                    "DELETE FROM g1.api_rate_limit WHERE window_min < %s",
+                    (window - 5,),
+                )
+            except Exception:
+                pass
+            await conn.commit()
+        return count <= _RATE_LIMIT_RPM
+    except Exception:
+        # DB unavailable — fail open so a DB blip doesn't block all API keys
+        logger.warning("rate limiter DB unavailable; allowing request")
+        return True
 
 
 @asynccontextmanager
@@ -109,6 +173,59 @@ def _verify_bff_context(request: Request) -> Optional[dict]:
         "session_generation": session_generation,
         "tenant_id": tenant_id or None,
         "correlation_id": correlation_id or None,
+    }
+
+
+async def _api_key_context(request: Request) -> dict | None:
+    """Resolve an API key from Authorization: Bearer header.
+
+    Returns a minimal context dict or None. Key auth bypasses the BFF
+    session system — it is independently attributable and revocable.
+    Only active, non-expired keys are accepted.
+    """
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer jlm_"):
+        return None
+    raw = auth[len("Bearer "):]
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+
+    if not await _rate_ok(digest):
+        return {"_rate_limited": True}
+
+    row = None
+    try:
+        async with db_connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT ak.key_id, ak.tenant_id, ak.principal_id, ak.scopes
+                  FROM g1.api_keys ak
+                 WHERE ak.key_digest = %s
+                   AND ak.state = 'active'
+                   AND (ak.expires_at IS NULL OR ak.expires_at > now())
+                """,
+                (digest,),
+            )
+            row = await cur.fetchone()
+            if row:
+                # Fire-and-forget last_used update (don't block on it)
+                try:
+                    await conn.execute(
+                        "SELECT g1.g27_record_key_use(%s)", (digest,))
+                    await conn.commit()
+                except Exception:
+                    pass
+    except Exception:
+        return None
+    if row is None:
+        return None
+    return {
+        "principal_id": row[2],
+        "tenant_id": row[1],
+        "session_digest": f"apikey:{row[0]}",
+        "session_generation": "apikey",
+        "correlation_id": telemetry.extract_correlation_id(request.headers),
+        "api_key": True,
+        "scopes": row[3],
     }
 
 
@@ -209,14 +326,29 @@ async def verify_context(request: Request, call_next):
     if path == "/api/v1/alerting/notifications/callback":
         return await call_next(request)
 
+    # G34 Alertmanager ingest — external callers (Alertmanager/Prometheus)
+    # carry no session; authenticity is token-verified inside the endpoint.
+    if (path.startswith("/api/v1/sources/alertmanager/")
+            and path.endswith("/ingest")):
+        return await call_next(request)
+
     # Dev sandbox routes stay open for local exploration in development
     sandbox_prefixes = (
         "/api/v1/auth/", "/api/v1/fence/", "/api/v1/monitoring/",
         "/api/v1/alerting/", "/api/v1/async/", "/api/v1/observability/",
-        "/api/v1/release/",
+        "/api/v1/release/", "/api/v1/aiops/", "/api/v1/finops/",
     )
     ctx = _verify_bff_context(request)
     display_ctx = False
+    api_key_ctx = False
+    if ctx is None:
+        # G27: API key bearer token — independently attributable, revocable
+        ctx = await _api_key_context(request)
+        if ctx is not None:
+            if ctx.get("_rate_limited"):
+                return JSONResponse({"state": "rate_limited"},
+                                    status_code=status.HTTP_429_TOO_MANY_REQUESTS)
+            api_key_ctx = True
     if ctx is None:
         # Display/TV principals authenticate via a device token —
         # independently attributable, read-only, revocable (§9).
@@ -234,7 +366,8 @@ async def verify_context(request: Request, call_next):
     if ctx is None:
         return JSONResponse({"state": "unauthenticated"},
                             status_code=status.HTTP_401_UNAUTHORIZED)
-    if not display_ctx and not await _session_current(ctx):
+    # API key and display token contexts are self-contained — no session table
+    if not display_ctx and not api_key_ctx and not await _session_current(ctx):
         return JSONResponse({"state": "forbidden"},
                             status_code=status.HTTP_403_FORBIDDEN)
 
@@ -338,17 +471,37 @@ async def whoami(request: Request) -> dict:
 
 app.add_middleware(_slo.SloMiddleware)
 
+app.include_router(alertmanager_ingest.router)
+app.include_router(api_keys.router)
+app.include_router(infra.router)
+app.include_router(kb.router)
 app.include_router(authority.router)
+app.include_router(automation.router)
+app.include_router(reports.router)
+app.include_router(billing.router)
+app.include_router(branding.router)
+app.include_router(changes.router)
 app.include_router(monitoring.router)
 app.include_router(async_ops.router)
 app.include_router(observability.router)
 app.include_router(release.router)
 app.include_router(alerting.router)
+app.include_router(escalation.router)
 app.include_router(human_ops.router)
 app.include_router(itsm.router)
+app.include_router(incident_response.router)
 app.include_router(notifications.router)
+app.include_router(onboarding.router)
 app.include_router(platform.router)
 app.include_router(tenant.router)
+app.include_router(aiops.router)
+app.include_router(finops.router)
+app.include_router(maintenance.router)
+app.include_router(sla.router)
+app.include_router(status_page.router)
+app.include_router(status_page._public_router)
+app.include_router(noc_stream.router)
+app.include_router(msp.router)
 
 
 @app.get("/metrics", tags=["health"])

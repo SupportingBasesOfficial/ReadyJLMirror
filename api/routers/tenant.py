@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import secrets
 
+import psycopg
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -157,7 +158,7 @@ async def create_role(request: Request, body: RoleCreate) -> dict:
                     (tenant_id, role_name, permissions, created_by)
                 VALUES (%s, %s, %s, %s)
                 """, (tenant, body.name, body.permissions, actor))
-        except Exception:
+        except psycopg.IntegrityError:
             raise HTTPException(
                 status_code=422,
                 detail="invalid role name or duplicate")

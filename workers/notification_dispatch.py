@@ -2,6 +2,14 @@
 runs the WhatsApp adapter attempt, records immutable attempt +
 normalized evidence, recomputes the delivery projection.
 At-least-once safe: dispatch_identity dedups replay.
+
+G20 integration: before dispatching, checks g20_is_in_maintenance() for
+the source that generated the alert.  A suppressed source releases the
+dispatch so a future cycle retries when the window expires.
+
+G21 integration: before dispatching, checks g21_is_snoozed() for the
+alert itself.  A snoozed alert releases the dispatch so a future cycle
+retries when the snooze expires.
 """
 
 from __future__ import annotations
@@ -12,7 +20,9 @@ import time
 
 import psycopg
 
-from providers.whatsapp import WhatsAppError, send_message
+from providers.email import EmailError, send_message as send_email
+from providers.slack import SlackError, send_message as send_slack
+from providers.whatsapp import WhatsAppError, send_message as send_whatsapp
 from shared.config import settings
 from shared import notification
 
@@ -35,21 +45,66 @@ def _process_pending(conn: psycopg.Connection) -> int:
                 (tenant_id,))
             cur = conn.execute(
                 """
-                SELECT destination_ref, payload_ref
-                  FROM notification.notification_intent
-                 WHERE tenant_id=%s AND notification_intent_id=%s
+                SELECT ni.destination_ref, ni.payload_ref,
+                       a.monitoring_source_id, ni.alert_id,
+                       ni.channel_class
+                  FROM notification.notification_intent ni
+                  JOIN alerting.alert a
+                    ON a.tenant_id = ni.tenant_id
+                   AND a.alert_id  = ni.alert_id
+                 WHERE ni.tenant_id=%s AND ni.notification_intent_id=%s
                 """, (tenant_id, intent_id))
-            dest, payload_ref = cur.fetchone()
+            row_data = cur.fetchone()
+            if row_data is None:
+                conn.rollback()
+                logger.warning("notification_intent %s not found — skipping", intent_id)
+                continue
+            dest, payload_ref, source_id, alert_id, channel_class = row_data
+
+            # G20: suppress delivery during active maintenance window
+            maint_cur = conn.execute(
+                "SELECT monitoring.g20_is_in_maintenance(%s, %s)",
+                (tenant_id, source_id))
+            if maint_cur.fetchone()[0]:
+                conn.rollback()
+                logger.info(
+                    "notification %s skipped — source %s in maintenance window",
+                    intent_id, source_id)
+                continue
+
+            # G21: suppress delivery while alert is snoozed
+            snooze_cur = conn.execute(
+                "SELECT alerting.g21_is_snoozed(%s, %s)",
+                (tenant_id, alert_id))
+            if snooze_cur.fetchone()[0]:
+                conn.rollback()
+                logger.info(
+                    "notification %s skipped — alert %s is snoozed",
+                    intent_id, alert_id)
+                continue
+
             try:
-                res = send_message(
-                    destination_ref=dest, template_name=payload_ref,
-                    correlation_id=logical_id)
-                outcome = "provider_accepted"   # 2xx = accepted only
+                if channel_class == "email_smtp@1":
+                    res = send_email(
+                        destination_ref=dest,
+                        template_name=payload_ref,
+                        correlation_id=logical_id)
+                elif channel_class == "slack@1":
+                    res = send_slack(
+                        destination_ref=dest,
+                        template_name=payload_ref,
+                        correlation_id=logical_id)
+                else:
+                    res = send_whatsapp(
+                        destination_ref=dest,
+                        template_name=payload_ref,
+                        correlation_id=logical_id)
+                outcome = "provider_accepted"
                 provider_ref = res["provider_message_ref"]
                 failure = None
                 evidence = {"provider_status":
                             res["raw"]["provider_status"]}
-            except WhatsAppError as exc:
+            except (WhatsAppError, EmailError, SlackError) as exc:
                 outcome = "unknown" if "transport" in str(exc) \
                     else "failed"
                 provider_ref = None
@@ -86,13 +141,24 @@ def run_notification_dispatch_worker(poll_interval: int = 10,
     dsn = settings.db_dsn
     logger.info("Starting notification dispatch worker (poll=%ss)",
                 poll_interval)
-    with psycopg.connect(dsn, autocommit=False) as conn:
-        while True:
-            try:
-                _process_pending(conn)
-            except Exception:
-                conn.rollback()
-                logger.exception("notification dispatch cycle failed")
-            if once:
-                return
-            time.sleep(poll_interval)
+    while True:
+        try:
+            with psycopg.connect(dsn, autocommit=False,
+                                 connect_timeout=10) as conn:
+                while True:
+                    try:
+                        _process_pending(conn)
+                    except psycopg.OperationalError:
+                        logger.warning("notification dispatch: DB connection lost, reconnecting")
+                        break
+                    except Exception:
+                        conn.rollback()
+                        logger.exception("notification dispatch cycle failed")
+                    if once:
+                        return
+                    time.sleep(poll_interval)
+        except Exception:
+            logger.exception("notification dispatch: failed to connect to DB")
+        if once:
+            return
+        time.sleep(poll_interval)

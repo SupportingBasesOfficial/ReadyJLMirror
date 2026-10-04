@@ -106,6 +106,29 @@ def write_binding_token(
     return target
 
 
+def delete_binding_token(
+    credential_binding_ref: str,
+    secrets_dir: str | Path | None = None,
+) -> None:
+    """Remove a provider token file from the secrets store.
+
+    Silently succeeds if the file is already absent. Used by the
+    credential-revoke API endpoint to clean up the worker fallback file.
+    """
+    if not _REF_SAFE.match(credential_binding_ref):
+        raise CredentialResolutionError(
+            "credential binding ref is not a safe file component"
+        )
+    directory = Path(
+        secrets_dir or os.environ.get("CREDENTIALS_DIR", "/run/secrets")
+    )
+    target = directory / f"{credential_binding_ref}.token"
+    try:
+        target.unlink()
+    except FileNotFoundError:
+        pass
+
+
 class BaoCredentialResolver:
     """OpenBao KV v2 credential resolver (runtime injection).
 
@@ -146,27 +169,34 @@ class BaoCredentialResolver:
     def available(self) -> bool:
         return bool(self._addr and self._token)
 
-    def _fetch_document(self) -> dict:
-        import urllib.error
-        import urllib.request
+    def _fetch_document(self) -> tuple[dict, int]:
+        """Returns (data_dict, current_version) from KV v2.
+
+        Uses httpx in a thread pool so the call does not block the event
+        loop when invoked from an async route via asyncio.to_thread().
+        """
+        import httpx
         import json as _json
-        req = urllib.request.Request(
-            f"{self._addr}/v1/secret/data/jlmirror/credentials",
-            headers={"X-Vault-Token": self._token})
         try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                body = _json.loads(resp.read() or b"{}")
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                return {}  # empty credentials document
+            resp = httpx.get(
+                f"{self._addr}/v1/secret/data/jlmirror/credentials",
+                headers={"X-Vault-Token": self._token},
+                timeout=5.0,
+            )
+            if resp.status_code == 404:
+                return {}, 0
+            resp.raise_for_status()
+            body = resp.json()
+        except httpx.HTTPStatusError as exc:
+            raise CredentialResolutionError(
+                f"credential unavailable (bao http error: {exc})"
+            ) from exc
+        except (httpx.RequestError, ValueError) as exc:
             raise CredentialResolutionError(
                 f"credential unavailable (bao unreachable: {exc})"
             ) from exc
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            raise CredentialResolutionError(
-                f"credential unavailable (bao unreachable: {exc})"
-            ) from exc
-        return body.get("data", {}).get("data", {})
+        kv_data = body.get("data", {})
+        return kv_data.get("data", {}), kv_data.get("metadata", {}).get("version", 0)
 
     def resolve_zabbix_api_token(
         self, credential_binding_ref: str
@@ -178,7 +208,7 @@ class BaoCredentialResolver:
         hit = self._cache.get(credential_binding_ref)
         if hit and now - hit[0] < self._cache_seconds:
             return hit[1]
-        document = self._fetch_document()
+        document, _ = self._fetch_document()
         token = str(document.get(credential_binding_ref, "")).strip()
         if not token:
             raise CredentialResolutionError(
@@ -210,25 +240,66 @@ class BaoCredentialResolver:
         token = token.strip()
         if not token:
             raise CredentialResolutionError("credential token is empty")
-        document = self._fetch_document()
-        document[credential_binding_ref] = token
-        self._put_document(document)
+        for _attempt in range(3):
+            document, version = self._fetch_document()
+            document[credential_binding_ref] = token
+            try:
+                self._put_document(document, cas_version=version)
+                break
+            except CredentialResolutionError as exc:
+                if "cas" in str(exc).lower() and _attempt < 2:
+                    continue
+                raise
         self._cache.pop(credential_binding_ref, None)
 
-    def _put_document(self, document: dict) -> None:
-        import urllib.error
-        import urllib.request
-        import json as _json
-        req = urllib.request.Request(
-            f"{self._addr}/v1/secret/data/jlmirror/credentials",
-            data=_json.dumps({"data": document}).encode("utf-8"),
-            headers={"X-Vault-Token": self._token,
-                     "Content-Type": "application/json"},
-            method="POST")
+    def delete_zabbix_api_token(self, credential_binding_ref: str) -> None:
+        """Remove a provider token from the KV credentials document.
+
+        Read-modify-write with CAS so concurrent rotations don't clobber
+        each other. Silently succeeds if the key is already absent.
+        """
+        if not self.available:
+            raise CredentialResolutionError(
+                "credential store unavailable (bao not configured)")
+        if not _REF_SAFE.match(credential_binding_ref):
+            raise CredentialResolutionError(
+                "credential binding ref is not a safe KV key")
+        for _attempt in range(3):
+            document, version = self._fetch_document()
+            if credential_binding_ref not in document:
+                break
+            document.pop(credential_binding_ref)
+            try:
+                self._put_document(document, cas_version=version)
+                break
+            except CredentialResolutionError as exc:
+                if "cas" in str(exc).lower() and _attempt < 2:
+                    continue
+                raise
+        self._cache.pop(credential_binding_ref, None)
+
+    def _put_document(self, document: dict, cas_version: int = 0) -> None:
+        import httpx
+        payload = {"options": {"cas": cas_version}, "data": document}
         try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                resp.read()
-        except (urllib.error.URLError, OSError) as exc:
+            resp = httpx.post(
+                f"{self._addr}/v1/secret/data/jlmirror/credentials",
+                json=payload,
+                headers={"X-Vault-Token": self._token},
+                timeout=5.0,
+            )
+            if resp.status_code == 412:
+                raise CredentialResolutionError(
+                    "credential write cas conflict — will retry"
+                )
+            resp.raise_for_status()
+        except CredentialResolutionError:
+            raise
+        except httpx.HTTPStatusError as exc:
+            raise CredentialResolutionError(
+                f"credential store unavailable (bao write: {exc})"
+            ) from exc
+        except httpx.RequestError as exc:
             raise CredentialResolutionError(
                 f"credential store unavailable (bao write: {exc})"
             ) from exc

@@ -111,6 +111,15 @@ class Settings:
             env_name="KEYCLOAK_CLIENT_SECRET",
             default="dev-bff-secret-change-me")
     )
+    keycloak_admin_user: str = field(
+        default_factory=lambda: _env("KEYCLOAK_ADMIN", "admin")
+    )
+    keycloak_admin_password: str = field(
+        default_factory=lambda: _secret(
+            "keycloak_admin_password",
+            env_name="KEYCLOAK_ADMIN_PASSWORD",
+            default="")
+    )
 
     # Session policy
     session_lifetime_hours: int = field(
@@ -145,6 +154,14 @@ class Settings:
     def db_dsn(self) -> str:
         return (
             f"postgresql://{self.db_user}:{self.db_password}"
+            f"@{self.db_host}:{self.db_port}/{self.db_name}"
+        )
+
+    @property
+    def db_dsn_safe(self) -> str:
+        """DSN with password masked — safe to log or include in error messages."""
+        return (
+            f"postgresql://{self.db_user}:***"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
 

@@ -106,4 +106,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import os
+    if os.environ.get("APP_ENVIRONMENT", "development") != "development":
+        print("ERROR: bao_sync.py seeds dev secrets and must not run in production.")
+        print("Set APP_ENVIRONMENT=development or use --force to override.")
+        import sys
+        if "--force" not in sys.argv:
+            sys.exit(1)
     sys.exit(main())

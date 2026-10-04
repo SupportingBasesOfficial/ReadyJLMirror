@@ -27,11 +27,15 @@ router = APIRouter(prefix="/api/v1/alerting", tags=["notifications"])
 
 _REASONS = ("alert_requires_attention", "alert_action_requested",
             "customer_awareness_required")
+_CHANNELS = ("whatsapp_business@1", "email_smtp@1", "slack@1")
+
+_G22_ROLE = "jlmirror_g22_dest_app_invoker"
 
 
 class IntentCreate(BaseModel):
     recipient_principal_id: str | None = None
-    destination_ref: str            # phone_number_id / msisdn ref
+    destination_ref: str            # phone/email/webhook depending on channel_class
+    channel_class: str = "whatsapp_business@1"
     reason: str = "alert_requires_attention"
     payload_ref: str = "alert_notification"
     visibility_requirement_id: str | None = None
@@ -51,6 +55,9 @@ async def create_intent(alert_id: str, request: Request,
     if body.reason not in _REASONS:
         raise HTTPException(status_code=422,
                             detail=f"reason one of {_REASONS}")
+    if body.channel_class not in _CHANNELS:
+        raise HTTPException(status_code=422,
+                            detail=f"channel_class one of {_CHANNELS}")
     logical_id = (body.logical_action_id
                   or f"nti_{secrets.token_urlsafe(12)}")
     intent_id = f"nti_{secrets.token_urlsafe(12)}"
@@ -86,14 +93,14 @@ async def create_intent(alert_id: str, request: Request,
                  channel_class, reason, payload_ref, content_hash,
                  visibility_requirement_id, authority_snapshot,
                  logical_action_id, created_by_principal_id)
-            VALUES (%s,%s,%s,%s,%s,'whatsapp_business@1',%s,%s,
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,
                     %s,%s,%s::jsonb,%s,%s)
             """,
             (tenant, intent_id, alert_id,
              body.recipient_principal_id, body.destination_ref,
-             body.reason, body.payload_ref, _hash(content),
-             body.visibility_requirement_id, json.dumps(snapshot),
-             logical_id, actor))
+             body.channel_class, body.reason, body.payload_ref,
+             _hash(content), body.visibility_requirement_id,
+             json.dumps(snapshot), logical_id, actor))
         dispatch_id = f"dsp_{secrets.token_urlsafe(12)}"
         await conn.execute(
             """
@@ -367,3 +374,95 @@ async def provider_callback(request: Request) -> dict:
         raise HTTPException(status_code=400,
                             detail="callback outside replay window")
     return {"state": state}
+
+
+# ---------------------------------------------------------------------------
+# G22 Notification destination configuration (per-tenant email/channel roster)
+# ---------------------------------------------------------------------------
+
+
+class DestinationCreate(BaseModel):
+    channel_class: str = "email_smtp@1"
+    destination_ref: str      # email address, phone ref, or webhook URL
+    label: str                # human-readable name
+
+
+@router.get("/notification-channels")
+async def list_destinations(request: Request,
+                            tenant_id: str | None = None) -> list[dict]:
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        cur = await conn.execute(
+            """
+            SELECT destination_config_id, channel_class,
+                   destination_ref, label, created_at
+              FROM notification.notification_destination_config
+             WHERE tenant_id = %s AND deleted_at IS NULL
+             ORDER BY created_at DESC
+            """, (tenant,))
+        cols = [d.name for d in cur.description]
+        rows = []
+        for r in await cur.fetchall():
+            row = dict(zip(cols, r))
+            row["created_at"] = row["created_at"].isoformat()
+            rows.append(row)
+        return rows
+
+
+@router.post("/notification-channels", status_code=status.HTTP_201_CREATED)
+async def add_destination(request: Request,
+                          body: DestinationCreate,
+                          tenant_id: str | None = None) -> dict:
+    tenant = _authoritative_tenant(request, tenant_id)
+    if body.channel_class not in _CHANNELS:
+        raise HTTPException(status_code=422,
+                            detail=f"channel_class one of {_CHANNELS}")
+    if not body.destination_ref.strip():
+        raise HTTPException(status_code=422,
+                            detail="destination_ref must not be empty")
+    if not body.label.strip():
+        raise HTTPException(status_code=422,
+                            detail="label must not be empty")
+    async with db_tenant_connection(tenant) as conn:
+        try:
+            async with conn.transaction():
+                await conn.execute(f"SET LOCAL ROLE {_G22_ROLE}")
+                cur = await conn.execute(
+                    "SELECT notification.g22_add_destination(%s,%s,%s,%s)",
+                    (tenant, body.channel_class,
+                     body.destination_ref, body.label))
+                row = await cur.fetchone()
+        except Exception as exc:
+            msg = str(exc)
+            if "g22.invalid_channel" in msg:
+                raise HTTPException(status_code=422,
+                                    detail="unsupported channel_class")
+            if "g22.empty_dest_ref" in msg:
+                raise HTTPException(status_code=422,
+                                    detail="destination_ref required")
+            if "g22.empty_label" in msg:
+                raise HTTPException(status_code=422,
+                                    detail="label required")
+            raise
+    return row[0] if row else {}
+
+
+@router.delete("/notification-channels/{dest_id}",
+               status_code=status.HTTP_200_OK)
+async def delete_destination(dest_id: str, request: Request,
+                             tenant_id: str | None = None) -> dict:
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        try:
+            async with conn.transaction():
+                await conn.execute(f"SET LOCAL ROLE {_G22_ROLE}")
+                cur = await conn.execute(
+                    "SELECT notification.g22_delete_destination(%s,%s)",
+                    (tenant, dest_id))
+                row = await cur.fetchone()
+        except Exception as exc:
+            if "g22.dest_not_found" in str(exc):
+                raise HTTPException(status_code=404,
+                                    detail="destination not found")
+            raise
+    return row[0] if row else {}

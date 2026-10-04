@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
 
 from api.routers.monitoring import _authoritative_tenant
@@ -265,17 +266,24 @@ async def list_alerts(request: Request,
     async with db_tenant_connection(tenant) as conn:
         cur = await conn.execute(
             """
-            SELECT alert_id, policy_id, policy_version, source_kind,
-                   source_subject_id, monitoring_source_id,
-                   monitoring_resource_id, lifecycle_state,
-                   source_occurrence_revision,
-                   current_source_revision,
-                   source_evidence_summary, opened_at, resolved_at
-              FROM alerting.alert
-             WHERE (%s::text IS NULL OR lifecycle_state = %s)
-               AND (%s::text IS NULL OR monitoring_source_id = %s)
-             ORDER BY (lifecycle_state = 'resolved'),
-                      opened_at DESC LIMIT %s
+            SELECT a.alert_id, a.policy_id, a.policy_version, a.source_kind,
+                   a.source_subject_id, a.monitoring_source_id,
+                   a.monitoring_resource_id, a.lifecycle_state,
+                   a.source_occurrence_revision,
+                   a.current_source_revision,
+                   a.source_evidence_summary, a.opened_at, a.resolved_at,
+                   (SELECT s.expires_at
+                      FROM alerting.alert_snooze s
+                     WHERE s.alert_id     = a.alert_id
+                       AND s.tenant_id    = a.tenant_id
+                       AND s.cancelled_at IS NULL
+                       AND s.expires_at   > now()
+                     ORDER BY s.expires_at DESC LIMIT 1) AS snoozed_until
+              FROM alerting.alert a
+             WHERE (%s::text IS NULL OR a.lifecycle_state = %s)
+               AND (%s::text IS NULL OR a.monitoring_source_id = %s)
+             ORDER BY (a.lifecycle_state = 'resolved'),
+                      a.opened_at DESC LIMIT %s
             """, (lifecycle_state, lifecycle_state,
                   source_id, source_id, min(limit, 200)))
         cols = [d.name for d in cur.description]
@@ -337,3 +345,77 @@ async def list_inbox(request: Request,
             """, (state, state, min(limit, 200)))
         cols = [d.name for d in cur.description]
         return [_ser(dict(zip(cols, r))) for r in await cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# G21 Alert Snooze — per-alert notification suppression overlay
+# ---------------------------------------------------------------------------
+
+_SNOOZE_ROLE = "jlmirror_g21_snooze_app_invoker"
+
+
+class SnoozeBody(BaseModel):
+    duration_minutes: int
+    reason: str | None = None
+
+
+def _snooze_actor(request: Request,
+                  x_principal_id: str | None) -> str:
+    ctx = getattr(request.state, "jlmirror_context", {}) or {}
+    return ctx.get("principal_id") or x_principal_id or "anonymous"
+
+
+@router.post("/alerts/{alert_id}/snooze", status_code=status.HTTP_200_OK)
+async def snooze_alert(
+    alert_id: str,
+    request: Request,
+    body: SnoozeBody,
+    tenant_id: str | None = None,
+    x_principal_id: Annotated[str | None, Header()] = None,
+):
+    tenant = _authoritative_tenant(request, tenant_id)
+    actor = _snooze_actor(request, x_principal_id)
+    async with db_tenant_connection(tenant) as conn:
+        try:
+            async with conn.transaction():
+                await conn.execute(f"SET LOCAL ROLE {_SNOOZE_ROLE}")
+                cur = await conn.execute(
+                    "SELECT alerting.g21_snooze_alert(%s,%s,%s,%s,%s)",
+                    (tenant, alert_id, body.duration_minutes, actor,
+                     body.reason))
+                row = await cur.fetchone()
+        except Exception as exc:
+            msg = str(exc)
+            if "g21.invalid_duration" in msg:
+                raise HTTPException(status_code=422,
+                                    detail="duration_minutes must be > 0")
+            if "g21.duration_too_long" in msg:
+                raise HTTPException(status_code=422,
+                                    detail="duration_minutes max is 10080 (7 days)")
+            raise
+    return row[0] if row else {}
+
+
+@router.post("/alerts/{alert_id}/unsnooze", status_code=status.HTTP_200_OK)
+async def unsnooze_alert(
+    alert_id: str,
+    request: Request,
+    tenant_id: str | None = None,
+    x_principal_id: Annotated[str | None, Header()] = None,
+):
+    tenant = _authoritative_tenant(request, tenant_id)
+    actor = _snooze_actor(request, x_principal_id)
+    async with db_tenant_connection(tenant) as conn:
+        try:
+            async with conn.transaction():
+                await conn.execute(f"SET LOCAL ROLE {_SNOOZE_ROLE}")
+                cur = await conn.execute(
+                    "SELECT alerting.g21_unsnooze_alert(%s,%s,%s)",
+                    (tenant, alert_id, actor))
+                row = await cur.fetchone()
+        except Exception as exc:
+            if "g21.snooze_not_found" in str(exc):
+                raise HTTPException(status_code=404,
+                                    detail="no active snooze for this alert")
+            raise
+    return row[0] if row else {}

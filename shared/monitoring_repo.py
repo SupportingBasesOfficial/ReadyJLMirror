@@ -538,6 +538,7 @@ def list_all_pending_validations(conn: Connection) -> list[tuple[str, str]]:
          WHERE state = 'pending'
            AND responsibility_kind = 'validation_and_initial_sync'
          ORDER BY created_at
+         LIMIT 500
         """
     )
     return [tuple(r) for r in cur.fetchall()]
@@ -913,8 +914,17 @@ class PgHostInventoryRepository:
         result: HostInventoryResult,
         snapshot_evidence_id: str,
     ) -> None:
-        """Upsert resources + provider evidence for a complete snapshot."""
+        """Upsert resources + provider evidence for a complete snapshot.
+
+        Per-host SELECT FOR UPDATE + INSERT/UPDATE stays sequential (no
+        unique constraint to UPSERT on). Evidence inserts and
+        latest_provider_evidence_id updates are batched after the loop
+        to reduce round-trips from O(4N) to O(2N + 2).
+        """
         seen_refs: list[str] = []
+        evidence_params: list[tuple] = []
+        resource_evidence_pairs: list[tuple[str, str]] = []
+
         for host in result.hosts:
             seen_refs.append(host.hostid)
             cur = self._conn.execute(
@@ -976,33 +986,45 @@ class PgHostInventoryRepository:
                 )
 
             evidence_id = _opaque("mon-ev")
+            evidence_params.append((
+                claim.tenant_id, evidence_id, snapshot_evidence_id,
+                resource_id, claim.monitoring_source_id,
+                claim.source_instance_generation, host.hostid,
+                host.evidence_fingerprint(),
+                json.dumps(host.canonical_evidence()),
+            ))
+            resource_evidence_pairs.append((resource_id, evidence_id))
+
+        if evidence_params:
+            with self._conn.cursor() as _cur:
+                _cur.executemany(
+                    """
+                    INSERT INTO monitoring.monitoring_resource_provider_evidence
+                        (tenant_id, provider_evidence_id,
+                         host_inventory_snapshot_evidence_id,
+                         monitoring_resource_id, monitoring_source_id,
+                         source_instance_generation, provider_object_kind,
+                         provider_external_ref, evidence_fingerprint,
+                         normalized_evidence, observed_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'zabbix_host', %s, %s,
+                            %s::jsonb, transaction_timestamp())
+                    """,
+                    evidence_params,
+                )
             self._conn.execute(
                 """
-                INSERT INTO monitoring.monitoring_resource_provider_evidence
-                    (tenant_id, provider_evidence_id,
-                     host_inventory_snapshot_evidence_id,
-                     monitoring_resource_id, monitoring_source_id,
-                     source_instance_generation, provider_object_kind,
-                     provider_external_ref, evidence_fingerprint,
-                     normalized_evidence, observed_at)
-                VALUES (%s, %s, %s, %s, %s, %s, 'zabbix_host', %s, %s,
-                        %s::jsonb, transaction_timestamp())
+                UPDATE monitoring.monitoring_resource AS r
+                   SET latest_provider_evidence_id = upd.evidence_id
+                  FROM unnest(%s::text[], %s::text[])
+                       AS upd(resource_id, evidence_id)
+                 WHERE r.tenant_id = %s
+                   AND r.monitoring_resource_id = upd.resource_id
                 """,
                 (
-                    claim.tenant_id, evidence_id, snapshot_evidence_id,
-                    resource_id, claim.monitoring_source_id,
-                    claim.source_instance_generation, host.hostid,
-                    host.evidence_fingerprint(),
-                    json.dumps(host.canonical_evidence()),
+                    [p[0] for p in resource_evidence_pairs],
+                    [p[1] for p in resource_evidence_pairs],
+                    claim.tenant_id,
                 ),
-            )
-            self._conn.execute(
-                """
-                UPDATE monitoring.monitoring_resource
-                   SET latest_provider_evidence_id = %s
-                 WHERE tenant_id = %s AND monitoring_resource_id = %s
-                """,
-                (evidence_id, claim.tenant_id, resource_id),
             )
 
         # Complete snapshot: resources not seen become removed
@@ -1034,6 +1056,7 @@ def list_all_pending_host_inventory(conn: Connection) -> list[tuple[str, str]]:
          WHERE state = 'pending'
            AND responsibility_kind = 'host_inventory_sync'
          ORDER BY created_at
+         LIMIT 500
         """
     )
     return [tuple(r) for r in cur.fetchall()]
@@ -1583,6 +1606,7 @@ def list_all_pending_metric_polls(conn: Connection) -> list[tuple[str, str]]:
          WHERE state = 'pending'
            AND responsibility_kind = 'metric_definition_poll'
          ORDER BY created_at
+         LIMIT 500
         """
     )
     return [tuple(r) for r in cur.fetchall()]
@@ -2131,6 +2155,7 @@ def list_all_pending_current_polls(conn: Connection) -> list[tuple[str, str]]:
          WHERE state = 'pending'
            AND responsibility_kind = 'current_state_poll'
          ORDER BY created_at
+         LIMIT 500
         """
     )
     return [tuple(r) for r in cur.fetchall()]
@@ -2606,8 +2631,11 @@ class PgMetricHistoryRepository:
             (self._tenant_id, monitoring_source_id),
         )
         rows = cur.fetchall()
-        for r in rows:
-            self._conn.execute(
+        if not rows:
+            self._conn.commit()
+            return 0
+        with self._conn.cursor() as _cur:
+            _cur.executemany(
                 """
                 INSERT INTO monitoring.metric_observation
                     (tenant_id, observation_id, monitoring_source_id,
@@ -2619,20 +2647,21 @@ class PgMetricHistoryRepository:
                         %s, transaction_timestamp(), %s, %s)
                 ON CONFLICT (tenant_id, observation_id) DO NOTHING
                 """,
-                (
-                    self._tenant_id, r[0], monitoring_source_id, r[1],
-                    r[2], r[3], r[4], r[5], r[6], r[7], r[8],
-                    json.dumps(r[9]),
-                ),
+                [
+                    (self._tenant_id, r[0], monitoring_source_id, r[1],
+                     r[2], r[3], r[4], r[5], r[6], r[7], r[8],
+                     json.dumps(r[9]))
+                    for r in rows
+                ],
             )
-            self._conn.execute(
-                """
-                UPDATE monitoring.monitoring_metric_observation_acceptance
-                   SET history_projection_state = 'projected'
-                 WHERE tenant_id = %s AND observation_id = %s
-                """,
-                (self._tenant_id, r[0]),
-            )
+        self._conn.execute(
+            """
+            UPDATE monitoring.monitoring_metric_observation_acceptance
+               SET history_projection_state = 'projected'
+             WHERE tenant_id = %s AND observation_id = ANY(%s)
+            """,
+            (self._tenant_id, [r[0] for r in rows]),
+        )
         self._conn.commit()
         return len(rows)
 
@@ -2852,6 +2881,7 @@ def list_all_pending_history_syncs(conn: Connection) -> list[tuple[str, str]]:
          WHERE state = 'pending'
            AND responsibility_kind = 'metric_history_sync'
          ORDER BY created_at
+         LIMIT 500
         """
     )
     return [tuple(r) for r in cur.fetchall()]
@@ -3805,6 +3835,7 @@ def list_all_pending_problem_syncs(conn: Connection) -> list[tuple[str, str]]:
          WHERE state = 'pending'
            AND responsibility_kind = 'problem_state_sync'
          ORDER BY created_at
+         LIMIT 500
         """
     )
     return [tuple(r) for r in cur.fetchall()]
@@ -4163,3 +4194,79 @@ async def list_health_projections(
         _encode_cursor({"k": items[-1]["monitoring_resource_id"]})
         if has_more else None)
     return {"items": items, "next_cursor": next_cursor}
+
+
+async def get_resource_detail(
+    conn: AsyncConnection, tenant_id: str, source_id: str, resource_id: str,
+) -> dict | None:
+    """Return full resource detail including normalized_evidence JSONB."""
+    cur = await conn.execute(
+        """
+        SELECT r.monitoring_resource_id, r.monitoring_source_id,
+               r.display_name, r.resource_kind,
+               r.scope_state, r.scope_evidence_state,
+               r.presence_state, r.presence_evidence_state,
+               r.last_observed_at, r.last_confirmed_present_at,
+               r.provider_external_ref, r.created_at, r.updated_at,
+               e.normalized_evidence
+          FROM monitoring.monitoring_resource r
+          JOIN monitoring.monitoring_resource_provider_evidence e
+            ON e.provider_evidence_id = r.latest_provider_evidence_id
+           AND e.tenant_id = r.tenant_id
+         WHERE r.tenant_id = %s
+           AND r.monitoring_source_id = %s
+           AND r.monitoring_resource_id = %s
+        """,
+        (tenant_id, source_id, resource_id),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return None
+    keys = (
+        "monitoring_resource_id", "monitoring_source_id",
+        "display_name", "resource_kind",
+        "scope_state", "scope_evidence_state",
+        "presence_state", "presence_evidence_state",
+        "last_observed_at", "last_confirmed_present_at",
+        "provider_external_ref", "created_at", "updated_at",
+        "normalized_evidence",
+    )
+    result = dict(zip(keys, row))
+    for k, v in result.items():
+        if hasattr(v, "isoformat"):
+            result[k] = v.isoformat()
+    return result
+
+
+async def list_resource_current_states(
+    conn: AsyncConnection, tenant_id: str, source_id: str,
+    resource_id: str, limit: int = 200,
+) -> dict:
+    """Return the current metric states for a single resource."""
+    cur = await conn.execute(
+        """
+        SELECT c.metric_definition_id, c.monitoring_resource_id,
+               c.observed_at, c.value_kind, c.canonical_value AS value,
+               d.name, d.unit
+          FROM monitoring.metric_current_state c
+          JOIN monitoring.metric_definition d
+            ON d.tenant_id = c.tenant_id
+           AND d.metric_definition_id = c.metric_definition_id
+         WHERE c.tenant_id = %s
+           AND c.monitoring_source_id = %s
+           AND c.monitoring_resource_id = %s
+         ORDER BY d.name
+         LIMIT %s
+        """,
+        (tenant_id, source_id, resource_id, limit),
+    )
+    keys = (
+        "metric_definition_id", "monitoring_resource_id",
+        "observed_at", "value_kind", "value",
+        "name", "unit",
+    )
+    rows = [dict(zip(keys, r)) for r in await cur.fetchall()]
+    for row in rows:
+        if hasattr(row.get("observed_at"), "isoformat"):
+            row["observed_at"] = row["observed_at"].isoformat()
+    return {"items": rows}

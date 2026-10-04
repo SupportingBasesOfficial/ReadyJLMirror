@@ -8,6 +8,7 @@ from datetime import timedelta
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
+from shared.config import settings
 from shared.auth import utcnow
 from shared.tenant import make_dev_tenant_context
 from jlmirror_async.model import (
@@ -56,6 +57,8 @@ class OutboxAppendResponse(BaseModel):
 @router.post("/outbox/append", response_model=OutboxAppendResponse)
 async def outbox_append(body: OutboxAppendRequest) -> OutboxAppendResponse:
     """Append a committed message to the outbox."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available outside development")
     ctx = make_dev_tenant_context(
         body.tenant_id, body.principal_id, body.credential_generation
     )
@@ -97,6 +100,8 @@ class OutboxClaimNextResponse(BaseModel):
 @router.post("/outbox/claim-next", response_model=OutboxClaimNextResponse)
 async def outbox_claim_next() -> OutboxClaimNextResponse:
     """Claim the next pending outbox message for dispatch."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available outside development")
     now = utcnow()
     claim = _outbox.claim_next(
         owner_id="worker-dev-1",
@@ -118,6 +123,8 @@ class OutboxMarkPublishedRequest(BaseModel):
 @router.post("/outbox/mark-published", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def outbox_mark_published(body: OutboxMarkPublishedRequest) -> None:
     """Mark a claimed outbox message as published."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available outside development")
     now = utcnow()
     # In dev mode, re-claim to get a valid claim object
     claim = _outbox.claim_next(
@@ -144,5 +151,7 @@ class OutboxPendingResponse(BaseModel):
 @router.get("/outbox/pending", response_model=OutboxPendingResponse)
 async def outbox_pending() -> OutboxPendingResponse:
     """List pending outbox message IDs."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available outside development")
     messages = _outbox.pending_messages(observed_at=utcnow())
     return OutboxPendingResponse(pending=[m.message_id for m in messages])

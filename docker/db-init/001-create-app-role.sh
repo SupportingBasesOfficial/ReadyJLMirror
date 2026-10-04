@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+APP_PASSWORD="${APP_DB_PASSWORD:-jlmirror_dev}"
+WORKER_PASSWORD="${WORKER_DB_PASSWORD:-jlmirror_dev}"
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+  -- Create the application role with least privilege.
+  -- Used by BFF and API for identity/session/tenant-scoped access.
+  -- The owner role (jlmirror_owner) is used for migrations and bootstrap.
+
+  DO \$\$
+  BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'jlmirror_app') THEN
+          CREATE ROLE jlmirror_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS
+              PASSWORD '$APP_PASSWORD';
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'jlmirror_worker') THEN
+          CREATE ROLE jlmirror_worker LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS
+              PASSWORD '$WORKER_PASSWORD';
+      END IF;
+  END
+  \$\$;
+
+  GRANT CONNECT ON DATABASE jlmirror TO jlmirror_app;
+  GRANT CONNECT ON DATABASE jlmirror TO jlmirror_worker;
+  GRANT USAGE ON SCHEMA public TO jlmirror_worker;
+  GRANT USAGE ON SCHEMA public TO jlmirror_app;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO jlmirror_app;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO jlmirror_app;
+
+  -- G1 schema is created here so grants apply; migrations create its tables.
+  CREATE SCHEMA IF NOT EXISTS g1 AUTHORIZATION jlmirror_owner;
+  GRANT USAGE ON SCHEMA g1 TO jlmirror_app;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA g1 TO jlmirror_app;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA g1
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO jlmirror_app;
+
+  -- Monitoring schema (Wave 4 mirrored authority) — schema exists for
+  -- future grants; table privileges are least-privilege via
+  -- sql/monitoring/010_app_least_privilege.sql (SELECT all + INSERT on
+  -- the onboarding/enqueue tables only). DML authority: jlmirror_worker.
+  CREATE SCHEMA IF NOT EXISTS monitoring AUTHORIZATION jlmirror_owner;
+  GRANT USAGE ON SCHEMA monitoring TO jlmirror_app;
+  GRANT USAGE ON SCHEMA g1 TO jlmirror_worker;
+  GRANT USAGE ON SCHEMA monitoring TO jlmirror_worker;
+  ALTER DEFAULT PRIVILEGES FOR ROLE jlmirror_owner IN SCHEMA monitoring
+      GRANT SELECT ON TABLES TO jlmirror_app;
+  -- Worker table privileges stay per-migration (sql/monitoring/*) —
+  -- immutable transition/evidence tables must not inherit DML.
+EOSQL

@@ -21,10 +21,13 @@ class WhatsAppError(Exception):
 
 
 def send_message(*, destination_ref: str, template_name: str,
-                 correlation_id: str, timeout: float = 10.0) -> dict:
+                 correlation_id: str, timeout: float = 10.0,
+                 template_variables: list[str] | None = None,
+                 language_code: str = "en") -> dict:
     """POST /{phone_number_id}/messages — returns
     {'provider_message_ref': ..., 'accepted': True} on HTTP 2xx.
 
+    template_variables: positional body params for {{1}}, {{2}}, … placeholders.
     A 2xx means PROVIDER ACCEPTED — not delivered, not read."""
     base = os.environ.get("WHATSAPP_API_URL", "").rstrip("/")
     if not base:
@@ -34,12 +37,18 @@ def send_message(*, destination_ref: str, template_name: str,
     if token:
         headers["Authorization"] = f"Bearer {token}"
     url = f"{base}/{destination_ref}/messages"
+    template: dict = {"name": template_name, "language": {"code": language_code}}
+    if template_variables:
+        template["components"] = [{
+            "type": "body",
+            "parameters": [{"type": "text", "text": str(v)}
+                           for v in template_variables],
+        }]
     payload = {
         "messaging_product": "whatsapp",
         "to": destination_ref,
         "type": "template",
-        "template": {"name": template_name,
-                     "language": {"code": "en"}},
+        "template": template,
     }
     try:
         resp = httpx.post(url, json=payload, headers=headers,

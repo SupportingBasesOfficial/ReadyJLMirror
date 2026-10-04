@@ -132,18 +132,28 @@ def _enqueue_due(conn: psycopg.Connection, kind: str, cadence: int) -> int:
 
 
 def _process_pending(conn: psycopg.Connection) -> int:
-    """Enqueue ops that are due. Returns count of new ops."""
+    """Enqueue ops that are due. Returns count of new ops.
+
+    Each kind is committed independently so a failure in one kind does
+    not prevent the others from being scheduled that cycle.
+    """
     enqueued = 0
     for kind, cadence in _CADENCES.items():
-        enqueued += _enqueue_due(conn, kind, cadence)
-    if enqueued:
-        conn.commit()
+        try:
+            n = _enqueue_due(conn, kind, cadence)
+            if n:
+                conn.commit()
+            enqueued += n
+        except Exception:
+            logger.exception("scheduler: failed to enqueue %s", kind)
+            conn.rollback()
     return enqueued
 
 
 def run_scheduler_worker(poll_interval: int = 30, once: bool = False) -> None:
     from shared.config import settings
-    with psycopg.connect(settings.db_dsn, autocommit=False) as conn:
+    with psycopg.connect(settings.db_dsn, autocommit=False,
+                         connect_timeout=10) as conn:
         while True:
             n = _process_pending(conn)
             if once:

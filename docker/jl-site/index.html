@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JL Informática</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <style>
+    :root {
+      --bg:  #ffffff;
+      --bg2: #f7f7f5;
+      --fg:  #0f1114;
+      --fgm: #555c6b;
+      --fgd: #9ba3b0;
+      --ac:  #1b3f82;
+      --acl: #e8f0fa;
+      --brd: #e5e7eb;
+      --f: 'Inter', system-ui, sans-serif;
+    }
+    *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body { background: var(--bg); color: var(--fg); font-family: var(--f); font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
+    a { color: inherit; text-decoration: none; }
+    .w { max-width: 1080px; margin: 0 auto; padding-inline: clamp(20px, 5vw, 56px); }
+
+    /* NAV */
+    nav { position: sticky; top: 0; z-index: 50; background: rgba(255,255,255,.92); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--brd); }
+    .ni { display: flex; align-items: center; justify-content: space-between; padding-block: 14px; }
+    .logo { display: flex; align-items: center; gap: 10px; }
+    .logo-text { font-size: 15px; font-weight: 600; letter-spacing: -.02em; color: var(--fg); }
+    .logo-text span { color: var(--fgd); font-weight: 400; }
+    .nl { display: flex; align-items: center; gap: 28px; list-style: none; }
+    .nl a { font-size: 13.5px; font-weight: 500; color: var(--fgm); transition: color .12s; }
+    .nl a:hover { color: var(--fg); }
+    @media(max-width: 640px) { .nl { display: none; } }
+    .ncta { display: inline-flex; align-items: center; padding: 9px 20px; background: var(--ac); color: #fff; border-radius: 6px; font-size: 13.5px; font-weight: 600; transition: opacity .12s; white-space: nowrap; }
+    .ncta:hover { opacity: .87; }
+
+    /* HERO */
+    .hero { padding-block: 72px 64px; border-bottom: 1px solid var(--brd); }
+    .hero h1 { font-size: clamp(34px, 5vw, 58px); font-weight: 700; letter-spacing: -.04em; line-height: 1.08; max-width: 700px; text-wrap: balance; margin-bottom: 22px; }
+    .hero p { font-size: 18px; color: var(--fgm); max-width: 560px; line-height: 1.72; margin-bottom: 38px; }
+    .hbtns { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .btn-solid { display: inline-flex; align-items: center; gap: 6px; padding: 13px 26px; background: var(--ac); color: #fff; border-radius: 6px; font-size: 15px; font-weight: 600; transition: opacity .12s; }
+    .btn-solid:hover { opacity: .87; }
+    .btn-link { font-size: 15px; font-weight: 500; color: var(--fgm); transition: color .12s; }
+    .btn-link:hover { color: var(--fg); }
+
+    /* STRIP */
+    .strip { padding-block: 22px; border-bottom: 1px solid var(--brd); background: var(--bg2); }
+    .strip-in { display: flex; align-items: center; gap: 40px; flex-wrap: wrap; }
+    .strip-k { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; color: var(--fgd); white-space: nowrap; }
+    .strip-items { display: flex; gap: 32px; flex-wrap: wrap; }
+    .strip-item { font-size: 13.5px; font-weight: 500; color: var(--fgd); }
+
+    /* SECTION */
+    .sec { padding-block: 56px 80px; border-bottom: 1px solid var(--brd); }
+    .sec.alt { background: var(--bg2); }
+    .ey { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; color: var(--ac); margin-bottom: 14px; }
+    .sh { font-size: clamp(24px, 3.2vw, 36px); font-weight: 700; letter-spacing: -.03em; line-height: 1.14; text-wrap: balance; margin-bottom: 16px; }
+    .sb { font-size: 16px; color: var(--fgm); line-height: 1.75; max-width: 580px; margin-bottom: 40px; }
+
+    /* SERVICES */
+    .svc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--brd); border: 1px solid var(--brd); border-radius: 10px; overflow: hidden; }
+    @media(max-width: 760px) { .svc-grid { grid-template-columns: 1fr; } }
+    .svc-card { background: var(--bg); padding: 28px 26px; transition: background .12s; }
+    .svc-card:hover { background: var(--acl); }
+    .svc-icon { width: 32px; height: 32px; margin-bottom: 14px; }
+    .svc-card h3 { font-size: 16px; font-weight: 600; letter-spacing: -.02em; margin-bottom: 8px; }
+    .svc-card p { font-size: 13.5px; color: var(--fgm); line-height: 1.65; }
+
+    /* SYSTEMS */
+    .sys-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    @media(max-width: 720px) { .sys-grid { grid-template-columns: 1fr; } }
+    .sys-card { border: 1px solid var(--brd); border-radius: 10px; padding: 28px; background: var(--bg); transition: border-color .15s, box-shadow .15s; }
+    .sys-card:hover { border-color: #a0b4d0; box-shadow: 0 4px 20px rgba(27,63,130,.07); }
+    .sys-card.featured { border-color: #b8cde8; background: var(--acl); }
+    .sys-badge { display: inline-block; padding: 3px 10px; border-radius: 100px; font-size: 11px; font-weight: 600; margin-bottom: 16px; }
+    .sys-badge.live { background: #dff0d8; color: #2a6b2a; }
+    .sys-badge.dev { background: #f5f5f5; color: var(--fgd); border: 1px solid var(--brd); }
+    .sys-card h3 { font-size: 18px; font-weight: 700; letter-spacing: -.03em; margin-bottom: 8px; }
+    .sys-card p { font-size: 14px; color: var(--fgm); line-height: 1.65; margin-bottom: 20px; }
+    .sys-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; }
+    .tag { padding: 3px 9px; border-radius: 100px; font-size: 11.5px; font-weight: 500; background: #eef2f8; color: #3a5a88; }
+    .sys-link { font-size: 13.5px; font-weight: 600; color: var(--ac); display: inline-flex; align-items: center; gap: 5px; transition: gap .12s; }
+    .sys-card:hover .sys-link { gap: 8px; }
+    .sys-card.soon { background: var(--bg2); cursor: default; }
+    .sys-card.soon h3 { color: var(--fgm); }
+    .sys-card.soon:hover { border-color: var(--brd); box-shadow: none; }
+
+    /* ABOUT */
+    .about-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; align-items: start; }
+    @media(max-width: 740px) { .about-cols { grid-template-columns: 1fr; gap: 44px; } }
+    .about-text { font-size: 16px; color: var(--fgm); line-height: 1.8; }
+    .about-text p+p { margin-top: 16px; }
+    .facts { display: flex; flex-direction: column; }
+    .fact { padding-block: 18px; border-top: 1px solid var(--brd); }
+    .fact:last-child { border-bottom: 1px solid var(--brd); }
+    .fk { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--fgd); font-weight: 600; margin-bottom: 5px; }
+    .fv { font-size: 15px; font-weight: 500; color: var(--fg); }
+
+    /* CTA */
+    .cta-sec { padding-block: 96px; border-bottom: 1px solid var(--brd); text-align: center; }
+    .cta-sec h2 { font-size: clamp(26px, 3.8vw, 44px); font-weight: 700; letter-spacing: -.04em; line-height: 1.1; text-wrap: balance; margin-bottom: 16px; max-width: 580px; margin-inline: auto; }
+    .cta-sec p { font-size: 17px; color: var(--fgm); margin-bottom: 38px; }
+    .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+    .email-l { margin-top: 22px; font-size: 14px; color: var(--fgd); }
+    .email-l a { color: var(--ac); font-weight: 500; }
+
+    /* FOOTER */
+    footer { padding-block: 52px 32px; background: var(--bg2); }
+    .ftop { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 48px; margin-bottom: 44px; }
+    @media(max-width: 600px) { .ftop { grid-template-columns: 1fr; gap: 32px; } }
+    .flogo { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .flogo-text { font-size: 15px; font-weight: 600; letter-spacing: -.02em; }
+    .ftag { font-size: 13px; color: var(--fgd); line-height: 1.65; max-width: 260px; }
+    .fch { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .09em; color: var(--fgd); margin-bottom: 13px; }
+    .fcol ul { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+    .fcol ul a { font-size: 13.5px; color: var(--fgm); transition: color .12s; }
+    .fcol ul a:hover { color: var(--fg); }
+    .fbot { border-top: 1px solid var(--brd); padding-top: 26px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .fbot p { font-size: 12.5px; color: var(--fgd); }
+    .fst { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--fgd); }
+    .fdot { width: 7px; height: 7px; border-radius: 50%; background: #3a9e6e; }
+
+    /* SCROLL SNAP — mouse/trackpad only (pointer: fine) */
+    @media (hover: hover) and (pointer: fine) {
+      html { scroll-snap-type: y mandatory; }
+      .hero, .sec, .cta-sec, footer {
+        scroll-snap-align: start;
+        scroll-snap-stop: always;
+      }
+    }
+
+    /* compensa nav sticky em scroll de ancora e snap */
+    .hero, .sec, .cta-sec, footer {
+      scroll-margin-top: 68px;
+    }
+
+    /* MODAL */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 200;
+      background: rgba(10,14,22,.55);
+      backdrop-filter: blur(4px);
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px;
+      opacity: 0; pointer-events: none;
+      transition: opacity .2s ease;
+    }
+    .modal-overlay.open { opacity: 1; pointer-events: auto; }
+    .modal-box {
+      background: var(--bg);
+      border: 1px solid var(--brd);
+      border-radius: 14px;
+      padding: 36px 32px 32px;
+      width: 100%; max-width: 480px;
+      max-height: calc(100vh - 80px);
+      overflow-y: auto;
+      position: relative;
+      box-shadow: 0 20px 60px rgba(0,0,0,.18);
+      transform: translateY(12px);
+      transition: transform .22s ease;
+    }
+    .modal-overlay.open .modal-box { transform: translateY(0); }
+    .modal-close {
+      position: absolute; top: 16px; right: 16px;
+      background: none; border: none; cursor: pointer;
+      color: var(--fgd); font-size: 22px; line-height: 1;
+      padding: 4px 8px; border-radius: 6px;
+      transition: color .12s, background .12s;
+    }
+    .modal-close:hover { color: var(--fg); background: var(--bg2); }
+    .modal-box h3 { font-size: 20px; font-weight: 700; letter-spacing: -.03em; margin-bottom: 6px; }
+    .modal-box > p { font-size: 14px; color: var(--fgm); margin-bottom: 28px; }
+    .mform { display: flex; flex-direction: column; gap: 16px; }
+    .mfield { display: flex; flex-direction: column; gap: 5px; }
+    .mfield label { font-size: 12.5px; font-weight: 600; color: var(--fgm); }
+    .mfield input, .mfield select, .mfield textarea {
+      background: var(--bg2);
+      border: 1px solid var(--brd);
+      border-radius: 8px;
+      padding: 10px 13px;
+      font-size: 14px;
+      color: var(--fg);
+      font-family: var(--f);
+      outline: none;
+      transition: border-color .12s;
+      width: 100%;
+    }
+    .mfield input:focus, .mfield select:focus, .mfield textarea:focus { border-color: var(--ac); }
+    .mfield textarea { resize: vertical; min-height: 80px; }
+    .mfield select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239ba3b0' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 13px center; padding-right: 36px; }
+    .btn-wa {
+      display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+      padding: 13px 26px;
+      background: #25d366; color: #fff;
+      border-radius: 8px; border: none; cursor: pointer;
+      font-size: 15px; font-weight: 600; font-family: var(--f);
+      transition: background .12s;
+      width: 100%; margin-top: 4px;
+    }
+    .btn-wa:hover { background: #1ebe5d; }
+    .btn-wa svg { flex-shrink: 0; }
+
+    /* SCROLL TO TOP */
+    #back-top {
+      position: fixed;
+      bottom: 32px;
+      right: 32px;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: var(--bg);
+      border: 1px solid #c0c8d4;
+      box-shadow: 0 2px 16px rgba(0,0,0,.13);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity .2s ease, transform .2s ease, box-shadow .15s;
+      z-index: 100;
+      pointer-events: none;
+    }
+    #back-top.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    #back-top:hover {
+      box-shadow: 0 4px 24px rgba(27,63,130,.16);
+    }
+    #back-top svg { display: block; }
+  </style>
+</head>
+<body>
+
+<!-- JL icon SVG — inline reusable -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="jl-icon" viewBox="0 0 100 100">
+      <rect width="100" height="100" rx="20" fill="#1b3f82"/>
+      <g stroke="white" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <line x1="16" y1="24" x2="44" y2="24" stroke-width="8.5"/>
+        <path d="M 35,24 L 35,66 Q 35,80 23,80 Q 11,80 11,67" stroke-width="8.5"/>
+        <polyline points="55,24 55,78 83,78" stroke-width="8.5"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<nav>
+  <div class="w ni">
+    <a href="#" class="logo">
+      <svg width="32" height="32" viewBox="0 0 100 100"><use href="#jl-icon"/></svg>
+      <span class="logo-text">JL <span>Informática</span></span>
+    </a>
+    <ul class="nl">
+      <li><a href="#servicos">Serviços</a></li>
+      <li><a href="#sistemas">Sistemas</a></li>
+      <li><a href="#sobre">Sobre</a></li>
+      <li><a href="#contato">Contato</a></li>
+    </ul>
+    <button class="ncta" data-open-modal>Falar com a JL →</button>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="w">
+    <h1>Banco de dados, infraestrutura e operações de TI.</h1>
+    <p>A JL Informática trabalha com DBA, redes, monitoramento e automação. Presentes no dia a dia do ambiente — não só quando algo para.</p>
+    <div class="hbtns">
+      <button class="btn-solid" data-open-modal>Falar com a JL</button>
+      <a href="#servicos" class="btn-link">Ver o que fazemos →</a>
+    </div>
+  </div>
+</section>
+
+<div class="strip">
+  <div class="w">
+    <div class="strip-in">
+      <span class="strip-k">Áreas de atuação</span>
+      <div class="strip-items">
+        <span class="strip-item">Bancos</span>
+        <span class="strip-item">Indústria</span>
+        <span class="strip-item">Varejo</span>
+        <span class="strip-item">Saúde</span>
+        <span class="strip-item">Logística</span>
+        <span class="strip-item">Serviços</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<section class="sec" id="servicos">
+  <div class="w">
+    <p class="ey">Serviços</p>
+    <h2 class="sh">Da base de dados à operação — cobrimos toda a stack</h2>
+    <p class="sb">Atuamos em múltiplas camadas da infraestrutura. Cada projeto tem um time técnico dedicado.</p>
+    <div class="svc-grid">
+      <div class="svc-card">
+        <svg class="svc-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="4" y="6" width="24" height="6" rx="2" stroke="#1b3f82" stroke-width="1.8"/>
+          <rect x="4" y="14" width="24" height="6" rx="2" stroke="#1b3f82" stroke-width="1.8"/>
+          <rect x="4" y="22" width="24" height="6" rx="2" stroke="#1b3f82" stroke-width="1.8"/>
+          <circle cx="24" cy="9" r="1.5" fill="#1b3f82"/>
+          <circle cx="24" cy="17" r="1.5" fill="#1b3f82"/>
+        </svg>
+        <h3>Banco de Dados</h3>
+        <p>DBA on demand e gerenciado. Oracle, PostgreSQL, SQL Server, MySQL. Performance tuning, migração, alta disponibilidade e backup.</p>
+      </div>
+      <div class="svc-card">
+        <svg class="svc-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="3" y="18" width="10" height="10" rx="2" stroke="#1b3f82" stroke-width="1.8"/>
+          <rect x="11" y="10" width="10" height="18" rx="2" stroke="#1b3f82" stroke-width="1.8"/>
+          <rect x="19" y="4" width="10" height="24" rx="2" stroke="#1b3f82" stroke-width="1.8"/>
+        </svg>
+        <h3>Infraestrutura Empresarial</h3>
+        <p>Servidores, redes, virtualização e cloud para grandes ambientes. Arquitetura, implementação e gestão contínua.</p>
+      </div>
+      <div class="svc-card">
+        <svg class="svc-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="16" cy="16" r="10" stroke="#1b3f82" stroke-width="1.8"/>
+          <circle cx="16" cy="16" r="5" stroke="#1b3f82" stroke-width="1.8"/>
+          <circle cx="16" cy="16" r="1.5" fill="#1b3f82"/>
+        </svg>
+        <h3>Monitoramento e NOC</h3>
+        <p>Monitoramento 24/7 com alertas, escalonamento e resposta a incidentes. Zabbix e outras plataformas. Visibilidade em tempo real.</p>
+      </div>
+      <div class="svc-card">
+        <svg class="svc-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M6 10h20M6 16h12M6 22h8" stroke="#1b3f82" stroke-width="1.8" stroke-linecap="round"/>
+          <circle cx="25" cy="22" r="4" stroke="#1b3f82" stroke-width="1.8"/>
+          <path d="M23.5 22l1 1 2-2" stroke="#1b3f82" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h3>Suporte de Infraestrutura</h3>
+        <p>Suporte técnico especializado para ambientes complexos. N1, N2 e N3. SLA definido e time sênior.</p>
+      </div>
+      <div class="svc-card">
+        <svg class="svc-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M8 24l4-8 4 4 4-12 4 8" stroke="#1b3f82" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 28h24" stroke="#1b3f82" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <h3>Automação e DevOps</h3>
+        <p>CI/CD, scripts, pipelines e automação de processos operacionais. Menos trabalho manual, menos risco humano.</p>
+      </div>
+      <div class="svc-card">
+        <svg class="svc-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M8 8h16v16H8z" stroke="#1b3f82" stroke-width="1.8" rx="2"/>
+          <path d="M12 14h8M12 18h5" stroke="#1b3f82" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M21 5v6M26 10h-6" stroke="#1b3f82" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <h3>Consultoria e Projetos</h3>
+        <p>Assessment de infraestrutura, arquitetura de soluções, planejamento de capacidade e migração de ambientes.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec alt" id="sistemas">
+  <div class="w">
+    <p class="ey">Nossos Sistemas</p>
+    <h2 class="sh">Ferramentas que construímos porque precisávamos delas</h2>
+    <p class="sb">Quando as ferramentas do mercado não respondem como precisamos, desenvolvemos as nossas. Cada sistema nasce de uma necessidade concreta da operação.</p>
+    <div class="sys-grid">
+      <div class="sys-card featured">
+        <span class="sys-badge live">Em produção</span>
+        <h3>JLMirror</h3>
+        <p>Plataforma de operações e monitoramento para MSPs e equipes de TI. Centraliza alertas, incidentes, mudanças e SLA em um painel unificado.</p>
+        <div class="sys-tags">
+          <span class="tag">Monitoramento</span>
+          <span class="tag">Alertas</span>
+          <span class="tag">SLA</span>
+          <span class="tag">NOC</span>
+        </div>
+        <a href="/monitoring" class="sys-link">Acessar painel →</a>
+      </div>
+      <div class="sys-card soon">
+        <span class="sys-badge dev">Em desenvolvimento</span>
+        <h3>Próximo sistema</h3>
+        <p>Novos sistemas surgem das necessidades que identificamos na operação diária dos nossos clientes.</p>
+        <div class="sys-tags">
+          <span class="tag" style="background:#f0f0f0;color:var(--fgd)">Em breve</span>
+        </div>
+      </div>
+      <div class="sys-card soon">
+        <span class="sys-badge dev">Planejado</span>
+        <h3>Em avaliação</h3>
+        <p>Avaliamos continuamente quais ferramentas faz sentido desenvolver em vez de adquirir ou terceirizar.</p>
+        <div class="sys-tags">
+          <span class="tag" style="background:#f0f0f0;color:var(--fgd)">Em breve</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="sobre">
+  <div class="w">
+    <div class="about-cols">
+      <div>
+        <p class="ey">Sobre a JL</p>
+        <h2 class="sh">Parceiro técnico de longo prazo, não fornecedor de evento.</h2>
+        <div class="about-text">
+          <p>A JL Informática existe para resolver problemas de infraestrutura que exigem profundidade técnica. Atuamos há mais de dez anos em ambientes de banco de dados, redes e operações de TI para empresas que não podem aceitar imprecisão.</p>
+          <p>Desenvolvemos sistemas próprios quando o mercado não entrega o que precisamos — o JLMirror é um exemplo disso. E continuaremos desenvolvendo sempre que identificarmos uma lacuna que valha resolver.</p>
+          <p>Nosso modelo é de parceria técnica contínua: conhecemos o ambiente do cliente em profundidade, não por relatórios, mas porque operamos dentro dele.</p>
+        </div>
+      </div>
+      <div class="facts">
+        <div class="fact">
+          <div class="fk">Atuação</div>
+          <div class="fv">Banco de dados, infraestrutura, operações e desenvolvimento</div>
+        </div>
+        <div class="fact">
+          <div class="fk">Experiência</div>
+          <div class="fv">Mais de 10 anos em ambientes críticos no Brasil</div>
+        </div>
+        <div class="fact">
+          <div class="fk">Clientes</div>
+          <div class="fv">Empresas de médio e grande porte, bancos e indústria</div>
+        </div>
+        <div class="fact">
+          <div class="fk">Sistemas próprios</div>
+          <div class="fv">JLMirror — plataforma de operações para MSPs</div>
+        </div>
+        <div class="fact">
+          <div class="fk">Contato</div>
+          <div class="fv"><a href="#contato" style="color:var(--ac);font-weight:500">Falar com a JL →</a></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="cta-sec" id="contato">
+  <div class="w">
+    <h2>Quer conversar sobre o seu ambiente?</h2>
+    <p>Fale com a JL. Sem formulário genérico — uma conversa técnica direta.</p>
+    <div class="cta-row">
+      <button class="btn-solid" data-open-modal>Entrar em contato</button>
+      <a href="#sistemas" class="btn-link">Ver nossos sistemas →</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="w">
+    <div class="ftop">
+      <div>
+        <div class="flogo">
+          <svg width="28" height="28" viewBox="0 0 100 100"><use href="#jl-icon"/></svg>
+          <span class="flogo-text">JL Informática</span>
+        </div>
+        <p class="ftag">Banco de dados, infraestrutura e operações de TI há mais de dez anos.</p>
+      </div>
+      <div class="fcol">
+        <div class="fch">Serviços</div>
+        <ul>
+          <li><a href="#servicos">Banco de Dados</a></li>
+          <li><a href="#servicos">Infraestrutura</a></li>
+          <li><a href="#servicos">Monitoramento</a></li>
+          <li><a href="#servicos">Suporte</a></li>
+          <li><a href="#servicos">Automação</a></li>
+        </ul>
+      </div>
+      <div class="fcol">
+        <div class="fch">Empresa</div>
+        <ul>
+          <li><a href="#sistemas">JLMirror</a></li>
+          <li><a href="#sobre">Sobre a JL</a></li>
+          <li><a href="#contato">Contato</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbot">
+      <p>© 2026 JL Informática. Todos os direitos reservados.</p>
+      <div class="fst"><div class="fdot"></div> Sistemas operacionais</div>
+    </div>
+  </div>
+</footer>
+
+<!-- Modal de contato -->
+<div id="contact-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-box">
+    <button class="modal-close" aria-label="Fechar">&times;</button>
+    <h3 id="modal-title">Fale com a JL</h3>
+    <p>Preencha e abrimos a conversa no WhatsApp — direto com quem decide.</p>
+    <form class="mform" id="contact-form" novalidate>
+      <div class="mfield">
+        <label for="cf-nome">Seu nome *</label>
+        <input id="cf-nome" name="nome" type="text" placeholder="João Silva" required>
+      </div>
+      <div class="mfield">
+        <label for="cf-empresa">Empresa *</label>
+        <input id="cf-empresa" name="empresa" type="text" placeholder="Empresa S.A." required>
+      </div>
+      <div class="mfield">
+        <label for="cf-interesse">Qual é a necessidade?</label>
+        <select id="cf-interesse" name="interesse">
+          <option value="Banco de Dados">Banco de Dados (DBA / performance / migração)</option>
+          <option value="Infraestrutura">Infraestrutura (servidores, cloud, redes)</option>
+          <option value="Monitoramento e NOC">Monitoramento e NOC 24/7</option>
+          <option value="Suporte de Infraestrutura">Suporte de Infraestrutura (N1/N2/N3)</option>
+          <option value="Automação e DevOps">Automação e DevOps</option>
+          <option value="Consultoria">Consultoria e Projetos</option>
+          <option value="JLMirror">JLMirror — plataforma de operações</option>
+          <option value="Outro">Outro / não sei ainda</option>
+        </select>
+      </div>
+      <div class="mfield">
+        <label for="cf-msg">Contexto rápido (opcional)</label>
+        <textarea id="cf-msg" name="mensagem" placeholder="Ex: temos um Oracle 19c com lentidão em produção desde a última atualização..."></textarea>
+      </div>
+      <button type="submit" class="btn-wa">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path fill-rule="evenodd" clip-rule="evenodd" d="M10 1C5.03 1 1 5.03 1 10c0 1.6.42 3.1 1.15 4.4L1 19l4.73-1.12A9 9 0 1010 1zm0 16.4a7.4 7.4 0 01-3.76-1.02l-.27-.16-2.8.66.68-2.72-.18-.28A7.4 7.4 0 1110 17.4z" fill="white"/>
+          <path d="M7.5 6.5c-.18-.4-.37-.41-.54-.42H6.5c-.17 0-.44.06-.67.32C5.6 6.66 5 7.32 5 8.66s.98 2.68 1.12 2.86c.14.18 1.88 3 4.63 4.08 2.3.91 2.75.73 3.24.68.5-.05 1.6-.65 1.83-1.28.22-.63.22-1.17.15-1.28-.07-.11-.25-.18-.52-.31-.27-.14-1.6-.79-1.85-.88-.25-.09-.43-.14-.6.14-.18.27-.7.88-.85 1.06-.16.18-.31.2-.58.07-.27-.14-1.14-.42-2.17-1.34-.8-.72-1.34-1.6-1.5-1.88-.16-.27-.02-.42.12-.56.12-.12.27-.31.41-.47.13-.15.18-.27.27-.45.09-.18.05-.34-.02-.48-.07-.14-.6-1.47-.84-2z" fill="white"/>
+        </svg>
+        Continuar no WhatsApp
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- Back to top -->
+<button id="back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Voltar ao topo">
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M8 12V4M4 8l4-4 4 4" stroke="#1b3f82" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</button>
+
+<script>
+(function () {
+  var modal   = document.getElementById('contact-modal');
+  var form    = document.getElementById('contact-form');
+  var closeBtn = modal.querySelector('.modal-close');
+
+  function openModal() {
+    modal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    modal.querySelector('#cf-nome').focus();
+  }
+  function closeModal() {
+    modal.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  document.querySelectorAll('[data-open-modal]').forEach(function (el) {
+    el.addEventListener('click', openModal);
+  });
+  closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) {
+    if (e.target === modal) closeModal();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && modal.classList.contains('open')) closeModal();
+  });
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var nome     = form.nome.value.trim();
+    var empresa  = form.empresa.value.trim();
+    var interesse = form.interesse.value;
+    var msg      = form.mensagem.value.trim();
+
+    if (!nome || !empresa) {
+      if (!nome) form.nome.focus();
+      else form.empresa.focus();
+      return;
+    }
+
+    var texto = 'Olá! Sou *' + nome + '* da empresa *' + empresa + '*.\n\n'
+      + 'Necessidade: *' + interesse + '*\n';
+    if (msg) texto += '\n' + msg + '\n';
+    texto += '\nPodemos conversar?';
+
+    window.open('https://wa.me/5547992657567?text=' + encodeURIComponent(texto), '_blank');
+    closeModal();
+    form.reset();
+  });
+})();
+</script>
+
+<script>
+(function () {
+  const btn  = document.getElementById('back-top');
+  const hero = document.querySelector('.hero');
+  window.addEventListener('scroll', function () {
+    btn.classList.toggle('visible', window.scrollY > hero.offsetHeight);
+  }, { passive: true });
+})();
+</script>
+</body>
+</html>

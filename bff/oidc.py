@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 _jwks_client: Optional[PyJWKClient] = None
 _discovery: Optional[dict] = None
+_discovery_expiry: float = 0.0
+_DISCOVERY_TTL = 3600.0  # re-fetch after 1 hour (covers key rotations)
 
 
 def _pkce_challenge(verifier: str) -> str:
@@ -53,9 +55,9 @@ def new_nonce() -> str:
 
 
 async def discover() -> dict:
-    """Fetch and cache the OIDC discovery document."""
-    global _discovery
-    if _discovery is not None:
+    """Fetch and cache the OIDC discovery document (TTL: 1 hour)."""
+    global _discovery, _discovery_expiry
+    if _discovery is not None and time.monotonic() < _discovery_expiry:
         return _discovery
     url = (
         f"{settings.keycloak_internal_url}/realms/{settings.keycloak_realm}"
@@ -65,13 +67,15 @@ async def discover() -> dict:
         resp = await client.get(url)
         resp.raise_for_status()
         _discovery = resp.json()
+        _discovery_expiry = time.monotonic() + _DISCOVERY_TTL
     return _discovery
 
 
 def reset_discovery() -> None:
     """Drop cached discovery/JWKS (for tests and key rotation)."""
-    global _discovery, _jwks_client
+    global _discovery, _jwks_client, _discovery_expiry
     _discovery = None
+    _discovery_expiry = 0.0
     _jwks_client = None
 
 

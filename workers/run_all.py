@@ -29,10 +29,18 @@ from workers.outbox_dispatcher import _publish_durable as outbox
 from workers.notification_dispatch import (
     _process_pending as notification_dispatch)
 from workers.itsm_sync import _process_pending as itsm_sync
+from workers.incident_response import _process_pending as incident_response
 from workers.problem_state import _process_pending as problem_state
 from workers.reconciliation import _process_pending as reaper
 from workers.scheduler import _process_pending as scheduler
 from workers.validation import _process_pending as validation
+from workers.aiops import _process_pending as aiops
+from workers.finops import _process_pending as finops
+from workers.escalation import _process_pending as escalation
+from workers.sla_checker import _process_pending as sla_checker
+from workers.automation_runner import _process_pending as automation_runner
+from workers.report_sender import _process_pending as report_sender
+from workers.cert_checker import _process_pending as cert_checker
 
 logger = logging.getLogger("workers.run_all")
 
@@ -50,6 +58,14 @@ _PROCESSORS = (
     ("alerting_inbox", alerting_inbox),
     ("notification_dispatch", notification_dispatch),
     ("itsm_sync", itsm_sync),
+    ("incident_response", incident_response),
+    ("aiops", aiops),
+    ("finops", finops),
+    ("escalation", escalation),
+    ("sla_checker", sla_checker),
+    ("automation_runner", automation_runner),
+    ("report_sender", report_sender),
+    ("cert_checker", cert_checker),
 )
 
 

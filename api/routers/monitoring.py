@@ -13,6 +13,7 @@ sandbox mode (no BFF context), explicit tenant_id is accepted.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from typing import Annotated
 
@@ -31,6 +32,7 @@ from shared.monitoring_repo import (
     enqueue_problem_state_sync,
     enqueue_sync_operation,
     get_onboarding_view,
+    get_resource_detail,
     get_source,
     list_current_states,
     list_health_projections,
@@ -39,6 +41,7 @@ from shared.monitoring_repo import (
     list_metric_definitions,
     list_metric_history,
     list_problems,
+    list_resource_current_states,
     list_resources,
     list_sources,
     list_sync_operations,
@@ -305,7 +308,8 @@ async def create_source(body: SourceCreateRequest, request: Request) -> SourceRe
         try:
             bao = BaoCredentialResolver()
             if bao.available:
-                bao.store_zabbix_api_token(
+                await asyncio.to_thread(
+                    bao.store_zabbix_api_token,
                     body.credential_binding_ref, body.api_token)
             write_binding_token(
                 body.credential_binding_ref, body.api_token)
@@ -465,6 +469,72 @@ async def get_source_endpoint(source_id: str, request: Request, tenant_id: str |
     return row
 
 
+class CredentialUpdateRequest(BaseModel):
+    api_token: str
+
+
+@router.put("/sources/{source_id}/credential", status_code=200)
+async def rotate_source_credential(
+    source_id: str,
+    body: CredentialUpdateRequest,
+    request: Request,
+    tenant_id: str | None = None,
+) -> dict:
+    """Replace the stored provider token for a monitoring source.
+
+    Writes the new token to OpenBao (authoritative) and to the mounted
+    secrets file (worker fallback). Does NOT revoke the old token at the
+    provider — that must be done in Zabbix Administration → API tokens.
+    """
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        row = await get_source(conn, tenant, source_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    cred_ref = row["credential_binding_ref"]
+    from providers.credentials import BaoCredentialResolver, write_binding_token
+    from jlmirror_monitoring.validation_worker import CredentialResolutionError
+    try:
+        bao = BaoCredentialResolver()
+        if bao.available:
+            await asyncio.to_thread(
+                bao.store_zabbix_api_token, cred_ref, body.api_token)
+        write_binding_token(cred_ref, body.api_token)
+    except CredentialResolutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"credential_binding_ref": cred_ref, "updated": True}
+
+
+@router.delete("/sources/{source_id}/credential", status_code=200)
+async def revoke_source_credential(
+    source_id: str,
+    request: Request,
+    tenant_id: str | None = None,
+) -> dict:
+    """Remove the stored provider token for a monitoring source.
+
+    Deletes the token from OpenBao and from the mounted secrets file.
+    The monitoring source will fail credential resolution until a new
+    token is supplied via PUT /sources/{source_id}/credential.
+    """
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        row = await get_source(conn, tenant, source_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    cred_ref = row["credential_binding_ref"]
+    from providers.credentials import BaoCredentialResolver, delete_binding_token
+    from jlmirror_monitoring.validation_worker import CredentialResolutionError
+    try:
+        bao = BaoCredentialResolver()
+        if bao.available:
+            await asyncio.to_thread(bao.delete_zabbix_api_token, cred_ref)
+        delete_binding_token(cred_ref)
+    except CredentialResolutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"credential_binding_ref": cred_ref, "revoked": True}
+
+
 @router.post("/sync/run", status_code=200)
 async def run_sync_once() -> dict:
     """Dev trigger: run one validation pass over pending operations.
@@ -525,6 +595,54 @@ async def list_resources_endpoint(source_id: str, request: Request,
     async with db_tenant_connection(tenant) as conn:
         payload = await list_resources(conn, tenant, source_id, **params)
     return _ser_rows(payload)
+
+
+@router.get("/sources/{source_id}/resources/{resource_id}")
+async def get_resource_detail_endpoint(
+    source_id: str, resource_id: str, request: Request,
+    tenant_id: str | None = None,
+) -> dict:
+    """Device detail — full resource record + normalized_evidence JSONB."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        detail = await get_resource_detail(conn, tenant, source_id, resource_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="resource not found")
+    return detail
+
+
+@router.get("/sources/{source_id}/resources/{resource_id}/current")
+async def list_resource_current_states_endpoint(
+    source_id: str, resource_id: str, request: Request,
+    tenant_id: str | None = None,
+    limit: int = 200,
+) -> dict:
+    """Current metric states for a single resource, ordered by metric name."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        payload = await list_resource_current_states(
+            conn, tenant, source_id, resource_id, limit=limit,
+        )
+    return payload
+
+
+@router.get("/sources/{source_id}/resources/{resource_id}/problems")
+async def list_resource_problems_endpoint(
+    source_id: str, resource_id: str, request: Request,
+    tenant_id: str | None = None,
+) -> dict:
+    """Active problems for a single resource, filtered from the source problem list."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        result = await list_problems(
+            conn, tenant, source_id,
+            active_only=True, cursor=None, limit=200, view="contract",
+        )
+    filtered = [
+        item for item in result.get("items", [])
+        if item.get("monitoring_resource_id") == resource_id
+    ]
+    return {"items": filtered}
 
 
 @router.get("/sources/{source_id}/onboarding")

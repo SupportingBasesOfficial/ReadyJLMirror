@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
 
+from shared.config import settings
 from shared.auth import (
     fence_store,
     session_store,
@@ -48,6 +49,8 @@ async def issue_session(
     x_principal_id: Annotated[str | None, Header()] = None,
 ) -> SessionIssueResponse:
     """Issue a browser session for the given principal (development mode)."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available outside development")
     principal = make_dev_principal(body.principal_id, body.credential_generation)
     try:
         handle = issue_browser_session(
@@ -103,6 +106,8 @@ class FenceResponse(BaseModel):
 @router.post("/fence/bootstrap", response_model=FenceResponse)
 async def bootstrap_fence(body: FenceBootstrapRequest) -> FenceResponse:
     """Bootstrap a fence scope with an initial generation."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available outside development")
     record = fence_store.bootstrap(body.fence_scope_id, body.generation_id)
     return FenceResponse(
         fence_scope_id=record.fence_scope_id,
@@ -122,6 +127,8 @@ class FenceAcquireRequest(BaseModel):
 @router.post("/fence/acquire", response_model=FenceResponse)
 async def acquire_fence(body: FenceAcquireRequest) -> FenceResponse:
     """Acquire the next fence epoch for a scope."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available outside development")
     try:
         record = acquire_next_fence(
             authority=fence_store,
@@ -143,6 +150,8 @@ async def acquire_fence(body: FenceAcquireRequest) -> FenceResponse:
 @router.get("/fence/current/{fence_scope_id}", response_model=FenceResponse | None)
 async def current_fence(fence_scope_id: str) -> FenceResponse | None:
     """Get the current fence state for a scope."""
+    if not settings.is_development:
+        raise HTTPException(status_code=403, detail="not available outside development")
     record = fence_store.current(fence_scope_id)
     if record is None:
         return None
