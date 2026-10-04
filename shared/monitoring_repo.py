@@ -1982,7 +1982,7 @@ class PgMetricCurrentStateRepository:
             existing = cur.fetchone()
 
             if existing is None:
-                self._conn.execute(
+                ins = self._conn.execute(
                     """
                     INSERT INTO monitoring.metric_current_state
                         (tenant_id, metric_definition_id,
@@ -1995,6 +1995,7 @@ class PgMetricCurrentStateRepository:
                     VALUES (%s, %s, %s, %s, %s, %s, %s,
                             transaction_timestamp(), %s, %s::jsonb, 'current',
                             1, %s, %s, transaction_timestamp())
+                    ON CONFLICT DO NOTHING
                     """,
                     (claim.tenant_id, obs.metric_definition_id,
                      obs.monitoring_resource_id, claim.monitoring_source_id,
@@ -2004,21 +2005,22 @@ class PgMetricCurrentStateRepository:
                      claim.current_state_poll_epoch,
                      claim.current_state_poll_generation),
                 )
-                self._conn.execute(
-                    """
-                    INSERT INTO monitoring.monitoring_metric_current_state_transition
-                        (tenant_id, current_state_transition_id,
-                         metric_definition_id, monitoring_resource_id,
-                         monitoring_source_id, source_instance_generation,
-                         from_observation_id, to_observation_id,
-                         projection_revision, evidence_state)
-                    VALUES (%s, %s, %s, %s, %s, %s, NULL, %s, 1, 'current')
-                    """,
-                    (claim.tenant_id, _opaque("mon-trans"),
-                     obs.metric_definition_id, obs.monitoring_resource_id,
-                     claim.monitoring_source_id,
-                     claim.source_instance_generation, observation_id),
-                )
+                if ins.rowcount == 1:
+                    self._conn.execute(
+                        """
+                        INSERT INTO monitoring.monitoring_metric_current_state_transition
+                            (tenant_id, current_state_transition_id,
+                             metric_definition_id, monitoring_resource_id,
+                             monitoring_source_id, source_instance_generation,
+                             from_observation_id, to_observation_id,
+                             projection_revision, evidence_state)
+                        VALUES (%s, %s, %s, %s, %s, %s, NULL, %s, 1, 'current')
+                        """,
+                        (claim.tenant_id, _opaque("mon-trans"),
+                         obs.metric_definition_id, obs.monitoring_resource_id,
+                         claim.monitoring_source_id,
+                         claim.source_instance_generation, observation_id),
+                    )
             else:
                 (prior_obs_id, prior_rev, prior_clock, prior_ns) = existing
                 newer = (
@@ -2587,6 +2589,7 @@ class PgMetricHistoryRepository:
                        provisional_ns = CASE
                            WHEN provisional_clock IS NULL
                                 OR %s > provisional_clock
+                                OR (%s = provisional_clock AND %s > provisional_ns)
                            THEN %s
                            ELSE provisional_ns END,
                        safe_clock = GREATEST(safe_clock, %s),
@@ -2601,7 +2604,7 @@ class PgMetricHistoryRepository:
                    AND history_value_type = %s
                 """,
                 (
-                    clock, clock, ns, clock, clock, ns,
+                    clock, clock, clock, ns, ns, clock, clock, ns,
                     claim.tenant_id, claim.monitoring_source_id,
                     claim.source_instance_generation, itemid, value_type,
                 ),
@@ -2973,12 +2976,17 @@ class PgProblemStateRepository:
              source_instance_generation),
         )
         host_to_resource = {r[0]: r[1] for r in cur.fetchall()}
-        n = 0
+        params_list = []
         for trigger_ref, hostid in trigger_host_pairs:
             resource_id = host_to_resource.get(hostid)
             if resource_id is None:
                 continue  # out-of-scope host — no association
-            self._conn.execute(
+            params_list.append((
+                self._tenant_id, monitoring_source_id,
+                source_instance_generation, trigger_ref, resource_id,
+            ))
+        if params_list:
+            self._conn.executemany(
                 """
                 INSERT INTO monitoring.monitoring_trigger_binding
                     (tenant_id, monitoring_source_id,
@@ -2991,14 +2999,10 @@ class PgProblemStateRepository:
                                   EXCLUDED.monitoring_resource_id,
                               updated_at = transaction_timestamp()
                 """,
-                (
-                    self._tenant_id, monitoring_source_id,
-                    source_instance_generation, trigger_ref, resource_id,
-                ),
+                params_list,
             )
-            n += 1
         self._conn.commit()
-        return n
+        return len(params_list)
 
     # -- canonical claim/complete ports ------------------------------------
 
@@ -3917,21 +3921,32 @@ class PgHealthProjectionRepository:
         )
         resources = cur.fetchall()
 
-        written = 0
-        for (res_id, presence, presence_ev, scope_state, scope_ev,
-             scope_rev_res) in resources:
+        # Batch-fetch all active problems for this source to avoid N+1 queries.
+        if resources:
+            all_res_ids = [row[0] for row in resources]
             cur = self._conn.execute(
                 """
-                SELECT severity_class, evidence_state, problem_id
+                SELECT monitoring_resource_id, severity_class,
+                       evidence_state, problem_id
                   FROM monitoring.monitoring_problem
                  WHERE tenant_id = %s AND monitoring_source_id = %s
                    AND source_instance_generation = %s
-                   AND monitoring_resource_id = %s
+                   AND monitoring_resource_id = ANY(%s)
                    AND problem_state = 'active'
                 """,
-                (self._tenant_id, monitoring_source_id, generation, res_id),
+                (self._tenant_id, monitoring_source_id, generation,
+                 all_res_ids),
             )
-            problems = cur.fetchall()
+            problems_by_resource: dict[str, list] = {}
+            for row in cur.fetchall():
+                problems_by_resource.setdefault(row[0], []).append(row[1:])
+        else:
+            problems_by_resource = {}
+
+        written = 0
+        for (res_id, presence, presence_ev, scope_state, scope_ev,
+             scope_rev_res) in resources:
+            problems = problems_by_resource.get(res_id, [])
             severities = [SeverityClass(p[0]) for p in problems]
             reason_refs = tuple(
                 f"problem:{p[2]}" for p in problems[:64])
