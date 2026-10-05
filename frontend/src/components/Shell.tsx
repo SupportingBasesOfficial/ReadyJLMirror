@@ -132,7 +132,7 @@ export function Shell() {
 
   const { data: openChangesCount } = useQuery({
     queryKey: ["nav-badge-changes", session?.tenant_id],
-    queryFn: () => api.get<{ state?: string }[]>("/api/v1/changes"),
+    queryFn: () => api.get<{ state?: string }[]>("/api/v1/itsm/changes"),
     refetchInterval: 60_000,
     enabled: session?.state === "ready",
     select: (d) => (Array.isArray(d) ? d.filter((c) => c.state && ["draft", "review", "approved"].includes(c.state)).length : 0),
