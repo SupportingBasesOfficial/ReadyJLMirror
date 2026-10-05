@@ -77,7 +77,7 @@ interface MetricState {
   monitoring_resource_id: string;
   observed_at?: string;
   value_kind: string;
-  value?: Record<string, unknown>;
+  value?: unknown;
   name: string;
   unit?: string;
 }
@@ -119,21 +119,22 @@ function fmtTs(iso?: string) {
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }
 
-function fmtMetricValue(value: Record<string, unknown> | null | undefined, unit?: string): string {
-  if (!value) return "—";
-  if ("n" in value) {
-    const n = Number(value.n);
+function fmtMetricValue(value: unknown, unit?: string): string {
+  if (!value || typeof value !== "object") return "—";
+  const v = value as Record<string, unknown>;
+  if ("n" in v) {
+    const n = Number(v.n);
     if (isNaN(n)) return "—";
     const formatted = Number.isInteger(n) ? String(n) : n.toFixed(2);
     return unit ? `${formatted} ${unit}` : formatted;
   }
-  if ("s" in value) return String(value.s).slice(0, 80);
+  if ("s" in v) return String(v.s).slice(0, 80);
   return "—";
 }
 
 function toChartData(points: HistoryPoint[]): { t: number; v: number }[] {
   return points
-    .filter(p => p.value && "n" in p.value)
+    .filter(p => p.value && typeof p.value === "object" && "n" in p.value)
     .map(p => ({
       t: new Date(p.observed_at).getTime(),
       v: Number((p.value as { n: number }).n),
