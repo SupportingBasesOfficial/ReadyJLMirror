@@ -36,3 +36,13 @@ export const api = {
   patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
   delete: <T>(path: string) => request<T>("DELETE", path),
 };
+
+export async function logout(): Promise<void> {
+  await fetch("/auth/logout", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "X-CSRF-Token": csrfToken() },
+    redirect: "follow",
+  }).catch(() => {});
+  window.location.href = "/";
+}

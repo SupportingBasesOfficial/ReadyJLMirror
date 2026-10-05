@@ -9,6 +9,7 @@
       "clientId": "jlmirror-bff",
       "name": "JLMirror BFF",
       "enabled": true,
+      "secret": "dev-bff-secret-change-me",
       "publicClient": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,

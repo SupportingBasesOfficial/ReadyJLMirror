@@ -13,7 +13,7 @@ import {
   ScrollText, BookOpen, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Building2,
 } from "lucide-react";
-import { api } from "@/api/client";
+import { api, logout } from "@/api/client";
 import { AlertsPage } from "@/pages/AlertsPage";
 import { MonitoringPage } from "@/pages/MonitoringPage";
 import { InventoryPage } from "@/pages/InventoryPage";
@@ -234,9 +234,7 @@ export function Shell() {
       <div className="flex items-center justify-center min-h-screen">
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-10 min-w-[320px] text-center">
           <p className="text-[var(--red)] mb-4">Acesso negado — sem associação a um workspace ativo.</p>
-          <form method="post" action="/auth/logout">
-            <Button variant="secondary" type="submit">Sair</Button>
-          </form>
+          <Button variant="secondary" onClick={() => logout()}>Sair</Button>
         </div>
       </div>
     );
@@ -542,16 +540,15 @@ export function Shell() {
               </div>
             )}
             {!collapsed && (
-              <form method="post" action="/auth/logout" className="m-0 flex-shrink-0">
-                <button
-                  type="submit"
-                  title="Sair"
-                  className="p-1 rounded-md hover:bg-[var(--surface-2)] transition-colors"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  <LogOut size={13} />
-                </button>
-              </form>
+              <button
+                type="button"
+                title="Sair"
+                onClick={() => logout()}
+                className="p-1 rounded-md hover:bg-[var(--surface-2)] transition-colors"
+                style={{ color: "var(--text-muted)" }}
+              >
+                <LogOut size={13} />
+              </button>
             )}
           </div>
 

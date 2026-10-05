@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import { api, logout } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Activity, Bell, Zap, CheckCircle } from "lucide-react";
@@ -179,15 +179,14 @@ export function OnboardingPage({ principalId: _principalId }: Props) {
             Criar meu workspace
           </Button>
 
-          <form method="post" action="/auth/logout" className="mt-3">
-            <button
-              type="submit"
-              className="w-full text-xs py-1"
-              style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer" }}
-            >
-              Sair
-            </button>
-          </form>
+          <button
+            type="button"
+            onClick={() => logout()}
+            className="w-full text-xs py-1 mt-3"
+            style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer" }}
+          >
+            Sair
+          </button>
         </div>
       </div>
     );
