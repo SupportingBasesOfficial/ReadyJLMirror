@@ -19,7 +19,8 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, field_validator
 
 from api.routers.monitoring import _authoritative_tenant
-from shared.db import db_connection
+from shared.audit import record_audit_event
+from shared.db import db_connection, db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/alerting", tags=["incident_response"])
 
@@ -228,4 +229,64 @@ async def get_error_event(path_tenant: str, event_id: str,
                           tenant_id: str | None = None) -> dict:
     tenant = _authoritative_tenant(request, tenant_id or path_tenant)
     result = await _g11("g11_get_event", (tenant, event_id))
+    return result or {}
+
+
+# ─── Operator mark-as-processed ───────────────────────────────────────────────
+
+class EventStatusUpdate(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def _valid_status(cls, v: str) -> str:
+        if v != "processed":
+            raise ValueError(
+                "only status='processed' is supported on this endpoint")
+        return v
+
+
+@router.patch(
+    "/tenants/{path_tenant}/application-error-events/{event_id}",
+    status_code=status.HTTP_200_OK,
+)
+async def mark_event_processed(
+    path_tenant: str,
+    event_id: str,
+    request: Request,
+    body: EventStatusUpdate,
+    tenant_id: str | None = None,
+) -> dict:
+    """Mark an application-error-event as processed by an operator.
+
+    Delegates the status update to incident_response.g11_mark_event_processed
+    (SECURITY DEFINER, runs as jlmirror_g11_ir_executor) which validates
+    tenant ownership and sets status = 'processed' on
+    incident_response.application_error_event.
+
+    The audit event is written in a separate tenant-scoped transaction
+    because the invoker role (jlmirror_g11_ir_app_invoker) does not hold
+    INSERT on audit.audit_event; only the base jlmirror_app role does.
+    """
+    tenant = _authoritative_tenant(request, tenant_id or path_tenant)
+    actor = _actor(request)
+
+    # 1. Validate event belongs to tenant and update status to 'processed'.
+    #    g11_mark_event_processed raises g11.event_missing if not found,
+    #    which _g11 maps to HTTP 404 via _G11_ERRORS.
+    result = await _g11("g11_mark_event_processed", (tenant, event_id, actor))
+
+    # 2. Audit event — separate tenant-context connection because
+    #    SET LOCAL ROLE (used inside _g11) drops jlmirror_app permissions.
+    async with db_tenant_connection(tenant) as conn:
+        await record_audit_event(
+            conn, tenant,
+            action="incident_response.event.processed",
+            actor_kind="principal",
+            actor_id=actor,
+            subject_type="application_error_event",
+            subject_id=event_id,
+            detail={"status": "processed"})
+        await conn.commit()
+
     return result or {}

@@ -103,6 +103,34 @@ async def disable_template(request: Request, template_id: str) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/templates/{template_id}/trigger", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_template(request: Request, template_id: str) -> dict:
+    """Enqueue an immediate one-off report generation for the template."""
+    tenant_id = _require_tenant(request)
+    async with db_tenant_connection(tenant_id) as conn:
+        row = await conn.execute(
+            "SELECT template_id, report_type FROM g1.report_template "
+            "WHERE tenant_id=%s AND template_id=%s AND enabled=true",
+            (tenant_id, template_id),
+        )
+        record = await row.fetchone()
+        if record is None:
+            raise HTTPException(status_code=404,
+                                detail="template not found or disabled")
+        job_id = f"rjob:{uuid.uuid4()}"
+        await conn.execute(
+            """
+            INSERT INTO g1.report_delivery
+                (delivery_id, tenant_id, template_id, report_type,
+                 recipient, outcome)
+            VALUES (%s, %s, %s, %s, 'manual_trigger', 'pending')
+            """,
+            (job_id, tenant_id, template_id, record[1]),
+        )
+        await conn.commit()
+    return {"job_id": job_id, "status": "queued"}
+
+
 # ── Schedules ─────────────────────────────────────────────────────────────────
 
 @router.get("/schedules")
@@ -171,6 +199,119 @@ async def delete_schedule(request: Request, schedule_id: str) -> Response:
             "UPDATE g1.report_schedule SET enabled=false "
             "WHERE report_schedule_id=%s",
             (schedule_id,),
+        )
+        await conn.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Subscribers (stored as comma-separated emails in report_template.delivery_email) ──
+
+class AddSubscriber(BaseModel):
+    email: str
+
+
+def _parse_subscribers(delivery_email: str) -> list[str]:
+    """Return list of individual emails from a comma-separated delivery_email string."""
+    return [e.strip() for e in delivery_email.split(",") if e.strip()]
+
+
+def _valid_email(email: str) -> bool:
+    return "@" in email and "." in email and len(email) <= 254
+
+
+@router.get("/schedules/{schedule_id}/subscribers")
+async def list_subscribers(request: Request, schedule_id: str) -> list:
+    """Return the list of subscriber emails for the given schedule."""
+    tenant_id = _require_tenant(request)
+    async with db_tenant_connection(tenant_id) as conn:
+        row = await conn.execute(
+            """
+            SELECT t.delivery_email
+              FROM g1.report_schedule s
+              JOIN g1.report_template t ON t.template_id = s.template_id
+             WHERE s.tenant_id = %s AND s.report_schedule_id = %s
+            """,
+            (tenant_id, schedule_id),
+        )
+        record = await row.fetchone()
+        if record is None:
+            raise HTTPException(status_code=404, detail="schedule not found")
+        return _parse_subscribers(record[0])
+
+
+@router.post("/schedules/{schedule_id}/subscribers", status_code=status.HTTP_201_CREATED)
+async def add_subscriber(request: Request, schedule_id: str, body: AddSubscriber) -> dict:
+    """Add an email address to the subscriber list of the given schedule."""
+    tenant_id = _require_tenant(request)
+    email = body.email.strip().lower()
+    if not _valid_email(email):
+        raise HTTPException(status_code=422, detail="invalid email address")
+
+    async with db_tenant_connection(tenant_id) as conn:
+        row = await conn.execute(
+            """
+            SELECT s.template_id, t.delivery_email
+              FROM g1.report_schedule s
+              JOIN g1.report_template t ON t.template_id = s.template_id
+             WHERE s.tenant_id = %s AND s.report_schedule_id = %s
+            """,
+            (tenant_id, schedule_id),
+        )
+        record = await row.fetchone()
+        if record is None:
+            raise HTTPException(status_code=404, detail="schedule not found")
+
+        template_id, delivery_email = record
+        subscribers = _parse_subscribers(delivery_email)
+        if email in subscribers:
+            raise HTTPException(status_code=409, detail="email already subscribed")
+        subscribers.append(email)
+        await conn.execute(
+            "UPDATE g1.report_template SET delivery_email=%s, updated_at=now() "
+            "WHERE template_id=%s",
+            (",".join(subscribers), template_id),
+        )
+        await conn.commit()
+    return {"email": email, "subscribed": True}
+
+
+@router.delete(
+    "/schedules/{schedule_id}/subscribers/{email:path}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_subscriber(request: Request, schedule_id: str, email: str) -> Response:
+    """Remove an email address from the subscriber list of the given schedule."""
+    tenant_id = _require_tenant(request)
+    email = email.strip().lower()
+
+    async with db_tenant_connection(tenant_id) as conn:
+        row = await conn.execute(
+            """
+            SELECT s.template_id, t.delivery_email
+              FROM g1.report_schedule s
+              JOIN g1.report_template t ON t.template_id = s.template_id
+             WHERE s.tenant_id = %s AND s.report_schedule_id = %s
+            """,
+            (tenant_id, schedule_id),
+        )
+        record = await row.fetchone()
+        if record is None:
+            raise HTTPException(status_code=404, detail="schedule not found")
+
+        template_id, delivery_email = record
+        subscribers = _parse_subscribers(delivery_email)
+        if email not in subscribers:
+            raise HTTPException(status_code=404, detail="email not subscribed")
+        if len(subscribers) <= 1:
+            raise HTTPException(
+                status_code=422,
+                detail="cannot remove the last subscriber; delete the template instead",
+            )
+        subscribers.remove(email)
+        await conn.execute(
+            "UPDATE g1.report_template SET delivery_email=%s, updated_at=now() "
+            "WHERE template_id=%s",
+            (",".join(subscribers), template_id),
         )
         await conn.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

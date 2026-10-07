@@ -268,6 +268,7 @@ async def list_alerts(request: Request,
                       tenant_id: str | None = None,
                       lifecycle_state: str | None = None,
                       source_id: str | None = None,
+                      severity: str | None = None,
                       limit: int = 50) -> list[dict]:
     tenant = _authoritative_tenant(request, tenant_id)
     async with db_tenant_connection(tenant) as conn:
@@ -289,10 +290,12 @@ async def list_alerts(request: Request,
               FROM alerting.alert a
              WHERE (%s::text IS NULL OR a.lifecycle_state = %s)
                AND (%s::text IS NULL OR a.monitoring_source_id = %s)
+               AND (%s::text IS NULL OR a.source_evidence_summary->>'severity' = %s)
              ORDER BY (a.lifecycle_state = 'resolved'),
                       a.opened_at DESC LIMIT %s
             """, (lifecycle_state, lifecycle_state,
-                  source_id, source_id, min(limit, 200)))
+                  source_id, source_id,
+                  severity, severity, min(limit, 200)))
         cols = [d.name for d in cur.description]
         return [_ser(dict(zip(cols, r))) for r in await cur.fetchall()]
 
@@ -319,6 +322,17 @@ async def get_alert(alert_id: str, request: Request,
                                 detail="alert not found")
         cols = [d.name for d in cur.description]
         alert = _ser(dict(zip(cols, row)))
+        # Flatten selected fields from source_evidence_summary JSONB
+        evidence = alert.get("source_evidence_summary") or {}
+        alert["description"] = evidence.get("description")
+        alert["problem_event_ids"] = evidence.get("problem_event_ids")
+        ack_by = evidence.get("acknowledged_by")
+        alert["ack_history"] = (
+            [{"acknowledged_by": ack_by,
+              "acknowledged_at": evidence.get("acknowledged_at"),
+              "reason": evidence.get("acknowledge_reason")}]
+            if ack_by else []
+        )
         cur = await conn.execute(
             """
             SELECT alert_transition_id, from_lifecycle_state,
@@ -426,3 +440,77 @@ async def unsnooze_alert(
                                     detail="no active snooze for this alert")
             raise
     return row[0] if row else {}
+
+
+# ---------------------------------------------------------------------------
+# Alert acknowledgment — human-operator annotation (monitoring:operate)
+# ---------------------------------------------------------------------------
+
+
+class AcknowledgeBody(BaseModel):
+    reason: str | None = None
+
+
+@router.post("/alerts/{alert_id}/acknowledge", status_code=status.HTTP_200_OK)
+async def acknowledge_alert(
+    alert_id: str,
+    request: Request,
+    body: AcknowledgeBody,
+    tenant_id: str | None = None,
+    x_principal_id: Annotated[str | None, Header()] = None,
+):
+    """Record human acknowledgment of an alert.
+
+    The acknowledgment is merged into source_evidence_summary (the only
+    mutable per-alert JSONB store) and written to the immutable audit
+    trail.  Alert lifecycle_state (active / resolved) is NOT changed.
+    Protected by the same actor-resolution pattern as snooze/unsnooze.
+    """
+    tenant = _authoritative_tenant(request, tenant_id)
+    actor = _snooze_actor(request, x_principal_id)
+    async with db_tenant_connection(tenant) as conn:
+        # Verify the alert exists in this tenant (RLS enforces isolation).
+        cur = await conn.execute(
+            "SELECT 1 FROM alerting.alert WHERE alert_id = %s",
+            (alert_id,))
+        if await cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail="alert not found")
+
+        # Merge acknowledgment fields into the existing JSONB evidence
+        # object.  The || operator on two jsonb objects keeps all original
+        # keys and adds / overwrites the three ack keys.  The CHECK
+        # constraint (jsonb_typeof = 'object') stays satisfied.
+        cur2 = await conn.execute(
+            """
+            UPDATE alerting.alert
+               SET source_evidence_summary = source_evidence_summary ||
+                   jsonb_build_object(
+                       'acknowledged_by',    %s::text,
+                       'acknowledged_at',    transaction_timestamp()::text,
+                       'acknowledge_reason', %s::text
+                   ),
+                   updated_at = transaction_timestamp()
+             WHERE alert_id = %s
+             RETURNING alert_id, policy_id, policy_version, source_kind,
+                       source_subject_id, monitoring_source_id,
+                       monitoring_resource_id, lifecycle_state,
+                       source_occurrence_revision, current_source_revision,
+                       source_evidence_summary, opened_at, resolved_at
+            """,
+            (actor, body.reason, alert_id))
+        row = await cur2.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="alert not found")
+        cols = [d.name for d in cur2.description]
+        alert = _ser(dict(zip(cols, row)))
+
+        await record_audit_event(
+            conn, tenant,
+            action="alert.acknowledged",
+            actor_kind="principal",
+            actor_id=actor,
+            subject_type="alert", subject_id=alert_id,
+            detail={"lifecycle_state": alert["lifecycle_state"],
+                    "reason": body.reason})
+        await conn.commit()
+    return alert

@@ -2094,6 +2094,22 @@ def _canonical_value_json(value) -> str:
     return json.dumps(value)
 
 
+def _wrap_metric_value(value_kind: str, raw) -> dict | None:
+    """Wrap a raw JSONB canonical_value into the {n:…} / {s:…} envelope the API contract requires."""
+    if raw is None:
+        return None
+    if value_kind in ("number", "integer"):
+        try:
+            return {"n": float(raw)}
+        except (TypeError, ValueError):
+            return None
+    if value_kind in ("string", "text", "log"):
+        return {"s": str(raw)}
+    if value_kind == "boolean":
+        return {"b": bool(raw)}
+    return None
+
+
 def _host_groups_json(host) -> str:
     """Snapshot-authoritative group membership for the resource —
     [{ref, name}] as the provider reported them this snapshot."""
@@ -2825,6 +2841,12 @@ async def list_metric_history(
                 if hasattr(last["observed_at"], "timestamp")
                 else last["observed_at"],
             "i": last["observation_id"]})
+    for item in items:
+        if hasattr(item.get("observed_at"), "isoformat"):
+            item["observed_at"] = item["observed_at"].isoformat()
+        if hasattr(item.get("accepted_at"), "isoformat"):
+            item["accepted_at"] = item["accepted_at"].isoformat()
+        item["value"] = _wrap_metric_value(item.get("value_kind", ""), item.get("value"))
 
     # Completeness from the stream checkpoint + immutable gap evidence.
     cur = await conn.execute(
@@ -4284,4 +4306,5 @@ async def list_resource_current_states(
     for row in rows:
         if hasattr(row.get("observed_at"), "isoformat"):
             row["observed_at"] = row["observed_at"].isoformat()
+        row["value"] = _wrap_metric_value(row.get("value_kind", ""), row.get("value"))
     return {"items": rows}

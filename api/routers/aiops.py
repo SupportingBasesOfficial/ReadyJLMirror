@@ -13,35 +13,38 @@ router = APIRouter(prefix="/api/v1/aiops", tags=["aiops"])
 
 def _ser_finding(r) -> dict:
     return {
-        "finding_id": r[0],
-        "finding_type": r[1],
-        "severity_hint": r[2],
-        "title": r[3],
-        "explanation": r[4],
-        "evidence_refs": r[5],
-        "confidence": float(r[6]) if r[6] is not None else None,
-        "model_id": r[7],
-        "created_at": r[8].isoformat(),
-        "expires_at": r[9].isoformat(),
-        "dismissed_at": r[10].isoformat() if r[10] else None,
+        "finding_id":         r[0],
+        "finding_type":       r[1],
+        "severity_hint":      r[2],
+        "title":              r[3],
+        "explanation":        r[4],
+        "evidence_refs":      r[5],
+        "confidence":         float(r[6]) if r[6] is not None else None,
+        "model_id":           r[7],
+        "recommended_action": r[8],
+        "created_at":         r[9].isoformat(),
+        "expires_at":         r[10].isoformat(),
+        "dismissed_at":       r[11].isoformat() if r[11] else None,
     }
 
 
 @router.get("/findings")
-async def list_findings(request: Request, limit: int = 50) -> list[dict]:
+async def list_findings(request: Request, limit: int = 50,
+                        include_dismissed: bool = False) -> list[dict]:
     ctx = request.state.jlmirror_context
     tenant_id = ctx["tenant_id"]
     limit = min(limit, 200)
+    dismissed_clause = "" if include_dismissed else "AND dismissed_at IS NULL"
 
     async with db_tenant_connection(tenant_id) as conn:
         cur = await conn.execute(
-            """
+            f"""
             SELECT finding_id, finding_type, severity_hint, title,
                    explanation, evidence_refs, confidence, model_id,
-                   created_at, expires_at, dismissed_at
+                   recommended_action, created_at, expires_at, dismissed_at
               FROM aiops.finding
              WHERE tenant_id = %s
-               AND dismissed_at IS NULL
+               {dismissed_clause}
                AND expires_at > now()
              ORDER BY created_at DESC
              LIMIT %s
@@ -63,7 +66,7 @@ async def get_finding(request: Request, finding_id: str) -> dict:
             """
             SELECT finding_id, finding_type, severity_hint, title,
                    explanation, evidence_refs, confidence, model_id,
-                   created_at, expires_at, dismissed_at
+                   recommended_action, created_at, expires_at, dismissed_at
               FROM aiops.finding
              WHERE tenant_id = %s AND finding_id = %s
             """,

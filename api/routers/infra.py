@@ -89,6 +89,28 @@ async def create_cert(request: Request, body: CreateCert) -> dict:
     return {"cert_id": cert_id, "domain": domain, "port": body.port}
 
 
+@router.post("/certs/{cert_id}/recheck", status_code=status.HTTP_202_ACCEPTED)
+async def recheck_cert(request: Request, cert_id: str) -> dict:
+    """Mark the certificate for an immediate re-check on the next worker cycle."""
+    tenant_id = _require_tenant(request)
+    async with db_tenant_connection(tenant_id) as conn:
+        row = await conn.execute(
+            "SELECT cert_id FROM g1.cert_tracker "
+            "WHERE tenant_id=%s AND cert_id=%s AND check_enabled=true",
+            (tenant_id, cert_id),
+        )
+        if await row.fetchone() is None:
+            raise HTTPException(status_code=404,
+                                detail="cert not found or check disabled")
+        await conn.execute(
+            "UPDATE g1.cert_tracker SET last_checked_at=NULL, updated_at=now() "
+            "WHERE cert_id=%s",
+            (cert_id,),
+        )
+        await conn.commit()
+    return {"cert_id": cert_id, "status": "recheck_queued"}
+
+
 @router.delete("/certs/{cert_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_cert(request: Request, cert_id: str) -> Response:
     tenant_id = _require_tenant(request)

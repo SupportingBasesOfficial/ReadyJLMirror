@@ -126,7 +126,7 @@ class Settings:
         default_factory=lambda: int(_env("SESSION_LIFETIME_HOURS", "8"))
     )
     cookie_secure: bool = field(
-        default_factory=lambda: _env("COOKIE_SECURE", "false").lower() == "true"
+        default_factory=lambda: _env("COOKIE_SECURE", "true").lower() == "true"
     )
 
     # Dev-only auth bypass: simulates the OIDC callback without Keycloak.

@@ -9,6 +9,7 @@ visitor can check a tenant's operational status by their public slug.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -124,6 +125,7 @@ class StatusPageConfig(BaseModel):
     status_slug: str
     public_name: str
     enabled: bool = True
+    components: list[dict] = []
 
 
 @router.get("/status-page")
@@ -133,7 +135,7 @@ async def get_status_page_config(request: Request,
     async with db_tenant_connection(tenant) as conn:
         cur = await conn.execute(
             """
-            SELECT status_slug, public_name, enabled, updated_at
+            SELECT status_slug, public_name, enabled, updated_at, components
               FROM g1.tenant_status_config
              WHERE tenant_id = %s
             """, (tenant,))
@@ -147,6 +149,7 @@ async def get_status_page_config(request: Request,
         "enabled": row[2],
         "updated_at": row[3].isoformat(),
         "public_url": f"/status/{row[0]}",
+        "components": row[4] if row[4] is not None else [],
     }
 
 
@@ -168,15 +171,18 @@ async def upsert_status_page_config(request: Request,
             await conn.execute(
                 """
                 INSERT INTO g1.tenant_status_config
-                    (tenant_id, status_slug, public_name, enabled, updated_at)
-                VALUES (%s, %s, %s, %s, now())
+                    (tenant_id, status_slug, public_name, enabled,
+                     components, updated_at)
+                VALUES (%s, %s, %s, %s, %s, now())
                 ON CONFLICT (tenant_id) DO UPDATE
                 SET status_slug  = EXCLUDED.status_slug,
                     public_name  = EXCLUDED.public_name,
                     enabled      = EXCLUDED.enabled,
+                    components   = EXCLUDED.components,
                     updated_at   = now()
                 """,
-                (tenant, slug, body.public_name.strip(), body.enabled))
+                (tenant, slug, body.public_name.strip(), body.enabled,
+                 json.dumps(body.components)))
             await conn.commit()
         except Exception as exc:
             if "unique" in str(exc).lower():
@@ -190,4 +196,5 @@ async def upsert_status_page_config(request: Request,
         "public_name": body.public_name.strip(),
         "enabled": body.enabled,
         "public_url": f"/status/{slug}",
+        "components": body.components,
     }

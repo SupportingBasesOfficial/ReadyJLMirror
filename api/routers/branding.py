@@ -12,7 +12,8 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
 from api.routers.monitoring import _authoritative_tenant
-from shared.db import db_tenant_connection
+from shared import access
+from shared.db import db_connection, db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/platform", tags=["branding"])
 
@@ -49,6 +50,17 @@ async def get_branding(request: Request, tenant_id: str | None = None) -> dict:
     }
 
 
+async def _require_admin(request: Request, tenant: str) -> None:
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
+    principal_id = ctx.get("principal_id")
+    if not principal_id:
+        raise HTTPException(status_code=403, detail="authentication required")
+    async with db_connection() as conn:
+        perms = await access.effective_permissions(conn, principal_id, tenant)
+    if "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="tenant:admin permission required")
+
+
 @router.put("/branding", status_code=status.HTTP_200_OK)
 async def upsert_branding(
     request: Request,
@@ -56,6 +68,7 @@ async def upsert_branding(
     tenant_id: str | None = None,
 ) -> dict:
     tenant = _authoritative_tenant(request, tenant_id)
+    await _require_admin(request, tenant)
 
     if body.brand_color is not None and not _HEX_RE.match(body.brand_color):
         raise HTTPException(

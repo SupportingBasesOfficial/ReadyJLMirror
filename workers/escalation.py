@@ -16,7 +16,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import secrets
+import smtplib
+import urllib.request
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 import psycopg
 
@@ -60,6 +65,49 @@ def _due_escalations(conn: psycopg.Connection,
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+def _dispatch_email(channel_config: dict, payload: dict) -> None:
+    host = channel_config.get("smtp_host", "")
+    port = int(channel_config.get("smtp_port", 587))
+    user = channel_config.get("smtp_user", "")
+    password = channel_config.get("smtp_password", "")
+    from_addr = channel_config.get("from_address", user)
+    to_addr = channel_config.get("to_address", "")
+
+    subject = payload.get("subject") or payload.get("title") or "Alerta JLMirror"
+    body = payload.get("body") or payload.get("message") or str(payload)
+
+    msg = MIMEMultipart()
+    msg["From"] = from_addr
+    msg["To"] = to_addr
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+    with smtplib.SMTP(host, port, timeout=10) as smtp:
+        smtp.starttls()
+        if user and password:
+            smtp.login(user, password)
+        smtp.sendmail(from_addr, [to_addr], msg.as_string())
+
+
+def _dispatch_slack(channel_config: dict, payload: dict) -> None:
+    webhook_url = channel_config.get("webhook_url", "")
+    if not webhook_url:
+        raise ValueError("slack channel missing webhook_url")
+
+    text = (payload.get("message") or payload.get("body")
+            or payload.get("title") or "Alerta JLMirror")
+    data = json.dumps({"text": text}).encode("utf-8")
+    req = urllib.request.Request(
+        webhook_url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        if resp.status not in (200, 204):
+            raise RuntimeError(f"Slack webhook returned {resp.status}")
+
+
 def _fire_step(conn: psycopg.Connection,
                tenant_id: str, row: dict) -> None:
     alert_id    = row["alert_id"]
@@ -86,6 +134,36 @@ def _fire_step(conn: psycopg.Connection,
         "reason": "alert_requires_attention", "payload_ref": payload_ref,
     }
 
+    # Build channel-specific config and payload for direct-dispatch channels.
+    # email_smtp@1 and slack@1 are dispatched directly here (fast path);
+    # whatsapp_business@1 and any other channel go through the outbox so
+    # notification_dispatch handles delivery, retries and callbacks.
+    _channel_config: dict = {}
+    _dispatch_payload: dict = {
+        "subject": f"[JLMirror] Escalação — Alerta {alert_id}",
+        "title": "JLMirror Escalation",
+        "message": (
+            f"Alerta {alert_id} atingiu o passo {step_no} de escalação "
+            f"e requer atenção. Payload: {payload_ref}."
+        ),
+        "body": (
+            f"O alerta {alert_id} alcançou o passo {step_no} da política "
+            f"de escalação. Acesse o painel NOC para revisar e agir."
+        ),
+    }
+    if channel == "email_smtp@1":
+        _channel_config = {
+            "smtp_host": os.environ.get("SMTP_HOST", ""),
+            "smtp_port": os.environ.get("SMTP_PORT", "587"),
+            "smtp_user": os.environ.get("SMTP_USER", ""),
+            "smtp_password": os.environ.get("SMTP_PASSWORD", ""),
+            "from_address": os.environ.get(
+                "SMTP_FROM", os.environ.get("SMTP_USER", "")),
+            "to_address": dest,
+        }
+    elif channel == "slack@1":
+        _channel_config = {"webhook_url": dest}
+
     try:
         with conn.transaction():
             conn.execute(
@@ -104,15 +182,32 @@ def _fire_step(conn: psycopg.Connection,
                 """,
                 (tenant_id, intent_id, alert_id, dest, channel,
                  payload_ref, _hash(content), logical_id))
-            conn.execute(
-                """
-                INSERT INTO notification.notification_dispatch_outbox
-                    (tenant_id, dispatch_id, notification_intent_id,
-                     logical_dispatch_id, attempt_number)
-                VALUES (%s,%s,%s,%s,1)
-                """,
-                (tenant_id, dispatch_id, intent_id,
-                 f"dispatch:{intent_id}:1"))
+            if channel == "email_smtp@1":
+                try:
+                    _dispatch_email(_channel_config, _dispatch_payload)
+                except Exception:
+                    logger.exception(
+                        "email dispatch failed alert=%s step=%s dest=%s",
+                        alert_id, step_no, dest)
+                    raise
+            elif channel == "slack@1":
+                try:
+                    _dispatch_slack(_channel_config, _dispatch_payload)
+                except Exception:
+                    logger.exception(
+                        "slack dispatch failed alert=%s step=%s dest=%s",
+                        alert_id, step_no, dest)
+                    raise
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO notification.notification_dispatch_outbox
+                        (tenant_id, dispatch_id, notification_intent_id,
+                         logical_dispatch_id, attempt_number)
+                    VALUES (%s,%s,%s,%s,1)
+                    """,
+                    (tenant_id, dispatch_id, intent_id,
+                     f"dispatch:{intent_id}:1"))
             # Advance or complete the escalation
             conn.execute(
                 f"SET LOCAL ROLE {_WORKER_ROLE}")

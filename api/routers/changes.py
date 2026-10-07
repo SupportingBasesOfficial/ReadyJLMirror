@@ -85,7 +85,7 @@ async def list_changes(request: Request) -> list:
         rows = await conn.execute(
             """
             SELECT rfc_id, title, category, risk, state,
-                   planned_start, planned_end, incident_id,
+                   description, planned_start, planned_end, incident_id,
                    created_by, created_at, updated_at
               FROM g1.change_request
              WHERE tenant_id = %s

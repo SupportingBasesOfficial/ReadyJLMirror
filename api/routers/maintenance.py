@@ -19,7 +19,8 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
 
 from api.routers.monitoring import _authoritative_tenant
-from shared.db import db_tenant_connection
+from shared import access
+from shared.db import db_connection, db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/maintenance", tags=["maintenance"])
 
@@ -30,6 +31,17 @@ def _actor(request: Request,
            x_principal_id: str | None) -> str:
     ctx = getattr(request.state, "jlmirror_context", {}) or {}
     return ctx.get("principal_id") or x_principal_id or "anonymous"
+
+
+async def _require_operate(request: Request, tenant: str) -> None:
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
+    principal_id = ctx.get("principal_id")
+    if not principal_id:
+        raise HTTPException(status_code=403, detail="authentication required")
+    async with db_connection() as conn:
+        perms = await access.effective_permissions(conn, principal_id, tenant)
+    if "monitoring:operate" not in perms and "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="monitoring:operate permission required")
 
 
 # ─── Models ──────────────────────────────────────────────────────────────────
@@ -67,6 +79,7 @@ async def create_window(
     x_principal_id: Annotated[str | None, Header()] = None,
 ):
     tenant = _authoritative_tenant(request, body.tenant_id)
+    await _require_operate(request, tenant)
     actor = _actor(request, x_principal_id)
 
     starts = body.starts_at.astimezone(timezone.utc) if body.starts_at.tzinfo else \
@@ -106,6 +119,7 @@ async def cancel_window(
     x_principal_id: Annotated[str | None, Header()] = None,
 ):
     tenant = _authoritative_tenant(request, tenant_id)
+    await _require_operate(request, tenant)
     actor = _actor(request, x_principal_id)
 
     async with db_tenant_connection(tenant) as conn:

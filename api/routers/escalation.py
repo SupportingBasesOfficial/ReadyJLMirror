@@ -44,13 +44,69 @@ async def list_policies(request: Request,
     async with db_tenant_connection(tenant) as conn:
         cur = await conn.execute(
             """
-            SELECT policy_id, name, description, created_at
-              FROM alerting.escalation_policy
-             WHERE tenant_id = %s AND deleted_at IS NULL
-             ORDER BY created_at DESC
-            """, (tenant,))
+            SELECT ep.policy_id, ep.name, ep.description, ep.created_at,
+                   (SELECT apv.policy_id
+                      FROM alerting.alert_policy_version apv
+                     WHERE apv.escalation_policy_id = ep.policy_id
+                       AND apv.tenant_id = %s
+                     LIMIT 1) AS linked_alert_policy_id
+              FROM alerting.escalation_policy ep
+             WHERE ep.tenant_id = %s AND ep.deleted_at IS NULL
+             ORDER BY ep.created_at DESC
+            """, (tenant, tenant))
         cols = [d.name for d in cur.description]
         return [_ser(dict(zip(cols, r))) for r in await cur.fetchall()]
+
+
+class PolicyPatch(BaseModel):
+    linked_alert_policy_id: str | None = None
+
+
+@router.patch("/escalation-policies/{policy_id}",
+              status_code=status.HTTP_200_OK)
+async def patch_policy(policy_id: str, request: Request,
+                       body: PolicyPatch,
+                       tenant_id: str | None = None) -> dict:
+    """Link (or unlink) an alert policy to this escalation policy."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        await conn.execute(f"SET LOCAL ROLE {_APP_ROLE}")
+        # Verify the escalation policy exists for this tenant.
+        cur = await conn.execute(
+            "SELECT 1 FROM alerting.escalation_policy "
+            "WHERE policy_id = %s AND tenant_id = %s AND deleted_at IS NULL",
+            (policy_id, tenant))
+        if await cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail="policy not found")
+        # Update the alert_policy_version row(s) for the given alert policy.
+        if body.linked_alert_policy_id is not None:
+            # Clear any existing link for this escalation policy first.
+            await conn.execute(
+                """
+                UPDATE alerting.alert_policy_version
+                   SET escalation_policy_id = NULL
+                 WHERE escalation_policy_id = %s AND tenant_id = %s
+                """, (policy_id, tenant))
+            # Set the new link on the alert policy's latest version.
+            await conn.execute(
+                """
+                UPDATE alerting.alert_policy_version
+                   SET escalation_policy_id = %s
+                 WHERE policy_id = %s AND tenant_id = %s
+                   AND superseded_at IS NULL
+                """, (policy_id, body.linked_alert_policy_id, tenant))
+        else:
+            # Unlink: clear escalation_policy_id for all versions of any
+            # alert policy currently pointing at this escalation policy.
+            await conn.execute(
+                """
+                UPDATE alerting.alert_policy_version
+                   SET escalation_policy_id = NULL
+                 WHERE escalation_policy_id = %s AND tenant_id = %s
+                """, (policy_id, tenant))
+        await conn.commit()
+    return {"policy_id": policy_id,
+            "linked_alert_policy_id": body.linked_alert_policy_id}
 
 
 @router.post("/escalation-policies", status_code=status.HTTP_201_CREATED)

@@ -9,7 +9,8 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from shared.db import db_tenant_connection
+from shared import access
+from shared.db import db_connection, db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/sla", tags=["sla"])
 
@@ -36,6 +37,19 @@ def _require_tenant(request: Request) -> str:
     return tid
 
 
+async def _require_admin(request: Request) -> str:
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
+    tenant_id = ctx.get("tenant_id")
+    principal_id = ctx.get("principal_id")
+    if not tenant_id or not principal_id:
+        raise HTTPException(status_code=403, detail="tenant context required")
+    async with db_connection() as conn:
+        perms = await access.effective_permissions(conn, principal_id, tenant_id)
+    if "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="tenant:admin permission required")
+    return tenant_id
+
+
 # ── SLA policies ──────────────────────────────────────────────────────────────
 
 @router.get("/policies")
@@ -58,7 +72,7 @@ async def list_policies(request: Request) -> list:
 
 @router.post("/policies", status_code=status.HTTP_201_CREATED)
 async def create_policy(request: Request, body: CreateSLA) -> dict:
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_admin(request)
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="name is required")
@@ -85,7 +99,7 @@ async def create_policy(request: Request, body: CreateSLA) -> dict:
 
 @router.put("/policies/{sla_id}")
 async def update_policy(request: Request, sla_id: str, body: UpdateSLA) -> dict:
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_admin(request)
     if body.response_secs is not None and body.response_secs <= 0:
         raise HTTPException(status_code=422, detail="response_secs must be positive")
     if body.resolve_secs is not None and body.resolve_secs <= 0:
@@ -121,7 +135,7 @@ async def update_policy(request: Request, sla_id: str, body: UpdateSLA) -> dict:
 
 @router.delete("/policies/{sla_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_policy(request: Request, sla_id: str) -> Response:
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_admin(request)
     async with db_tenant_connection(tenant_id) as conn:
         row = await conn.execute(
             "SELECT sla_id FROM g1.sla_policy WHERE tenant_id=%s AND sla_id=%s",

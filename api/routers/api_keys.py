@@ -15,7 +15,8 @@ import secrets
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
-from shared.db import db_tenant_connection
+from shared import access
+from shared.db import db_connection, db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/api-keys", tags=["api-keys"])
 
@@ -28,6 +29,15 @@ def _tenant_ctx(request: Request) -> tuple[str, str]:
     if ctx is None or not ctx.get("tenant_id"):
         raise HTTPException(status_code=403, detail="no tenant authority")
     return ctx["tenant_id"], ctx["principal_id"]
+
+
+async def _require_admin(request: Request) -> tuple[str, str]:
+    tenant, principal = _tenant_ctx(request)
+    async with db_connection() as conn:
+        perms = await access.effective_permissions(conn, principal, tenant)
+    if "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="tenant:admin permission required")
+    return tenant, principal
 
 
 def _generate_raw_key() -> str:
@@ -74,7 +84,7 @@ async def list_api_keys(request: Request) -> list[dict]:
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_api_key(request: Request, body: ApiKeyCreate) -> dict:
-    tenant, principal = _tenant_ctx(request)
+    tenant, principal = await _require_admin(request)
     invalid = [s for s in body.scopes if s not in _VALID_SCOPES]
     if invalid:
         raise HTTPException(status_code=422,
@@ -109,7 +119,7 @@ async def create_api_key(request: Request, body: ApiKeyCreate) -> dict:
 
 @router.delete("/{key_id}", status_code=status.HTTP_200_OK)
 async def revoke_api_key(request: Request, key_id: str) -> dict:
-    tenant, _ = _tenant_ctx(request)
+    tenant, _ = await _require_admin(request)
     async with db_tenant_connection(tenant) as conn:
         await conn.execute(f"SET LOCAL ROLE {_APP_ROLE}")
         cur = await conn.execute(

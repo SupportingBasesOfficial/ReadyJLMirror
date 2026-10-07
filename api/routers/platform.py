@@ -662,6 +662,65 @@ async def list_usage(request: Request,
                 for r in await cur.fetchall()]
 
 
+@router.get("/health")
+async def platform_health(request: Request) -> dict:
+    """Lightweight liveness check for the platform admin dashboard."""
+    await _require_platform_admin(request)
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            """
+            SELECT
+                (SELECT count(*) FROM g1.tenants WHERE state = 'active')
+                    AS active_tenants,
+                (SELECT count(*) FROM g1.organizations WHERE state = 'active')
+                    AS active_orgs,
+                (SELECT count(*) FROM g1.principals WHERE active = true)
+                    AS active_principals
+            """
+        )
+        row = await cur.fetchone()
+    return {
+        "status": "ok",
+        "active_tenants": int(row[0]),
+        "active_organizations": int(row[1]),
+        "active_principals": int(row[2]),
+    }
+
+
+class TenantCreate(BaseModel):
+    tenant_id: str
+    display_name: str
+    organization_id: str
+
+
+@router.post("/tenants", status_code=201)
+async def create_tenant(request: Request, body: TenantCreate) -> dict:
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        cur = await conn.execute(
+            "SELECT 1 FROM g1.organizations WHERE organization_id = %s",
+            (body.organization_id,))
+        if await cur.fetchone() is None:
+            raise HTTPException(status_code=404,
+                                detail="organization not found")
+        await conn.execute(
+            """
+            INSERT INTO g1.tenants
+                (tenant_id, display_name, organization_id)
+            VALUES (%s, %s, %s)
+            """,
+            (body.tenant_id, body.display_name, body.organization_id))
+        await record_audit_event(
+            conn, "platform",
+            action="platform.tenant.created",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="tenant", subject_id=body.tenant_id,
+            detail={"display_name": body.display_name,
+                    "organization_id": body.organization_id})
+        await conn.commit()
+    return {"tenant_id": body.tenant_id, "display_name": body.display_name}
+
+
 @router.get("/tenants")
 async def list_tenants(request: Request) -> list[dict]:
     """Platform sovereign view of tenants (§14) — read-only."""
@@ -676,3 +735,56 @@ async def list_tenants(request: Request) -> list[dict]:
         return [{"tenant_id": r[0], "display_name": r[1],
                  "state": r[2], "organization_id": r[3]}
                 for r in await cur.fetchall()]
+
+
+_ALLOWED_ORG_STATES = {"active", "suspended", "cancelled"}
+
+
+class OrganizationStateUpdate(BaseModel):
+    state: str  # "active" | "suspended" | "cancelled"
+
+
+@router.patch("/organizations/{org_id}/state")
+async def update_organization_state(request: Request,
+                                    org_id: str,
+                                    body: OrganizationStateUpdate) -> dict:
+    """Transition an organization's lifecycle state (§14).
+
+    Accepted values: 'active', 'suspended', 'cancelled'.
+    Suspending an organization also suspends all of its tenants so
+    their workloads become ineligible for placement.
+    All state changes produce durable audit evidence."""
+    actor = await _require_platform_admin(request)
+    if body.state not in _ALLOWED_ORG_STATES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"state must be one of {sorted(_ALLOWED_ORG_STATES)}")
+    async with db_tenant_connection("platform") as conn:
+        cur = await conn.execute(
+            "SELECT organization_id, display_name, state, created_at "
+            "FROM g1.organizations WHERE organization_id = %s",
+            (org_id,))
+        org = await cur.fetchone()
+        if org is None:
+            raise HTTPException(status_code=404,
+                                detail="organization not found")
+        previous_state = org[2]
+        await conn.execute(
+            "UPDATE g1.organizations SET state = %s "
+            "WHERE organization_id = %s",
+            (body.state, org_id))
+        if body.state == "suspended":
+            await conn.execute(
+                "UPDATE g1.tenants SET state = 'suspended' "
+                "WHERE organization_id = %s",
+                (org_id,))
+        await record_audit_event(
+            conn, "platform",
+            action="platform.organization.state_changed",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="organization", subject_id=org_id,
+            detail={"previous_state": previous_state,
+                    "new_state": body.state})
+        await conn.commit()
+    return {"organization_id": org_id, "display_name": org[1],
+            "state": body.state, "created_at": org[3].isoformat()}

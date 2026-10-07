@@ -213,7 +213,7 @@ async def _api_key_context(request: Request) -> dict | None:
                         "SELECT g1.g27_record_key_use(%s)", (digest,))
                     await conn.commit()
                 except Exception:
-                    pass
+                    logger.warning("g27_record_key_use failed", exc_info=True)
     except Exception:
         return None
     if row is None:
@@ -358,9 +358,12 @@ async def verify_context(request: Request, call_next):
     # Dev sandbox is open only to ANONYMOUS local exploration — a
     # presented credential (signed ctx or display token) always gets
     # gated, never upgraded to sandbox trust.
+    # Requires explicit DEV_AUTH_BYPASS=true opt-in (never on in production).
     if (settings.is_development
+            and settings.dev_auth_bypass
             and path.startswith(sandbox_prefixes)
             and ctx is None):
+        logger.warning("sandbox passthrough: unauthenticated request allowed for %s", path)
         return await call_next(request)
 
     if ctx is None:
@@ -376,6 +379,14 @@ async def verify_context(request: Request, call_next):
     # membership role ∪ delegated grants ∪ platform capability.
     required = _required_permission(path, request.method)
     if required and ctx.get("tenant_id"):
+        # API key scope gate: key scopes constrain the principal's role perms.
+        if api_key_ctx:
+            scopes = ctx.get("scopes") or []
+            scope_ok = (required in scopes or
+                        (required.endswith(":read") and "read" in scopes))
+            if not scope_ok:
+                return JSONResponse({"state": "forbidden", "reason": "scope"},
+                                    status_code=status.HTTP_403_FORBIDDEN)
         async with db_connection() as conn:
             perms = await access.effective_permissions(
                 conn, ctx["principal_id"], ctx["tenant_id"])
@@ -433,6 +444,7 @@ async def dev_outbox_sink(request: Request) -> dict:
              envelope.get("contract_name", ""),
              envelope.get("correlation_id", ""),
              json.dumps(envelope)))
+        await conn.commit()
     return {"received": True, "message_id": envelope.get("message_id")}
 
 

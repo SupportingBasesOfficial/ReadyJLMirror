@@ -91,6 +91,47 @@ async def add_member(request: Request, body: MemberCreate) -> dict:
     return {"membership_id": membership_id}
 
 
+class MemberRoleUpdate(BaseModel):
+    role: str
+
+
+@router.patch("/members/{membership_id}")
+async def update_member_role(
+    request: Request, membership_id: str, body: MemberRoleUpdate
+) -> dict:
+    tenant, actor = _tenant_ctx(request)
+    if body.role not in ROLES and not body.role.startswith("custom:"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"role must be one of {ROLES} or 'custom:<name>'")
+    async with db_tenant_connection(tenant) as conn:
+        if body.role.startswith("custom:"):
+            cur = await conn.execute(
+                "SELECT 1 FROM g1.tenant_roles WHERE tenant_id = %s "
+                "AND role_name = %s AND state = 'active'",
+                (tenant, body.role[7:]))
+            if await cur.fetchone() is None:
+                raise HTTPException(status_code=404, detail="custom role not found")
+        cur = await conn.execute(
+            """
+            UPDATE g1.tenant_memberships
+               SET role = %s
+             WHERE membership_id = %s AND tenant_id = %s
+               AND state = 'active'
+            """, (body.role, membership_id, tenant))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404,
+                                detail="membership not found or inactive")
+        await record_audit_event(
+            conn, tenant,
+            action="tenant.membership.role_changed",
+            actor_kind="principal", actor_id=actor,
+            subject_type="membership", subject_id=membership_id,
+            detail={"role": body.role})
+        await conn.commit()
+    return {"membership_id": membership_id, "role": body.role}
+
+
 @router.post("/members/{membership_id}/revoke")
 async def revoke_member(request: Request, membership_id: str) -> dict:
     tenant, actor = _tenant_ctx(request)

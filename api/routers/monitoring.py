@@ -424,11 +424,14 @@ async def discover_groups(
 
 class SourceDetailResponse(BaseModel):
     monitoring_source_id: str
+    source_id: str
     display_name: str
     operational_evidence_state: str
+    state: str
     configuration_revision: int
     scope_revision: int
     provider_instance_ref: str
+    provider: str
     provider_base_url: str
 
 
@@ -440,15 +443,39 @@ async def list_sources_endpoint(request: Request, tenant_id: str | None = None) 
     return [
         SourceDetailResponse(
             monitoring_source_id=r["monitoring_source_id"],
+            source_id=r["monitoring_source_id"],
             display_name=r["display_name"],
             operational_evidence_state=r["operational_evidence_state"],
+            state=r["operational_evidence_state"],
             configuration_revision=r["configuration_revision"],
             scope_revision=r["scope_revision"],
             provider_instance_ref=r["provider_instance_ref"],
+            provider=r["provider_instance_ref"],
             provider_base_url=r["provider_base_url"],
         )
         for r in rows
     ]
+
+
+@router.post("/sources/{source_id}/recheck", status_code=202)
+async def recheck_source(source_id: str, request: Request,
+                         tenant_id: str | None = None) -> dict:
+    """Reset last_attempt_at to force worker to re-sync on next cycle."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        cur = await conn.execute(
+            """
+            UPDATE monitoring.monitoring_source
+               SET last_attempt_at = NULL
+             WHERE monitoring_source_id = %s AND tenant_id = %s
+            RETURNING monitoring_source_id
+            """,
+            (source_id, tenant),
+        )
+        if await cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail="source not found")
+        await conn.commit()
+    return {"source_id": source_id, "status": "recheck_queued"}
 
 
 @router.get("/sources/{source_id}")
