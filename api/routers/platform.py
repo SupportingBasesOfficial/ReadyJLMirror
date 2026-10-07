@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import secrets
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -788,3 +789,180 @@ async def update_organization_state(request: Request,
         await conn.commit()
     return {"organization_id": org_id, "display_name": org[1],
             "state": body.state, "created_at": org[3].isoformat()}
+
+
+# ---------------------------------------------------------------------------
+# User provisioning (Keycloak + tenant membership in one shot)
+# ---------------------------------------------------------------------------
+
+PROVISION_ROLES = ("admin", "operator", "viewer", "auditor")
+
+
+class UserProvision(BaseModel):
+    email: str
+    first_name: str
+    last_name: str
+    tenant_id: str
+    role: str = "viewer"
+    temp_password: str | None = None
+
+
+class UserPasswordReset(BaseModel):
+    new_password: str | None = None
+
+
+@router.post("/users", status_code=201)
+async def provision_user(request: Request, body: UserProvision) -> dict:
+    """Create a Keycloak account, register the principal, and add the user
+    to the target tenant with the requested role — all in one operation.
+
+    Returns the temporary password that the user must change on first login.
+    This is the ONLY time the plain-text password is visible.
+    """
+    actor = await _require_platform_admin(request)
+    if body.role not in PROVISION_ROLES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"role must be one of {PROVISION_ROLES}")
+
+    from shared import keycloak_admin
+
+    temp_pw = body.temp_password or keycloak_admin.generate_temp_password()
+    try:
+        user_id = await keycloak_admin.create_user(
+            email=body.email,
+            first_name=body.first_name,
+            last_name=body.last_name,
+            temp_password=temp_pw,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Keycloak error: {exc.response.status_code}")
+
+    membership_id = f"mem_{secrets.token_urlsafe(12)}"
+    async with db_tenant_connection("platform") as conn:
+        # Upsert principal (oidc_user kind; credential_generation is a
+        # stable opaque tag for this provisioning event).
+        await conn.execute(
+            """
+            INSERT INTO g1.principals
+                (principal_id, kind, credential_generation)
+            VALUES (%s, 'oidc_user', %s)
+            ON CONFLICT (principal_id) DO NOTHING
+            """,
+            (user_id, f"prov-{secrets.token_urlsafe(8)}"))
+
+        cur = await conn.execute(
+            """
+            INSERT INTO g1.tenant_memberships
+                (membership_id, tenant_id, principal_id, role)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (tenant_id, principal_id)
+            DO UPDATE SET role = EXCLUDED.role, state = 'active'
+            RETURNING membership_id
+            """,
+            (membership_id, body.tenant_id, user_id, body.role))
+        membership_id = (await cur.fetchone())[0]
+
+        await record_audit_event(
+            conn, "platform",
+            action="platform.user.provisioned",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="principal", subject_id=user_id,
+            detail={"email": body.email, "tenant_id": body.tenant_id,
+                    "role": body.role, "membership_id": membership_id})
+        await conn.commit()
+
+    return {
+        "principal_id": user_id,
+        "email": body.email,
+        "tenant_id": body.tenant_id,
+        "role": body.role,
+        "membership_id": membership_id,
+        "temp_password": temp_pw,
+        "must_change_password": True,
+    }
+
+
+@router.get("/users")
+async def search_users(request: Request, q: str = "") -> list[dict]:
+    """Search Keycloak users by email or name fragment."""
+    await _require_platform_admin(request)
+    from shared import keycloak_admin
+    try:
+        return await keycloak_admin.search_users(q, max_results=50)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Keycloak error: {exc.response.status_code}")
+
+
+@router.post("/users/{user_id}/disable")
+async def disable_user(request: Request, user_id: str) -> dict:
+    """Disable a Keycloak account (user cannot log in; data is preserved)."""
+    actor = await _require_platform_admin(request)
+    from shared import keycloak_admin
+    try:
+        await keycloak_admin.set_user_enabled(user_id, enabled=False)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Keycloak error: {exc.response.status_code}")
+    async with db_tenant_connection("platform") as conn:
+        await record_audit_event(
+            conn, "platform",
+            action="platform.user.disabled",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="principal", subject_id=user_id)
+        await conn.commit()
+    return {"principal_id": user_id, "enabled": False}
+
+
+@router.post("/users/{user_id}/enable")
+async def enable_user(request: Request, user_id: str) -> dict:
+    """Re-enable a previously disabled Keycloak account."""
+    actor = await _require_platform_admin(request)
+    from shared import keycloak_admin
+    try:
+        await keycloak_admin.set_user_enabled(user_id, enabled=True)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Keycloak error: {exc.response.status_code}")
+    async with db_tenant_connection("platform") as conn:
+        await record_audit_event(
+            conn, "platform",
+            action="platform.user.enabled",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="principal", subject_id=user_id)
+        await conn.commit()
+    return {"principal_id": user_id, "enabled": True}
+
+
+@router.post("/users/{user_id}/reset-password")
+async def reset_user_password(
+    request: Request, user_id: str, body: UserPasswordReset
+) -> dict:
+    """Reset a user's password. If new_password is omitted a fresh
+    temporary password is generated and returned."""
+    actor = await _require_platform_admin(request)
+    from shared import keycloak_admin
+    new_pw = body.new_password or keycloak_admin.generate_temp_password()
+    try:
+        await keycloak_admin.reset_password(user_id, new_pw, temporary=True)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Keycloak error: {exc.response.status_code}")
+    async with db_tenant_connection("platform") as conn:
+        await record_audit_event(
+            conn, "platform",
+            action="platform.user.password_reset",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="principal", subject_id=user_id)
+        await conn.commit()
+    return {"principal_id": user_id, "temp_password": new_pw,
+            "must_change_password": True}

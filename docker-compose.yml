@@ -155,6 +155,11 @@ services:
       PROVIDER_CA_FILE: ${PROVIDER_CA_FILE:-}
       BAO_ADDR: ${BAO_ADDR:-}
       BAO_TOKEN: ${BAO_TOKEN:-}
+      # Keycloak Admin API — used for user provisioning (platform.py)
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8180
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-jlmirror}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
       # Opt-in mTLS: python -m scripts.dev_tls, then set API_MTLS=1
       # plus the cert paths in .env (see .env.example).
       API_MTLS: ${API_MTLS:-}

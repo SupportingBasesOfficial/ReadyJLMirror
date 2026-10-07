@@ -426,6 +426,7 @@ function ScriptPicker({
   selected: string[];
   onChange: (ids: string[]) => void;
 }) {
+  const navigate = useNavigate();
   const q = useQuery<Script[]>({
     queryKey: ["automation-scripts", tenantId],
     queryFn: () => api.get<Script[]>("/api/v1/automation/scripts"),
