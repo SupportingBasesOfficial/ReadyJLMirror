@@ -24,6 +24,9 @@ async function request<T>(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    if (res.status === 401) {
+      window.dispatchEvent(new CustomEvent("jlm:session-expired"));
+    }
     throw new Error(`${res.status} ${res.statusText}: ${text}`);
   }
   return res.json() as Promise<T>;

@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { useCanOperate } from "@/hooks/usePermission";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { useToast } from "@/components/ui/toast";
 
 interface MaintenanceWindow {
   window_id: string;
@@ -40,7 +42,9 @@ function statusVariant(w: MaintenanceWindow): "success" | "muted" {
 }
 
 export function MaintenancePage({ tenantId }: { tenantId: string }) {
+  const canOperate = useCanOperate();
   const qc = useQueryClient();
+  const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
   const [label, setLabel] = useState("");
   const [sourceIdsRaw, setSourceIdsRaw] = useState("");
@@ -62,10 +66,12 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
       qc.invalidateQueries({ queryKey: ["maintenance-windows"] });
       setShowForm(false);
       resetForm();
+      toast("Janela de manutenção criada", "success");
     },
     onError: (e: unknown) => {
       const msg = (e as Error)?.message;
       setFormErr(msg ?? "Failed to create window");
+      toast(msg ?? "Erro ao criar janela", "error");
     },
   });
 
@@ -74,7 +80,14 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
       api.delete<{ window_id: string; cancelled: boolean }>(
         `/api/v1/maintenance/windows/${windowId}?tenant_id=${tenantId}`
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["maintenance-windows"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["maintenance-windows"] });
+      toast("Janela de manutenção cancelada", "success");
+    },
+    onError: (e: unknown) => {
+      const msg = (e as Error)?.message;
+      toast(msg ?? "Erro ao cancelar janela", "error");
+    },
   });
 
   function resetForm() {
@@ -118,12 +131,12 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Maintenance Windows</h1>
-          <p className="text-sm text-[var(--muted)] mt-0.5">
+          <p className="text-sm text-[var(--text-muted)] mt-0.5">
             Alert notifications are suppressed for sources during active windows.
             Alerts still fire — only delivery is muted.
           </p>
         </div>
-        {!showForm && (
+        {canOperate && !showForm && (
           <Button onClick={() => { setShowForm(true); resetForm(); }}>
             + New Window
           </Button>
@@ -131,7 +144,7 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
       </div>
 
       {/* Create form */}
-      {showForm && (
+      {canOperate && showForm && (
         <Card>
           <form onSubmit={handleCreate} className="p-4 space-y-4">
             <h2 className="font-semibold">New Maintenance Window</h2>
@@ -150,7 +163,7 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
             <div className="space-y-1">
               <label className="text-sm font-medium">
                 Source IDs{" "}
-                <span className="text-[var(--muted)]">(comma-separated, blank = all sources)</span>
+                <span className="text-[var(--text-muted)]">(comma-separated, blank = all sources)</span>
               </label>
               <textarea
                 className="w-full border border-[var(--border)] rounded px-2 py-1.5 text-sm bg-[var(--surface)] focus:outline-none focus:ring-1 focus:ring-[var(--brand)] font-mono"
@@ -212,7 +225,7 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
       {/* Active windows */}
       {active.length > 0 && (
         <section className="space-y-2">
-          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wide">
+          <h2 className="text-sm font-semibold text-[var(--text-muted)] uppercase tracking-wide">
             Active
           </h2>
           {active.map((w) => (
@@ -221,6 +234,7 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
               window={w}
               onCancel={() => cancelMut.mutate(w.window_id)}
               cancelling={cancelMut.isPending}
+              canOperate={canOperate}
             />
           ))}
         </section>
@@ -229,7 +243,7 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
       {/* Upcoming windows */}
       {upcoming.length > 0 && (
         <section className="space-y-2">
-          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wide">
+          <h2 className="text-sm font-semibold text-[var(--text-muted)] uppercase tracking-wide">
             Upcoming
           </h2>
           {upcoming.map((w) => (
@@ -238,13 +252,14 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
               window={w}
               onCancel={() => cancelMut.mutate(w.window_id)}
               cancelling={cancelMut.isPending}
+              canOperate={canOperate}
             />
           ))}
         </section>
       )}
 
       {!isLoading && windows.length === 0 && (
-        <p className="text-sm text-[var(--muted)]">
+        <p className="text-sm text-[var(--text-muted)]">
           No maintenance windows. Active and upcoming windows appear here.
         </p>
       )}
@@ -256,10 +271,12 @@ function WindowCard({
   window: w,
   onCancel,
   cancelling,
+  canOperate,
 }: {
   window: MaintenanceWindow;
   onCancel: () => void;
   cancelling: boolean;
+  canOperate: boolean;
 }) {
   return (
     <Card>
@@ -271,28 +288,30 @@ function WindowCard({
               {w.active ? "active" : "upcoming"}
             </Badge>
           </div>
-          <p className="text-xs text-[var(--muted)]">
+          <p className="text-xs text-[var(--text-muted)]">
             {fmtDT(w.starts_at)} → {fmtDT(w.ends_at)}
           </p>
           {w.source_ids ? (
-            <p className="text-xs text-[var(--muted)] font-mono truncate">
+            <p className="text-xs text-[var(--text-muted)] font-mono truncate">
               Sources: {w.source_ids.join(", ")}
             </p>
           ) : (
-            <p className="text-xs text-[var(--muted)]">All sources</p>
+            <p className="text-xs text-[var(--text-muted)]">All sources</p>
           )}
-          <p className="text-xs text-[var(--muted)]">
+          <p className="text-xs text-[var(--text-muted)]">
             Created by {w.created_by} · {fmtDT(w.created_at)}
           </p>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onCancel}
-          disabled={cancelling}
-        >
-          Cancel
-        </Button>
+        {canOperate && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onCancel}
+            disabled={cancelling}
+          >
+            {cancelling ? <Spinner className="w-3 h-3" /> : w.active ? "Encerrar agora" : "Cancelar janela"}
+          </Button>
+        )}
       </div>
     </Card>
   );

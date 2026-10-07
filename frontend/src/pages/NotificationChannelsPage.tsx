@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { useCanOperate } from "@/hooks/usePermission";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 interface Destination {
   destination_config_id: string;
@@ -60,12 +62,15 @@ function AddDestinationForm({
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["notification-channels", tenantId] });
-      toast("Canal adicionado com sucesso.", "success");
+      toast("Canal criado com sucesso", "success");
       onDone();
     },
     onError: (e: unknown) => {
-      const detail = (e as { detail?: string })?.detail;
-      setErr(detail ?? "Falha ao adicionar canal.");
+      const detail = (e as { detail?: string; message?: string })?.detail
+        ?? (e as Error)?.message
+        ?? "Falha ao adicionar canal.";
+      setErr(detail);
+      toast("Erro: " + detail, "error");
     },
   });
 
@@ -140,9 +145,11 @@ function AddDestinationForm({
 }
 
 export function NotificationChannelsPage({ tenantId }: { tenantId: string }) {
+  const canOperate = useCanOperate();
   const qc = useQueryClient();
   const { toast } = useToast();
   const [adding, setAdding] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const q = useQuery({
     queryKey: ["notification-channels", tenantId],
@@ -155,7 +162,11 @@ export function NotificationChannelsPage({ tenantId }: { tenantId: string }) {
       api.delete(`/api/v1/alerting/notification-channels/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["notification-channels", tenantId] });
-      toast("Canal removido.", "info");
+      setDeletingId(null);
+      toast("Canal removido", "success");
+    },
+    onError: (e: Error) => {
+      toast("Erro: " + (e.message ?? "Falha ao remover canal."), "error");
     },
   });
 
@@ -170,14 +181,14 @@ export function NotificationChannelsPage({ tenantId }: { tenantId: string }) {
             Destinos configurados para alertas e notificações de incidentes.
           </p>
         </div>
-        {!adding && (
+        {canOperate && !adding && (
           <Button size="sm" onClick={() => setAdding(true)}>
             Add destination
           </Button>
         )}
       </div>
 
-      {adding && (
+      {canOperate && adding && (
         <AddDestinationForm
           tenantId={tenantId}
           onDone={() => setAdding(false)}
@@ -227,15 +238,15 @@ export function NotificationChannelsPage({ tenantId }: { tenantId: string }) {
                       {fmtTs(d.created_at)}
                     </td>
                     <td className="px-4 py-2.5">
-                      <button
-                        onClick={() =>
-                          deleteMut.mutate(d.destination_config_id)
-                        }
-                        disabled={removing}
-                        className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)] underline disabled:opacity-40"
-                      >
-                        {removing ? "removing…" : "remove"}
-                      </button>
+                      {canOperate && (
+                        <button
+                          onClick={() => setDeletingId(d.destination_config_id)}
+                          disabled={removing}
+                          className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)] underline disabled:opacity-40"
+                        >
+                          {removing ? "removing…" : "remove"}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -244,6 +255,18 @@ export function NotificationChannelsPage({ tenantId }: { tenantId: string }) {
           </table>
         )}
       </Card>
+
+      {deletingId && (
+        <ConfirmModal
+          title="Remover canal"
+          description={`Tem certeza que deseja remover "${destinations.find((d) => d.destination_config_id === deletingId)?.label ?? deletingId}"? Esta ação não pode ser desfeita.`}
+          confirmLabel="Remover"
+          destructive
+          isPending={deleteMut.isPending}
+          onConfirm={() => deleteMut.mutate(deletingId)}
+          onCancel={() => setDeletingId(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1,7 +1,12 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
+import DOMPurify from "dompurify";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { marked } from "marked";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -142,6 +147,7 @@ function ArticleDetailView({
 }) {
   const qc = useQueryClient();
   const [incidentInput, setIncidentInput] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const linkIncident = useMutation({
     mutationFn: (incidentId: string) =>
@@ -160,6 +166,28 @@ function ArticleDetailView({
 
   return (
     <div>
+      <style>{`
+        .kb-prose h1, .kb-prose h2, .kb-prose h3, .kb-prose h4 { font-weight: 600; margin: 0.9em 0 0.4em; line-height: 1.3; }
+        .kb-prose h1 { font-size: 1.3em; }
+        .kb-prose h2 { font-size: 1.15em; }
+        .kb-prose h3 { font-size: 1.05em; }
+        .kb-prose h4 { font-size: 0.95em; }
+        .kb-prose p { margin: 0.5em 0; }
+        .kb-prose strong, .kb-prose b { font-weight: 600; }
+        .kb-prose em, .kb-prose i { font-style: italic; }
+        .kb-prose a { color: var(--brand); text-decoration: underline; }
+        .kb-prose code { font-family: monospace; background: var(--surface); padding: 1px 5px; border-radius: 3px; font-size: 0.88em; }
+        .kb-prose pre { background: var(--surface); padding: 10px 12px; border-radius: 6px; overflow-x: auto; margin: 0.6em 0; }
+        .kb-prose pre code { background: none; padding: 0; }
+        .kb-prose ul, .kb-prose ol { padding-left: 1.6em; margin: 0.5em 0; }
+        .kb-prose li { margin: 0.2em 0; }
+        .kb-prose blockquote { border-left: 3px solid var(--border); padding-left: 1em; color: var(--text-muted); margin: 0.5em 0; }
+        .kb-prose hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
+        .kb-prose table { border-collapse: collapse; width: 100%; margin: 0.5em 0; font-size: 0.9em; }
+        .kb-prose th, .kb-prose td { border: 1px solid var(--border); padding: 5px 10px; }
+        .kb-prose th { background: var(--surface); font-weight: 600; }
+      `}</style>
+
       <button onClick={onBack} style={{ color: "var(--brand)", background: "none", border: "none", cursor: "pointer", fontSize: "0.82rem", marginBottom: 12 }}>
         ← Back to articles
       </button>
@@ -175,7 +203,7 @@ function ArticleDetailView({
         </div>
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
           <Button variant="secondary" size="sm" onClick={onEdit}>Edit</Button>
-          <Button variant="secondary" size="sm" onClick={onDelete}>Delete</Button>
+          <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(true)}>Delete</Button>
         </div>
       </div>
 
@@ -187,10 +215,18 @@ function ArticleDetailView({
         </div>
       )}
 
-      {/* Body */}
-      <div style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 16, marginBottom: 20, fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "0.83rem", lineHeight: 1.6, minHeight: 80 }}>
-        {article.body || <span style={{ color: "var(--text-muted)" }}>No content yet.</span>}
-      </div>
+      {/* Body — rendered Markdown */}
+      {article.body ? (
+        <div
+          className="kb-prose"
+          style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 16, marginBottom: 20, fontSize: "0.85rem", lineHeight: 1.7, minHeight: 80, color: "var(--text)" }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked(article.body) as string) }}
+        />
+      ) : (
+        <div style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 16, marginBottom: 20, minHeight: 80 }}>
+          <span style={{ color: "var(--text-muted)", fontSize: "0.83rem" }}>No content yet.</span>
+        </div>
+      )}
 
       {/* Incident links */}
       <div>
@@ -215,6 +251,19 @@ function ArticleDetailView({
           </Button>
         </form>
       </div>
+
+      {confirmDelete && (
+        <ConfirmModal
+          title="Excluir artigo"
+          description="Esta ação é permanente. O artigo será removido e não poderá ser recuperado."
+          confirmLabel="Excluir"
+          cancelLabel="Cancelar"
+          destructive={true}
+          isPending={false}
+          onConfirm={() => { setConfirmDelete(false); onDelete(); }}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
     </div>
   );
 }
@@ -229,6 +278,7 @@ function loadKbStatus(tenantId: string): string {
 
 export function KnowledgeBasePage({ tenantId }: { tenantId: string }) {
   const qc = useQueryClient();
+  const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("");
   const [filterStatus, setFilterStatus] = useState(() => loadKbStatus(tenantId));
@@ -239,8 +289,14 @@ export function KnowledgeBasePage({ tenantId }: { tenantId: string }) {
   };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showEditor, setShowEditor] = useState(false);
+  const [searchParams] = useSearchParams();
+  useEffect(() => {
+    const articleId = searchParams.get("article");
+    if (articleId) setSelectedId(articleId);
+  }, []);
   const [showNewCat, setShowNewCat] = useState(false);
   const [newCatName, setNewCatName] = useState("");
+  const [deletingCatId, setDeletingCatId] = useState<string | null>(null);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [debouncedQ, setDebouncedQ] = useState("");
 
@@ -281,12 +337,27 @@ export function KnowledgeBasePage({ tenantId }: { tenantId: string }) {
 
   const deleteArticle = useMutation({
     mutationFn: (id: string) => api.delete(`/api/v1/kb/articles/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["kb-articles"] }); setSelectedId(null); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["kb-articles"] });
+      setSelectedId(null);
+      toast("Artigo excluído.", "success");
+    },
+    onError: () => toast("Erro ao excluir artigo.", "error"),
   });
 
   const createCategory = useMutation({
     mutationFn: (name: string) => api.post<Category>("/api/v1/kb/categories", { name }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["kb-categories"] }); setNewCatName(""); setShowNewCat(false); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["kb-categories"] }); setNewCatName(""); },
+  });
+
+  const deleteCategory = useMutation({
+    mutationFn: (id: string) => api.delete(`/api/v1/kb/categories/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["kb-categories"] });
+      setDeletingCatId(null);
+      toast("Categoria excluída.", "success");
+    },
+    onError: () => { setDeletingCatId(null); toast("Erro ao excluir categoria.", "error"); },
   });
 
   const handleSearch = (val: string) => {
@@ -300,11 +371,13 @@ export function KnowledgeBasePage({ tenantId }: { tenantId: string }) {
       <ArticleDetailView
         article={articleDetail}
         onEdit={() => setShowEditor(true)}
-        onDelete={() => { if (window.confirm("Delete this article?")) deleteArticle.mutate(selectedId); }}
+        onDelete={() => deleteArticle.mutate(selectedId)}
         onBack={() => setSelectedId(null)}
       />
     );
   }
+
+  const catToDelete = categories.find((c) => c.category_id === deletingCatId);
 
   return (
     <div>
@@ -353,13 +426,37 @@ export function KnowledgeBasePage({ tenantId }: { tenantId: string }) {
         </Button>
       </div>
 
-      {/* New category form */}
+      {/* Category management panel */}
       {showNewCat && (
-        <form onSubmit={(e) => { e.preventDefault(); if (newCatName.trim()) createCategory.mutate(newCatName.trim()); }} style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Category name" style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", background: "var(--surface-2)", color: "var(--text)", fontSize: "0.82rem" }} />
-          <Button type="submit" size="sm" disabled={!newCatName.trim() || createCategory.isPending}>Create</Button>
-          <Button variant="secondary" size="sm" onClick={() => setShowNewCat(false)}>Cancel</Button>
-        </form>
+        <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 14, marginBottom: 14, background: "var(--surface-2)" }}>
+          <h3 style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: 10 }}>Gerenciar categorias</h3>
+
+          {categories.length > 0 ? (
+            <div style={{ marginBottom: 12 }}>
+              {categories.map((c) => (
+                <div key={c.category_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 8px", borderRadius: 6, marginBottom: 3, background: "var(--surface)", border: "1px solid var(--border)" }}>
+                  <span style={{ fontSize: "0.82rem", color: "var(--text)" }}>{c.name}</span>
+                  <button
+                    onClick={() => setDeletingCatId(c.category_id)}
+                    style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem", padding: "2px 6px" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = "var(--red, #ef4444)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+                  >
+                    Excluir
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: 10 }}>Nenhuma categoria criada.</p>
+          )}
+
+          <form onSubmit={(e) => { e.preventDefault(); if (newCatName.trim()) createCategory.mutate(newCatName.trim()); }} style={{ display: "flex", gap: 8 }}>
+            <input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Nova categoria…" style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", background: "var(--surface)", color: "var(--text)", fontSize: "0.82rem" }} />
+            <Button type="submit" size="sm" disabled={!newCatName.trim() || createCategory.isPending}>Criar</Button>
+            <Button variant="secondary" size="sm" type="button" onClick={() => setShowNewCat(false)}>Fechar</Button>
+          </form>
+        </div>
       )}
 
       {/* Article list */}
@@ -393,6 +490,20 @@ export function KnowledgeBasePage({ tenantId }: { tenantId: string }) {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Confirm delete category modal */}
+      {deletingCatId && catToDelete && (
+        <ConfirmModal
+          title="Excluir categoria"
+          description={`Excluir a categoria "${catToDelete.name}"? Artigos vinculados perderão esta categoria.`}
+          confirmLabel="Excluir"
+          cancelLabel="Cancelar"
+          destructive={true}
+          isPending={deleteCategory.isPending}
+          onConfirm={() => deleteCategory.mutate(deletingCatId)}
+          onCancel={() => setDeletingCatId(null)}
+        />
       )}
     </div>
   );

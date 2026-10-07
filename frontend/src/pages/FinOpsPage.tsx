@@ -3,6 +3,15 @@ import { api } from "@/api/client";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from "recharts";
 
 interface Entitlement {
   entitlement_id: string;
@@ -63,6 +72,13 @@ function fmtDate(iso?: string | null) {
   try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
 }
 
+function entVariant(state: string): "success" | "warning" | "danger" | "muted" {
+  if (state === "active") return "success";
+  if (state === "suspended") return "warning";
+  if (state === "expired") return "danger";
+  return "muted";
+}
+
 interface BillingStatus {
   adapter: string;
   status: string;
@@ -89,6 +105,23 @@ export function FinOpsPage({ tenantId }: { tenantId: string }) {
   });
 
   const s = summaryQ.data;
+
+  // Build chart data: last 20 usage rows sorted by window_end
+  const chartData = usageQ.data
+    ? [...usageQ.data]
+        .sort((a, b) => a.window_end.localeCompare(b.window_end))
+        .slice(-20)
+        .map((r) => ({
+          time: new Date(r.window_end).toLocaleString([], {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          quantity: r.quantity,
+          meter: meterLabel(r.meter),
+        }))
+    : [];
 
   return (
     <div className="space-y-4">
@@ -155,7 +188,7 @@ export function FinOpsPage({ tenantId }: { tenantId: string }) {
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {s.entitlements.map((e) => (
-                  <Badge key={e.entitlement_id} variant="success">
+                  <Badge key={e.entitlement_id} variant={entVariant(e.state)}>
                     {capLabel(e.capability)}
                   </Badge>
                 ))}
@@ -226,6 +259,39 @@ export function FinOpsPage({ tenantId }: { tenantId: string }) {
           <span className="text-sm font-medium">Usage history (last 3 days)</span>
           {usageQ.isFetching && <Spinner className="w-3 h-3" />}
         </CardHeader>
+
+        {/* Trend chart */}
+        {!usageQ.isLoading && chartData.length > 0 && (
+          <div className="px-4 pb-2 pt-1">
+            <ResponsiveContainer width="100%" height={140}>
+              <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 24, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis
+                  dataKey="time"
+                  tick={{ fontSize: 9, fill: "var(--text-muted)" }}
+                  angle={-35}
+                  textAnchor="end"
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={{ fontSize: 9, fill: "var(--text-muted)" }}
+                  width={32}
+                  allowDecimals={false}
+                />
+                <Tooltip
+                  contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", fontSize: "0.75rem", borderRadius: 6 }}
+                  labelStyle={{ color: "var(--text-muted)" }}
+                  formatter={(value, _name, entry) => [
+                    value,
+                    (entry as { payload?: { meter?: string } }).payload?.meter ?? "quantity",
+                  ]}
+                />
+                <Bar dataKey="quantity" fill="var(--brand, #6366f1)" radius={[2, 2, 0, 0]} maxBarSize={24} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
         {usageQ.isLoading ? (
           <div className="flex justify-center py-6"><Spinner /></div>
         ) : usageQ.isError ? (

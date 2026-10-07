@@ -5,6 +5,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { useToast } from "@/components/ui/toast";
 import { UserPlus, Copy, Check, X, ShieldOff, ShieldCheck, Trash2 } from "lucide-react";
 
 interface User {
@@ -248,6 +249,7 @@ function ConfirmModal({
   message,
   confirmLabel,
   danger,
+  isPending,
   onConfirm,
   onClose,
 }: {
@@ -255,6 +257,7 @@ function ConfirmModal({
   message: string;
   confirmLabel: string;
   danger?: boolean;
+  isPending?: boolean;
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -265,9 +268,10 @@ function ConfirmModal({
       <div className="flex gap-2">
         <Button
           onClick={onConfirm}
+          disabled={isPending}
           className={`flex-1 ${danger ? "bg-[var(--red)] hover:opacity-90" : ""}`}
         >
-          {confirmLabel}
+          {isPending ? <Spinner className="w-3 h-3" /> : confirmLabel}
         </Button>
         <Button variant="ghost" onClick={onClose} className="flex-1">
           Cancelar
@@ -339,6 +343,7 @@ function RoleCell({ user }: { user: User }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export function UsersAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
   const qc = useQueryClient();
+  const { toast } = useToast();
   const [showInvite, setShowInvite] = useState(false);
   const [tempPwd, setTempPwd] = useState<{ email: string; pwd: string } | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -354,17 +359,32 @@ export function UsersAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
 
   const deactivate = useMutation({
     mutationFn: (id: string) => api.post(`/api/admin/users/${id}/deactivate`, {}),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-users"] }); setConfirmAction(null); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      setConfirmAction(null);
+      toast("Usuário desativado", "success");
+    },
+    onError: (e: Error) => toast(e.message || "Erro na operação", "error"),
   });
 
   const reactivate = useMutation({
     mutationFn: (id: string) => api.post(`/api/admin/users/${id}/reactivate`, {}),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-users"] }); setConfirmAction(null); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      setConfirmAction(null);
+      toast("Usuário reativado", "success");
+    },
+    onError: (e: Error) => toast(e.message || "Erro na operação", "error"),
   });
 
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/api/admin/users/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-users"] }); setConfirmAction(null); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      setConfirmAction(null);
+      toast("Usuário removido", "success");
+    },
+    onError: (e: Error) => toast(e.message || "Erro na operação", "error"),
   });
 
   const users = q.data ?? [];
@@ -546,6 +566,7 @@ export function UsersAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
               : "Reativar"
           }
           danger={confirmAction.type === "delete"}
+          isPending={deactivate.isPending || reactivate.isPending || remove.isPending}
           onConfirm={handleConfirm}
           onClose={() => setConfirmAction(null)}
         />

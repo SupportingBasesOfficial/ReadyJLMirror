@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { useCanOperate } from "@/hooks/usePermission";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { useToast } from "@/components/ui/toast";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 interface Script {
   script_id: string;
@@ -32,6 +35,8 @@ interface Run {
   outcome: string;
   http_status?: number;
   error_detail?: string;
+  output?: string;
+  log?: string;
   started_at: string;
   finished_at?: string;
 }
@@ -171,10 +176,15 @@ function AddScheduleForm({ tenantId, scripts, onDone }: {
 }
 
 export function AutomationPage({ tenantId }: { tenantId: string }) {
+  const canOperate = useCanOperate();
   const qc = useQueryClient();
+  const { toast } = useToast();
   const [tab, setTab] = useState<"scripts" | "schedules" | "runs">("scripts");
   const [creatingScript, setCreatingScript] = useState(false);
   const [creatingSchedule, setCreatingSchedule] = useState(false);
+  const [confirmDeleteScriptId, setConfirmDeleteScriptId] = useState<string | null>(null);
+  const [confirmDeleteScheduleId, setConfirmDeleteScheduleId] = useState<string | null>(null);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
 
   const scripts = useQuery({
     queryKey: ["automation-scripts", tenantId],
@@ -195,13 +205,33 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
   const triggerMut = useMutation({
     mutationFn: (script_id: string) =>
       api.post(`/api/v1/automation/scripts/${script_id}/trigger`, {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["automation-runs", tenantId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["automation-runs", tenantId] });
+      toast("Execução iniciada.", "success");
+    },
+    onError: () => toast("Erro ao iniciar execução.", "error"),
   });
 
-  const disableScheduleMut = useMutation({
+  const deleteScriptMut = useMutation({
+    mutationFn: (script_id: string) =>
+      api.delete(`/api/v1/automation/scripts/${script_id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["automation-scripts", tenantId] });
+      setConfirmDeleteScriptId(null);
+      toast("Script excluído.", "success");
+    },
+    onError: () => { setConfirmDeleteScriptId(null); toast("Erro ao excluir script.", "error"); },
+  });
+
+  const deleteScheduleMut = useMutation({
     mutationFn: (schedule_id: string) =>
       api.delete(`/api/v1/automation/schedules/${schedule_id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["automation-schedules", tenantId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["automation-schedules", tenantId] });
+      setConfirmDeleteScheduleId(null);
+      toast("Agendamento excluído.", "success");
+    },
+    onError: () => { setConfirmDeleteScheduleId(null); toast("Erro ao excluir agendamento.", "error"); },
   });
 
   const tabs = [
@@ -209,6 +239,9 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
     { id: "schedules" as const, label: "Schedules" },
     { id: "runs" as const, label: "Run history" },
   ];
+
+  const scriptToDelete = (scripts.data ?? []).find((s) => s.script_id === confirmDeleteScriptId);
+  const scheduleToDelete = (schedules.data ?? []).find((s) => s.schedule_id === confirmDeleteScheduleId);
 
   return (
     <div className="space-y-4">
@@ -219,18 +252,18 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
             Webhook and scheduled automation scripts.
           </p>
         </div>
-        {tab === "scripts" && !creatingScript && (
+        {canOperate && tab === "scripts" && !creatingScript && (
           <Button size="sm" onClick={() => setCreatingScript(true)}>New script</Button>
         )}
-        {tab === "schedules" && !creatingSchedule && (
+        {canOperate && tab === "schedules" && !creatingSchedule && (
           <Button size="sm" onClick={() => setCreatingSchedule(true)}>Add schedule</Button>
         )}
       </div>
 
-      {creatingScript && tab === "scripts" && (
+      {canOperate && creatingScript && tab === "scripts" && (
         <CreateScriptForm tenantId={tenantId} onDone={() => setCreatingScript(false)} />
       )}
-      {creatingSchedule && tab === "schedules" && (
+      {canOperate && creatingSchedule && tab === "schedules" && (
         <AddScheduleForm
           tenantId={tenantId}
           scripts={scripts.data ?? []}
@@ -288,13 +321,22 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
                       </Badge>
                     </td>
                     <td className="px-4 py-2.5">
-                      {s.enabled && (
-                        <Button size="sm" variant="secondary"
-                          onClick={() => triggerMut.mutate(s.script_id)}
-                          disabled={triggerMut.isPending}>
-                          Run now
-                        </Button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {canOperate && s.enabled && (
+                          <Button size="sm" variant="secondary"
+                            onClick={() => triggerMut.mutate(s.script_id)}
+                            disabled={triggerMut.isPending}>
+                            Run now
+                          </Button>
+                        )}
+                        {canOperate && (
+                          <button
+                            onClick={() => setConfirmDeleteScriptId(s.script_id)}
+                            className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)] underline">
+                            Excluir
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -333,11 +375,11 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
                       {fmtTs(s.last_run_at)}
                     </td>
                     <td className="px-4 py-2.5">
-                      {s.enabled && (
-                        <button onClick={() => disableScheduleMut.mutate(s.schedule_id)}
-                          disabled={disableScheduleMut.isPending}
+                      {canOperate && (
+                        <button
+                          onClick={() => setConfirmDeleteScheduleId(s.schedule_id)}
                           className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)] underline">
-                          disable
+                          Excluir
                         </button>
                       )}
                     </td>
@@ -363,33 +405,81 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
                   <th className="px-4 py-2.5 font-medium">Trigger</th>
                   <th className="px-4 py-2.5 font-medium">HTTP</th>
                   <th className="px-4 py-2.5 font-medium">Started</th>
-                  <th className="px-4 py-2.5 font-medium">Error</th>
+                  <th className="px-4 py-2.5 font-medium">Error / Log</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
                 {(runs.data ?? []).map(r => (
-                  <tr key={r.run_id} className="hover:bg-[var(--surface-2)] transition-colors">
-                    <td className="px-4 py-2.5">
-                      <Badge variant={OUTCOME_VARIANTS[r.outcome] ?? "muted"}>
-                        {r.outcome}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-2.5 text-[var(--text-muted)]">{r.trigger_type}</td>
-                    <td className="px-4 py-2.5 text-[var(--text-muted)]">
-                      {r.http_status ?? "—"}
-                    </td>
-                    <td className="px-4 py-2.5 text-[var(--text-muted)] whitespace-nowrap">
-                      {fmtTs(r.started_at)}
-                    </td>
-                    <td className="px-4 py-2.5 text-[var(--red)] font-mono text-[10px]">
-                      {r.error_detail ?? ""}
-                    </td>
-                  </tr>
+                  <Fragment key={r.run_id}>
+                    <tr className="hover:bg-[var(--surface-2)] transition-colors">
+                      <td className="px-4 py-2.5">
+                        <Badge variant={OUTCOME_VARIANTS[r.outcome] ?? "muted"}>
+                          {r.outcome}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-2.5 text-[var(--text-muted)]">{r.trigger_type}</td>
+                      <td className="px-4 py-2.5 text-[var(--text-muted)]">
+                        {r.http_status ?? "—"}
+                      </td>
+                      <td className="px-4 py-2.5 text-[var(--text-muted)] whitespace-nowrap">
+                        {fmtTs(r.started_at)}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {r.error_detail && (
+                          <span className="text-[var(--red)] font-mono text-[10px] mr-2">
+                            {r.error_detail}
+                          </span>
+                        )}
+                        <button
+                          onClick={() => setExpandedRunId(expandedRunId === r.run_id ? null : r.run_id)}
+                          className="text-[10px] text-[var(--brand)] underline whitespace-nowrap">
+                          {expandedRunId === r.run_id ? "Ocultar log" : "Ver log"}
+                        </button>
+                      </td>
+                    </tr>
+                    {expandedRunId === r.run_id && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-3 bg-[var(--surface-2)]">
+                          <pre style={{ fontSize: "0.7rem", overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0, color: "var(--text-muted)", maxHeight: 240 }}>
+                            {r.output ?? r.log ?? JSON.stringify(r, null, 2)}
+                          </pre>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
           )}
         </Card>
+      )}
+
+      {/* Delete script confirmation */}
+      {confirmDeleteScriptId && scriptToDelete && (
+        <ConfirmModal
+          title="Excluir script"
+          description={`Excluir permanentemente o script "${scriptToDelete.name}"? Esta ação não pode ser desfeita.`}
+          confirmLabel="Excluir"
+          cancelLabel="Cancelar"
+          destructive={true}
+          isPending={deleteScriptMut.isPending}
+          onConfirm={() => deleteScriptMut.mutate(confirmDeleteScriptId)}
+          onCancel={() => setConfirmDeleteScriptId(null)}
+        />
+      )}
+
+      {/* Delete schedule confirmation */}
+      {confirmDeleteScheduleId && scheduleToDelete && (
+        <ConfirmModal
+          title="Excluir agendamento"
+          description={`Excluir permanentemente o agendamento do script "${scheduleToDelete.script_name}"? Esta ação não pode ser desfeita.`}
+          confirmLabel="Excluir"
+          cancelLabel="Cancelar"
+          destructive={true}
+          isPending={deleteScheduleMut.isPending}
+          onConfirm={() => deleteScheduleMut.mutate(confirmDeleteScheduleId)}
+          onCancel={() => setConfirmDeleteScheduleId(null)}
+        />
       )}
     </div>
   );

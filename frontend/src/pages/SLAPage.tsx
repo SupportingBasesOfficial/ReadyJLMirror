@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { useCanOperate } from "@/hooks/usePermission";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -112,7 +114,9 @@ function CreatePolicyForm({ tenantId, onDone }: { tenantId: string; onDone: () =
 }
 
 export function SLAPage({ tenantId }: { tenantId: string }) {
+  const canOperate = useCanOperate();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
   const [tab, setTab] = useState<"policies" | "active" | "breaches">("policies");
 
@@ -140,6 +144,12 @@ export function SLAPage({ tenantId }: { tenantId: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sla-policies", tenantId] }),
   });
 
+  const reactivateMut = useMutation({
+    mutationFn: (sla_id: string) =>
+      api.put(`/api/v1/sla/policies/${sla_id}`, { enabled: true }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sla-policies", tenantId] }),
+  });
+
   const tabs = [
     { id: "policies" as const, label: "Policies" },
     { id: "active" as const, label: "Active" },
@@ -155,12 +165,12 @@ export function SLAPage({ tenantId }: { tenantId: string }) {
             Response and resolution time commitments.
           </p>
         </div>
-        {tab === "policies" && !creating && (
+        {canOperate && tab === "policies" && !creating && (
           <Button size="sm" onClick={() => setCreating(true)}>New policy</Button>
         )}
       </div>
 
-      {creating && tab === "policies" && (
+      {canOperate && creating && tab === "policies" && (
         <CreatePolicyForm tenantId={tenantId} onDone={() => setCreating(false)} />
       )}
 
@@ -218,14 +228,21 @@ export function SLAPage({ tenantId }: { tenantId: string }) {
                       </Badge>
                     </td>
                     <td className="px-4 py-2.5">
-                      {p.enabled && (
+                      {canOperate && (p.enabled ? (
                         <button
                           onClick={() => disableMut.mutate(p.sla_id)}
                           disabled={disableMut.isPending}
                           className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)] underline disabled:opacity-40">
                           disable
                         </button>
-                      )}
+                      ) : (
+                        <button
+                          onClick={() => reactivateMut.mutate(p.sla_id)}
+                          disabled={reactivateMut.isPending}
+                          className="text-[10px] text-[var(--brand)] hover:underline disabled:opacity-40">
+                          Reativar
+                        </button>
+                      ))}
                     </td>
                   </tr>
                 ))}
@@ -255,8 +272,13 @@ export function SLAPage({ tenantId }: { tenantId: string }) {
               <tbody className="divide-y divide-[var(--border)]">
                 {(trackers.data ?? []).map(t => (
                   <tr key={t.tracker_id} className="hover:bg-[var(--surface-2)] transition-colors">
-                    <td className="px-4 py-2.5 font-mono text-[10px] text-[var(--text-muted)]">
-                      {t.alert_id.slice(0, 20)}…
+                    <td className="px-4 py-2.5">
+                      <button
+                        onClick={() => navigate(`/alerts?highlight=${t.alert_id}`)}
+                        title={t.alert_id}
+                        className="font-mono text-[10px] text-[var(--brand)] hover:underline cursor-pointer">
+                        {t.alert_id.slice(0, 20)}…
+                      </button>
                     </td>
                     <td className="px-4 py-2.5 text-[var(--text)]">{t.sla_name}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
@@ -307,8 +329,13 @@ export function SLAPage({ tenantId }: { tenantId: string }) {
               <tbody className="divide-y divide-[var(--border)]">
                 {(breaches.data ?? []).map(b => (
                   <tr key={b.breach_id} className="hover:bg-[var(--surface-2)] transition-colors">
-                    <td className="px-4 py-2.5 font-mono text-[10px] text-[var(--text-muted)]">
-                      {b.alert_id.slice(0, 20)}…
+                    <td className="px-4 py-2.5">
+                      <button
+                        onClick={() => navigate(`/alerts?highlight=${b.alert_id}`)}
+                        title={b.alert_id}
+                        className="font-mono text-[10px] text-[var(--brand)] hover:underline cursor-pointer">
+                        {b.alert_id.slice(0, 20)}…
+                      </button>
                     </td>
                     <td className="px-4 py-2.5 text-[var(--text)]">{b.sla_name}</td>
                     <td className="px-4 py-2.5">

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/api/client";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -93,8 +93,11 @@ export function NOCDashboard({ tenantId }: Props) {
   const [error, setError] = useState(false);
   const esRef = useRef<EventSource | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryDelayRef = useRef(5000);
   const [widgets, setWidgets] = useState<typeof DEFAULT_WIDGETS>(() => loadWidgets(tenantId));
   const [showCustomize, setShowCustomize] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   const toggleWidget = (key: WidgetKey) => {
     setWidgets((prev) => {
@@ -104,6 +107,24 @@ export function NOCDashboard({ tenantId }: Props) {
     });
   };
 
+  useEffect(() => {
+    if (!showCustomize) return;
+    function handleOutside(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowCustomize(false);
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setShowCustomize(false);
+    }
+    document.addEventListener("mousedown", handleOutside);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [showCustomize]);
+
   // Maintenance windows — determine which source IDs are currently in maintenance
   const { data: maintenanceWindows = [] } = useQuery<
     { window_id: string; source_ids: string[] | null; active: boolean }[]
@@ -111,7 +132,7 @@ export function NOCDashboard({ tenantId }: Props) {
     queryKey: ["maintenance-windows", tenantId],
     queryFn: () =>
       api.get<{ window_id: string; source_ids: string[] | null; active: boolean }[]>(
-        `/api/v1/maintenance/windows?tenant_id=${tenantId}`
+        `/api/v1/maintenance/windows`
       ),
     refetchInterval: 60_000,
   });
@@ -150,6 +171,7 @@ export function NOCDashboard({ tenantId }: Props) {
         if (cancelled) { es.close(); return; }
         setConnected(true);
         setError(false);
+        retryDelayRef.current = 5000;
       };
 
       es.onmessage = (ev) => {
@@ -179,7 +201,9 @@ export function NOCDashboard({ tenantId }: Props) {
           .get<RawSource[]>(`/api/v1/monitoring/sources`)
           .then((data) => { if (!cancelled) setSources(data); })
           .catch(() => null);
-        retryRef.current = setTimeout(connect, 10_000);
+        const delay = retryDelayRef.current * (0.8 + Math.random() * 0.4);
+        retryDelayRef.current = Math.min(retryDelayRef.current * 2, 60_000);
+        retryRef.current = setTimeout(connect, delay);
       };
     }
 
@@ -217,7 +241,7 @@ export function NOCDashboard({ tenantId }: Props) {
           <h2 className="text-base font-semibold">NOC Overview</h2>
           <LiveDot connected={connected} />
         </div>
-        <div className="relative">
+        <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setShowCustomize((v) => !v)}
             className="text-xs text-[var(--text-muted)] hover:text-[var(--text)] flex items-center gap-1 px-2 py-1 rounded border border-[var(--border)] bg-[var(--surface-2)] transition-colors"
@@ -279,7 +303,7 @@ export function NOCDashboard({ tenantId }: Props) {
           </p>
           <div className="grid gap-3 sm:grid-cols-3 mb-5">
             {[
-              { Icon: Activity, label: "1. Adicionar fonte", desc: "Conecte Zabbix, Nagios, Prometheus ou Alertmanager", page: "/monitoring" },
+              { Icon: Activity, label: "1. Adicionar fonte", desc: "Conecte Zabbix ao JLMirror", page: "/monitoring" },
               { Icon: Bell, label: "2. Definir políticas", desc: "Configure as regras de alerta e escalonamento", page: "/policies" },
               { Icon: Zap, label: "3. Configurar automação", desc: "Crie respostas automáticas a incidentes", page: "/automation" },
             ].map(({ Icon, label, desc, page }) => (
@@ -363,7 +387,11 @@ export function NOCDashboard({ tenantId }: Props) {
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
                 {alerts.map((a) => (
-                  <tr key={a.alert_id}>
+                  <tr
+                    key={a.alert_id}
+                    className="cursor-pointer hover:bg-[var(--surface-2)] transition-colors"
+                    onClick={() => navigate(`/alerts?highlight=${a.alert_id}`)}
+                  >
                     <td className="py-1.5 pr-3">
                       <Badge variant={sevVariant(a.source_evidence_summary?.severity_class)}>
                         {sevLabel(a.source_evidence_summary?.severity_class)}
@@ -405,8 +433,14 @@ export function NOCDashboard({ tenantId }: Props) {
                   allSourcesMaintenance ||
                   maintenanceSources.has(s.monitoring_source_id);
                 return (
-                  <div key={s.monitoring_source_id}
-                    className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg p-3">
+                  <div
+                    key={s.monitoring_source_id}
+                    className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg p-3 cursor-pointer hover:border-[var(--brand)] transition-colors"
+                    onClick={() => navigate("/monitoring")}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") navigate("/monitoring"); }}
+                  >
                     <div className="flex items-center justify-between mb-1 gap-1 flex-wrap">
                       <span className="text-sm font-medium truncate">{s.display_name}</span>
                       <div className="flex gap-1 flex-shrink-0">

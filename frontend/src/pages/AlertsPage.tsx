@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { useCanOperate } from "@/hooks/usePermission";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,17 @@ const SNOOZE_OPTIONS = [
   { label: "8 hours", value: 480 },
   { label: "24 hours", value: 1440 },
 ];
+
+const SEVERITY_FILTERS = [
+  { label: "Todas", value: "all" },
+  { label: "Critical", value: "critical" },
+  { label: "High", value: "degraded" },
+  { label: "Medium", value: "warning" },
+  { label: "Low", value: "informational" },
+  { label: "Info", value: "info" },
+] as const;
+
+const PAGE_SIZE = 50;
 
 function sevVariant(cls?: string): "danger" | "warning" | "info" | "muted" {
   if (cls === "critical") return "danger";
@@ -140,13 +153,24 @@ function loadAlertFilter(tenantId: string): "active" | "all" {
 }
 
 export function AlertsPage({ tenantId }: { tenantId: string }) {
+  const canOperate = useCanOperate();
+  const [searchParams] = useSearchParams();
+  const highlight = searchParams.get("highlight");
+
   const [filter, setFilter] = useState<"active" | "all">(() => loadAlertFilter(tenantId));
+  const [severityFilter, setSeverityFilter] = useState<string>("all");
+  const [page, setPage] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Track whether we already auto-opened for the current highlight value so that
+  // navigating back to the list doesn't immediately re-open the detail.
+  const [autoOpenedFor, setAutoOpenedFor] = useState<string | null>(null);
 
   const setAndSaveFilter = (v: "active" | "all") => {
     setFilter(v);
+    setPage(0);
     try { localStorage.setItem(`jlm_alerts_filter_${tenantId}`, v); } catch { /* */ }
   };
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+
   const qc = useQueryClient();
 
   const q = useQuery({
@@ -172,7 +196,30 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
   });
 
-  const alerts = q.data ?? [];
+  // Auto-open the highlighted alert when data is available.
+  // If the alert isn't in the current list, open the detail anyway — AlertDetail will
+  // fetch it directly via GET /api/v1/alerting/alerts/{id}.
+  useEffect(() => {
+    if (!highlight) return;
+    if (autoOpenedFor === highlight) return;
+    if (q.isLoading) return;
+
+    // Mark as auto-opened before setting selectedId so that the user returning to the
+    // list (setting selectedId = null) doesn't trigger another auto-open.
+    setAutoOpenedFor(highlight);
+    setSelectedId(highlight);
+  }, [highlight, q.isLoading, autoOpenedFor]);
+
+  const allAlerts = q.data ?? [];
+
+  // Client-side severity filter
+  const filteredAlerts = severityFilter === "all"
+    ? allAlerts
+    : allAlerts.filter((a) => a.source_evidence_summary?.severity_class === severityFilter);
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filteredAlerts.length / PAGE_SIZE));
+  const pagedAlerts = filteredAlerts.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   if (selectedId) {
     return (
@@ -186,9 +233,9 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-base font-semibold">Alerts</h2>
-        <div className="flex gap-1.5">
+        <div className="flex gap-1.5 flex-wrap">
           {(["active", "all"] as const).map((f) => (
             <button
               key={f}
@@ -206,13 +253,40 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
         </div>
       </div>
 
+      {/* Severity filter */}
+      <div className="flex gap-1.5 flex-wrap items-center">
+        {SEVERITY_FILTERS.map((sf) => (
+          <button
+            key={sf.value}
+            onClick={() => { setSeverityFilter(sf.value); setPage(0); }}
+            className={[
+              "px-2.5 py-1 rounded text-[10px] cursor-pointer border transition-colors",
+              severityFilter === sf.value
+                ? "border-[var(--brand)] text-[var(--brand)] bg-[var(--surface-2)]"
+                : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--text-muted)]",
+            ].join(" ")}
+          >
+            {sf.label}
+          </button>
+        ))}
+        {allAlerts.length > 0 && (
+          <span className="text-[10px] text-[var(--text-muted)] ml-1">
+            {filteredAlerts.length} de {allAlerts.length} alert{allAlerts.length !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+
       <Card className="p-0 overflow-hidden">
         {q.isLoading ? (
           <div className="flex justify-center py-8"><Spinner /></div>
         ) : q.isError ? (
           <p className="text-xs text-[var(--red)] p-4">Failed to load alerts.</p>
-        ) : alerts.length === 0 ? (
-          <p className="text-xs text-[var(--text-muted)] p-4">No alerts.</p>
+        ) : pagedAlerts.length === 0 ? (
+          <p className="text-xs text-[var(--text-muted)] p-4">
+            {filteredAlerts.length === 0 && allAlerts.length > 0
+              ? "Nenhum alerta com a severidade selecionada."
+              : "No alerts."}
+          </p>
         ) : (
           <table className="w-full text-xs">
             <thead className="bg-[var(--surface-2)]">
@@ -226,16 +300,22 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
-              {alerts.map((a) => {
+              {pagedAlerts.map((a) => {
                 const busy =
                   (snoozeMut.isPending &&
                     (snoozeMut.variables as { alertId: string } | undefined)?.alertId === a.alert_id) ||
                   (unsnoozeMut.isPending && unsnoozeMut.variables === a.alert_id);
+                const isHighlighted = highlight === a.alert_id;
                 return (
                   <tr
                     key={a.alert_id}
                     onClick={() => setSelectedId(a.alert_id)}
-                    className="hover:bg-[var(--surface-2)] cursor-pointer transition-colors"
+                    className={[
+                      "cursor-pointer transition-colors",
+                      isHighlighted
+                        ? "bg-[color-mix(in_srgb,var(--brand)_8%,transparent)] ring-1 ring-inset ring-[var(--brand)] hover:bg-[color-mix(in_srgb,var(--brand)_12%,transparent)]"
+                        : "hover:bg-[var(--surface-2)]",
+                    ].join(" ")}
                   >
                     <td className="px-4 py-2.5">
                       <Badge variant={sevVariant(a.source_evidence_summary?.severity_class)}>
@@ -255,7 +335,7 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
                       {fmtTs(a.opened_at)}
                     </td>
                     <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
-                      {a.lifecycle_state === "active" && (
+                      {canOperate && a.lifecycle_state === "active" && (
                         <SnoozeControl
                           alert={a}
                           onSnooze={(minutes) =>
@@ -273,6 +353,33 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
           </table>
         )}
       </Card>
+
+      {/* Pagination */}
+      {filteredAlerts.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
+          <span>
+            Página {page + 1} de {totalPages} · {filteredAlerts.length} alertas
+          </span>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              ← Anterior
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            >
+              Próxima →
+            </Button>
+          </div>
+        </div>
+      )}
 
       {q.isFetching && !q.isLoading && (
         <div className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">

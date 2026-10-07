@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { useCanOperate } from "@/hooks/usePermission";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { useToast } from "@/components/ui/toast";
 
 interface Finding {
   finding_id: string;
@@ -47,19 +50,32 @@ function fmtConfidence(c: number | null) {
 }
 
 export function AIOpsPage({ tenantId }: { tenantId: string }) {
+  const canOperate = useCanOperate();
+  const navigate = useNavigate();
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [showDismissed, setShowDismissed] = useState(false);
   const qc = useQueryClient();
+  const { toast } = useToast();
 
   const q = useQuery({
-    queryKey: ["aiops-findings", tenantId],
-    queryFn: () => api.get<Finding[]>(`/api/v1/aiops/findings?limit=50`),
+    queryKey: ["aiops-findings", tenantId, showDismissed],
+    queryFn: () =>
+      api.get<Finding[]>(
+        showDismissed
+          ? `/api/v1/aiops/findings?limit=50&include_dismissed=true`
+          : `/api/v1/aiops/findings?limit=50`
+      ),
     refetchInterval: 120_000,
   });
 
   const dismiss = useMutation({
     mutationFn: (finding_id: string) =>
-      api.post(`/api/v1/aiops/findings/${finding_id}/dismiss`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["aiops-findings", tenantId] }),
+      api.post(`/api/v1/aiops/findings/${finding_id}/dismiss`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["aiops-findings", tenantId] });
+      toast("Finding descartado", "success");
+    },
+    onError: () => toast("Erro ao descartar", "error"),
   });
 
   const findings = q.data ?? [];
@@ -73,8 +89,26 @@ export function AIOpsPage({ tenantId }: { tenantId: string }) {
             AI-generated analysis · advisory only · does not create or resolve alerts
           </p>
         </div>
-        {q.isFetching && <Spinner className="w-3 h-3" />}
+        <div className="flex items-center gap-2">
+          {q.isFetching && <Spinner className="w-3 h-3" />}
+          <button
+            onClick={() => setShowDismissed((v) => !v)}
+            className={[
+              "px-3 py-1 rounded-full text-xs cursor-pointer border transition-colors",
+              showDismissed
+                ? "border-[var(--brand)] text-[var(--brand)] bg-[var(--surface-2)]"
+                : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--text-muted)]",
+            ].join(" ")}
+          >
+            {showDismissed ? "Ocultar descartados" : "Ver descartados"}
+          </button>
+        </div>
       </div>
+      {showDismissed && (
+        <p className="text-[10px] text-[var(--text-muted)]">
+          Nota: findings descartados não são listados caso o servidor não suporte o filtro.
+        </p>
+      )}
 
       {q.isLoading ? (
         <div className="flex justify-center py-10"><Spinner /></div>
@@ -107,15 +141,17 @@ export function AIOpsPage({ tenantId }: { tenantId: string }) {
                   <span className="text-[10px] text-[var(--text-muted)] whitespace-nowrap">
                     conf {fmtConfidence(f.confidence)}
                   </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => dismiss.mutate(f.finding_id)}
-                    disabled={dismiss.isPending}
-                    className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)]"
-                  >
-                    Dismiss
-                  </Button>
+                  {canOperate && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => dismiss.mutate(f.finding_id)}
+                      disabled={dismiss.isPending}
+                      className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)]"
+                    >
+                      Dismiss
+                    </Button>
+                  )}
                 </div>
               </CardHeader>
 
@@ -127,14 +163,33 @@ export function AIOpsPage({ tenantId }: { tenantId: string }) {
                     <div>
                       <p className="text-[10px] text-[var(--text-muted)] mb-1">Referenced evidence</p>
                       <div className="flex flex-wrap gap-1">
-                        {f.evidence_refs.map((ref) => (
-                          <span
-                            key={ref}
-                            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)]"
-                          >
-                            {ref}
-                          </span>
-                        ))}
+                        {f.evidence_refs.map((ref) => {
+                          const isAlert = ref.startsWith("alert:");
+                          if (isAlert) {
+                            const alertId = ref.slice("alert:".length);
+                            return (
+                              <a
+                                key={ref}
+                                href={`/alerts?highlight=${alertId}`}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  navigate(`/alerts?highlight=${alertId}`);
+                                }}
+                                className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--brand)] text-[var(--brand)] hover:underline cursor-pointer"
+                              >
+                                {ref}
+                              </a>
+                            );
+                          }
+                          return (
+                            <span
+                              key={ref}
+                              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)]"
+                            >
+                              {ref}
+                            </span>
+                          );
+                        })}
                       </div>
                     </div>
                   )}

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { useToast } from "@/components/ui/toast";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -57,10 +59,12 @@ function daysUntil(iso: string | null): string {
 // ── Certificates tab ───────────────────────────────────────────────────────
 
 function CertsTab({ tenantId }: { tenantId: string }) {
+  const { toast } = useToast();
   const qc = useQueryClient();
   const [domain, setDomain] = useState("");
   const [port, setPort] = useState("443");
   const [alertDays, setAlertDays] = useState("30");
+  const [removingCertId, setRemovingCertId] = useState<string | null>(null);
 
   const { data: certs = [], isLoading } = useQuery<Cert[]>({
     queryKey: ["infra-certs", tenantId],
@@ -76,19 +80,57 @@ function CertsTab({ tenantId }: { tenantId: string }) {
         alert_days: parseInt(alertDays, 10),
       }),
     onSuccess: () => {
+      toast("Certificado adicionado.", "success");
       qc.invalidateQueries({ queryKey: ["infra-certs"] });
       setDomain("");
+    },
+    onError: () => {
+      toast("Erro ao adicionar certificado.", "error");
     },
   });
 
   const remove = useMutation({
     mutationFn: (certId: string) =>
       api.delete(`/api/v1/infra/certs/${certId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["infra-certs"] }),
+    onSuccess: () => {
+      toast("Certificado removido.", "success");
+      qc.invalidateQueries({ queryKey: ["infra-certs"] });
+      setRemovingCertId(null);
+    },
+    onError: () => {
+      toast("Erro ao remover certificado.", "error");
+      setRemovingCertId(null);
+    },
   });
+
+  const recheck = useMutation({
+    mutationFn: (certId: string) =>
+      api.post(`/api/v1/infra/certs/${certId}/recheck`, {}),
+    onSuccess: () => {
+      toast("Verificação enfileirada. Aguarde alguns instantes.", "success");
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["infra-certs"] }), 5000);
+    },
+    onError: () => {
+      toast("Verificação manual não disponível nesta versão.", "info");
+    },
+  });
+
+  const removingCert = certs.find((c) => c.cert_id === removingCertId);
 
   return (
     <div>
+      {removingCertId && removingCert && (
+        <ConfirmModal
+          title="Remover certificado"
+          description={`Parar de monitorar "${removingCert.domain}:${removingCert.port}"?`}
+          confirmLabel="Remover"
+          destructive
+          isPending={remove.isPending}
+          onConfirm={() => remove.mutate(removingCertId)}
+          onCancel={() => setRemovingCertId(null)}
+        />
+      )}
+
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -156,12 +198,21 @@ function CertsTab({ tenantId }: { tenantId: string }) {
                     {c.last_checked_at ? new Date(c.last_checked_at).toLocaleString() : "pending"}
                   </td>
                   <td style={{ padding: "5px 8px" }}>
-                    <button
-                      onClick={() => remove.mutate(c.cert_id)}
-                      style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem" }}
-                    >
-                      remove
-                    </button>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        onClick={() => recheck.mutate(c.cert_id)}
+                        disabled={recheck.isPending && recheck.variables === c.cert_id}
+                        style={{ color: "var(--brand)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem" }}
+                      >
+                        verificar
+                      </button>
+                      <button
+                        onClick={() => setRemovingCertId(c.cert_id)}
+                        style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem" }}
+                      >
+                        remove
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -185,12 +236,23 @@ const STATUS_COLOR: Record<string, string> = {
   maintenance: "#f59e0b",
 };
 
+interface EditForm {
+  name: string;
+  status: string;
+  ip_address: string;
+  location: string;
+  owner: string;
+}
+
 function AssetsTab({ tenantId }: { tenantId: string }) {
+  const { toast } = useToast();
   const qc = useQueryClient();
   const [form, setForm] = useState({ name: "", asset_type: "server", status: "active", ip_address: "", location: "", owner: "" });
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [editing, setEditing] = useState<Asset | null>(null);
+  const [editForm, setEditForm] = useState<EditForm>({ name: "", status: "active", ip_address: "", location: "", owner: "" });
+  const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
 
   const { data: assets = [], isLoading } = useQuery<Asset[]>({
     queryKey: ["infra-assets", tenantId],
@@ -198,20 +260,58 @@ function AssetsTab({ tenantId }: { tenantId: string }) {
   });
 
   const create = useMutation({
-    mutationFn: () => api.post<Asset>("/api/v1/infra/assets", { ...form, ip_address: form.ip_address || null, location: form.location || null, owner: form.owner || null }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["infra-assets"] }); setForm({ name: "", asset_type: "server", status: "active", ip_address: "", location: "", owner: "" }); },
+    mutationFn: () => api.post<Asset>("/api/v1/infra/assets", {
+      ...form,
+      ip_address: form.ip_address || null,
+      location: form.location || null,
+      owner: form.owner || null,
+    }),
+    onSuccess: () => {
+      toast("Asset criado.", "success");
+      qc.invalidateQueries({ queryKey: ["infra-assets"] });
+      setForm({ name: "", asset_type: "server", status: "active", ip_address: "", location: "", owner: "" });
+    },
+    onError: () => {
+      toast("Erro ao criar asset.", "error");
+    },
   });
 
   const update = useMutation({
     mutationFn: ({ assetId, data }: { assetId: string; data: Partial<Asset> }) =>
       api.put<Asset>(`/api/v1/infra/assets/${assetId}`, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["infra-assets"] }); setEditing(null); },
+    onSuccess: () => {
+      toast("Asset atualizado.", "success");
+      qc.invalidateQueries({ queryKey: ["infra-assets"] });
+      setEditing(null);
+    },
+    onError: () => {
+      toast("Erro ao atualizar asset.", "error");
+    },
   });
 
   const remove = useMutation({
     mutationFn: (assetId: string) => api.delete(`/api/v1/infra/assets/${assetId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["infra-assets"] }),
+    onSuccess: () => {
+      toast("Asset excluído.", "success");
+      qc.invalidateQueries({ queryKey: ["infra-assets"] });
+      setDeletingAssetId(null);
+    },
+    onError: () => {
+      toast("Erro ao excluir asset.", "error");
+      setDeletingAssetId(null);
+    },
   });
+
+  const openEdit = (a: Asset) => {
+    setEditing(a);
+    setEditForm({
+      name: a.name,
+      status: a.status,
+      ip_address: a.ip_address ?? "",
+      location: a.location ?? "",
+      owner: a.owner ?? "",
+    });
+  };
 
   const displayed = assets.filter((a) =>
     (filterType === "all" || a.asset_type === filterType) &&
@@ -221,8 +321,22 @@ function AssetsTab({ tenantId }: { tenantId: string }) {
   const sel = (field: string) => (e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>) =>
     setForm((f) => ({ ...f, [field]: e.target.value }));
 
+  const deletingAsset = assets.find((a) => a.asset_id === deletingAssetId);
+
   return (
     <div>
+      {deletingAssetId && deletingAsset && (
+        <ConfirmModal
+          title="Excluir asset"
+          description={`Excluir "${deletingAsset.name}"? Esta ação não pode ser desfeita.`}
+          confirmLabel="Excluir"
+          destructive
+          isPending={remove.isPending}
+          onConfirm={() => remove.mutate(deletingAssetId)}
+          onCancel={() => setDeletingAssetId(null)}
+        />
+      )}
+
       {/* Create form */}
       <form onSubmit={(e) => { e.preventDefault(); if (form.name.trim()) create.mutate(); }} style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         <input value={form.name} onChange={sel("name")} placeholder="Name" style={{ flex: 2, minWidth: 140, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", background: "var(--surface-2)", color: "var(--text)", fontSize: "0.82rem" }} />
@@ -275,8 +389,8 @@ function AssetsTab({ tenantId }: { tenantId: string }) {
                   <td style={{ padding: "5px 8px", color: "var(--text-muted)" }}>{a.location ?? "—"}</td>
                   <td style={{ padding: "5px 8px", color: "var(--text-muted)" }}>{a.owner ?? "—"}</td>
                   <td style={{ padding: "5px 8px", display: "flex", gap: 8 }}>
-                    <button onClick={() => setEditing(a)} style={{ color: "var(--brand)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem" }}>edit</button>
-                    <button onClick={() => { if (window.confirm(`Delete "${a.name}"?`)) remove.mutate(a.asset_id); }} style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem" }}>delete</button>
+                    <button onClick={() => openEdit(a)} style={{ color: "var(--brand)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem" }}>edit</button>
+                    <button onClick={() => setDeletingAssetId(a.asset_id)} style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem" }}>delete</button>
                   </td>
                 </tr>
               ))}
@@ -285,37 +399,51 @@ function AssetsTab({ tenantId }: { tenantId: string }) {
         </div>
       )}
 
-      {/* Edit modal */}
+      {/* Edit modal — controlled inputs */}
       {editing && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, maxWidth: 420, width: "100%", margin: "0 16px" }}>
             <h3 style={{ fontWeight: 600, marginBottom: 14 }}>Edit asset</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {[
-                { label: "Name", key: "name", type: "text" },
-                { label: "IP address", key: "ip_address", type: "text" },
-                { label: "Location", key: "location", type: "text" },
-                { label: "Owner", key: "owner", type: "text" },
-              ].map(({ label, key, type }) => (
+              {(["name", "ip_address", "location", "owner"] as const).map((key) => (
                 <label key={key} style={{ fontSize: "0.82rem" }}>
-                  {label}
+                  {key === "ip_address" ? "IP address" : key.charAt(0).toUpperCase() + key.slice(1)}
                   <input
-                    type={type}
-                    defaultValue={(editing as unknown as Record<string, string | null>)[key] ?? ""}
-                    onChange={(e) => setEditing((prev) => prev ? { ...prev, [key]: e.target.value } : null)}
+                    type="text"
+                    value={editForm[key]}
+                    onChange={(e) => setEditForm((f) => ({ ...f, [key]: e.target.value }))}
                     style={{ display: "block", width: "100%", border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", background: "var(--surface-2)", color: "var(--text)", marginTop: 4, fontSize: "0.82rem", boxSizing: "border-box" }}
                   />
                 </label>
               ))}
               <label style={{ fontSize: "0.82rem" }}>
                 Status
-                <select defaultValue={editing.status} onChange={(e) => setEditing((prev) => prev ? { ...prev, status: e.target.value } : null)} style={{ display: "block", width: "100%", border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px", background: "var(--surface-2)", color: "var(--text)", marginTop: 4, fontSize: "0.82rem" }}>
+                <select
+                  value={editForm.status}
+                  onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}
+                  style={{ display: "block", width: "100%", border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px", background: "var(--surface-2)", color: "var(--text)", marginTop: 4, fontSize: "0.82rem" }}
+                >
                   {STATUSES.map((s) => <option key={s}>{s}</option>)}
                 </select>
               </label>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-              <Button size="sm" onClick={() => update.mutate({ assetId: editing.asset_id, data: { name: editing.name, status: editing.status, ip_address: editing.ip_address ?? undefined, location: editing.location ?? undefined, owner: editing.owner ?? undefined } })} disabled={update.isPending}>
+              <Button
+                size="sm"
+                onClick={() =>
+                  update.mutate({
+                    assetId: editing.asset_id,
+                    data: {
+                      name: editForm.name,
+                      status: editForm.status,
+                      ip_address: editForm.ip_address || null,
+                      location: editForm.location || null,
+                      owner: editForm.owner || null,
+                    },
+                  })
+                }
+                disabled={update.isPending}
+              >
                 {update.isPending ? "Saving…" : "Save"}
               </Button>
               <Button variant="secondary" size="sm" onClick={() => setEditing(null)}>Cancel</Button>

@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { useCanOperate } from "@/hooks/usePermission";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { useToast } from "@/components/ui/toast";
 
 interface PolicyVersion {
   policy_id: string;
@@ -18,6 +21,12 @@ interface PolicyVersion {
   effective_enabled: boolean;
   is_effective: boolean;
   created_at: string;
+  escalation_policy_id?: string | null;
+}
+
+interface MonitoringSource {
+  monitoring_source_id: string;
+  display_name: string;
 }
 
 const SEVERITIES = ["informational", "warning", "degraded", "critical"];
@@ -65,10 +74,13 @@ const EMPTY_FORM: PolicyFormData = {
 function PolicyForm({
   initial,
   onDone,
+  sources,
 }: {
   initial?: Partial<PolicyFormData>;
   onDone: () => void;
+  sources: MonitoringSource[];
 }) {
+  const { toast } = useToast();
   const qc = useQueryClient();
   const [form, setForm] = useState<PolicyFormData>({ ...EMPTY_FORM, ...initial });
   const [error, setError] = useState<string | null>(null);
@@ -91,10 +103,14 @@ function PolicyForm({
       return api.post("/api/v1/alerting/policies", body);
     },
     onSuccess: () => {
+      toast("Política criada e ativada.", "success");
       qc.invalidateQueries({ queryKey: ["alert-policies"] });
       onDone();
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => {
+      setError(e.message);
+      toast(e.message || "Erro ao criar política.", "error");
+    },
   });
 
   const toggleHC = (hc: string) => {
@@ -178,17 +194,35 @@ function PolicyForm({
 
       <div>
         <label className="block text-[var(--text-muted)] mb-1">
-          Monitoring source ID (optional scope)
+          Fonte de monitoramento (escopo opcional)
         </label>
-        <input
-          value={form.monitoring_source_id}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, monitoring_source_id: e.target.value }))
-          }
-          placeholder="mon-src_…"
-          className="w-full px-2 py-1.5 rounded border border-[var(--border)]
-            bg-[var(--surface-2)] text-[var(--text)] font-mono text-xs"
-        />
+        {sources.length > 0 ? (
+          <select
+            value={form.monitoring_source_id}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, monitoring_source_id: e.target.value }))
+            }
+            className="w-full px-2 py-1.5 rounded border border-[var(--border)]
+              bg-[var(--surface-2)] text-[var(--text)] text-xs cursor-pointer"
+          >
+            <option value="">Todas as fontes</option>
+            {sources.map((s) => (
+              <option key={s.monitoring_source_id} value={s.monitoring_source_id}>
+                {s.display_name} ({s.monitoring_source_id})
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            value={form.monitoring_source_id}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, monitoring_source_id: e.target.value }))
+            }
+            placeholder="mon-src_…"
+            className="w-full px-2 py-1.5 rounded border border-[var(--border)]
+              bg-[var(--surface-2)] text-[var(--text)] font-mono text-xs"
+          />
+        )}
       </div>
 
       {error && <p className="text-[var(--red)] text-xs">{error}</p>}
@@ -210,15 +244,24 @@ function PolicyForm({
 }
 
 export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string }) {
+  const canOperate = useCanOperate();
+  const { toast } = useToast();
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [newVersionFor, setNewVersionFor] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [deletingPolicyId, setDeletingPolicyId] = useState<string | null>(null);
 
   const q = useQuery({
     queryKey: ["alert-policies"],
     queryFn: () => api.get<PolicyVersion[]>("/api/v1/alerting/policies"),
     refetchInterval: 60_000,
+  });
+
+  const sourcesQ = useQuery({
+    queryKey: ["monitoring-sources-for-policy"],
+    queryFn: () => api.get<MonitoringSource[]>("/api/v1/monitoring/sources"),
+    staleTime: 5 * 60_000,
   });
 
   const toggleEffective = useMutation({
@@ -229,14 +272,47 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
         policy_version,
         enabled,
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["alert-policies"] }),
+    onSuccess: (_data, vars) => {
+      toast(vars.enabled ? "Política ativada." : "Política desativada.", "success");
+      qc.invalidateQueries({ queryKey: ["alert-policies"] });
+    },
+    onError: () => {
+      toast("Erro ao alterar status da política.", "error");
+    },
+  });
+
+  const deletePolicyMut = useMutation({
+    mutationFn: (policyId: string) =>
+      api.delete(`/api/v1/alerting/policies/${policyId}`),
+    onSuccess: () => {
+      toast("Política excluída.", "success");
+      qc.invalidateQueries({ queryKey: ["alert-policies"] });
+      setDeletingPolicyId(null);
+    },
+    onError: () => {
+      toast("Erro ao excluir política.", "error");
+      setDeletingPolicyId(null);
+    },
   });
 
   const versions = q.data ?? [];
   const grouped = groupPolicies(versions);
+  const sources = sourcesQ.data ?? [];
 
   return (
     <div className="space-y-4">
+      {deletingPolicyId && (
+        <ConfirmModal
+          title="Excluir política de alertas"
+          description={`Excluir a política "${deletingPolicyId}" e todas as suas versões? Esta ação não pode ser desfeita.`}
+          confirmLabel="Excluir"
+          destructive
+          isPending={deletePolicyMut.isPending}
+          onConfirm={() => deletePolicyMut.mutate(deletingPolicyId)}
+          onCancel={() => setDeletingPolicyId(null)}
+        />
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-base font-semibold">Alert policies</h2>
@@ -246,18 +322,20 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
         </div>
         <div className="flex items-center gap-2">
           {q.isFetching && <Spinner className="w-3 h-3" />}
-          <Button size="sm" onClick={() => { setShowForm(true); setNewVersionFor(null); }}>
-            New policy
-          </Button>
+          {canOperate && (
+            <Button size="sm" onClick={() => { setShowForm(true); setNewVersionFor(null); }}>
+              New policy
+            </Button>
+          )}
         </div>
       </div>
 
-      {(showForm && !newVersionFor) && (
+      {canOperate && (showForm && !newVersionFor) && (
         <Card className="flex flex-col gap-3">
           <CardHeader>
             <span className="text-sm font-medium">Create policy</span>
           </CardHeader>
-          <PolicyForm onDone={() => setShowForm(false)} />
+          <PolicyForm sources={sources} onDone={() => setShowForm(false)} />
         </Card>
       )}
 
@@ -292,7 +370,7 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    {effective && (
+                    {canOperate && effective && (
                       <Button
                         size="sm"
                         variant="secondary"
@@ -308,16 +386,18 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
                         {effective.effective_enabled ? "Disable" : "Enable"}
                       </Button>
                     )}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => {
-                        setNewVersionFor(policyId);
-                        setShowForm(true);
-                      }}
-                    >
-                      New version
-                    </Button>
+                    {canOperate && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          setNewVersionFor(policyId);
+                          setShowForm(true);
+                        }}
+                      >
+                        New version
+                      </Button>
+                    )}
                     {historical.length > 0 && (
                       <button
                         onClick={() =>
@@ -332,6 +412,14 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
                         {isExpanded ? "Hide" : `History (${historical.length})`}
                       </button>
                     )}
+                    {canOperate && (
+                      <button
+                        onClick={() => setDeletingPolicyId(policyId)}
+                        className="text-xs text-[var(--text-muted)] hover:text-[var(--red)] underline cursor-pointer"
+                      >
+                        Excluir
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -341,10 +429,11 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
                   </p>
                 )}
 
-                {newVersionFor === policyId && showForm && (
+                {canOperate && newVersionFor === policyId && showForm && (
                   <div className="border-t border-[var(--border)] pt-3">
                     <p className="text-xs text-[var(--text-muted)] mb-2">New version for {policyId}</p>
                     <PolicyForm
+                      sources={sources}
                       initial={{ policy_id: policyId, source_kind: effective?.source_kind }}
                       onDone={() => { setShowForm(false); setNewVersionFor(null); }}
                     />

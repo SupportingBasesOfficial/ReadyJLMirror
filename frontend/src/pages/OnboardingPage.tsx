@@ -15,7 +15,7 @@ const FEATURES = [
   {
     Icon: Activity,
     title: "Monitoramento unificado",
-    desc: "Zabbix, Nagios, Prometheus e mais — tudo em um único painel.",
+    desc: "Zabbix integrado nativamente — alertas, inventário e métricas em tempo real.",
   },
   {
     Icon: Bell,

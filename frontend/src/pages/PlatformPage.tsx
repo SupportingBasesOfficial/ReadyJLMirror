@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -191,12 +191,33 @@ function OutcomeList({ outcomes }: { outcomes: string[] }) {
   );
 }
 
+interface ComponentItem {
+  name: string;
+  description: string;
+  status: "operational" | "degraded" | "outage" | "maintenance";
+}
+
+const COMP_STATUS_OPTIONS: { value: ComponentItem["status"]; label: string }[] = [
+  { value: "operational", label: "Operacional" },
+  { value: "degraded", label: "Degradado" },
+  { value: "outage", label: "Incidente ativo" },
+  { value: "maintenance", label: "Manutenção" },
+];
+
+const COMP_STATUS_COLOR: Record<ComponentItem["status"], string> = {
+  operational: "#6fdc8c",
+  degraded: "#e6b450",
+  outage: "#ff6b6b",
+  maintenance: "#8b93a5",
+};
+
 interface StatusPageCfg {
   configured: boolean;
   status_slug?: string;
   public_name?: string;
   enabled?: boolean;
   public_url?: string;
+  components?: ComponentItem[];
 }
 
 function StatusPageCard({ tenantId }: { tenantId: string }) {
@@ -335,6 +356,195 @@ function StatusPageCard({ tenantId }: { tenantId: string }) {
   );
 }
 
+function StatusPageComponentsCard({ tenantId }: { tenantId: string }) {
+  const qc = useQueryClient();
+  const [components, setComponents] = useState<ComponentItem[]>([]);
+  const [initialized, setInitialized] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [newStatus, setNewStatus] = useState<ComponentItem["status"]>("operational");
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const q = useQuery({
+    queryKey: ["status-page-cfg", tenantId],
+    queryFn: () => api.get<StatusPageCfg>("/api/v1/platform/status-page"),
+  });
+
+  useEffect(() => {
+    if (q.data && !initialized) {
+      setComponents(q.data.components ?? []);
+      setInitialized(true);
+    }
+  }, [q.data, initialized]);
+
+  const mut = useMutation({
+    mutationFn: () => {
+      const cfg = q.data;
+      if (!cfg?.configured) throw new Error("Configure a Status Page antes de adicionar componentes.");
+      return api.put("/api/v1/platform/status-page", {
+        status_slug: cfg.status_slug!,
+        public_name: cfg.public_name!,
+        enabled: cfg.enabled ?? true,
+        components,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["status-page-cfg", tenantId] });
+      setErr(null);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    },
+    onError: (e: unknown) => {
+      setErr((e as { detail?: string })?.detail ?? "Falha ao salvar componentes.");
+    },
+  });
+
+  function addComponent() {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    setComponents((prev) => [
+      ...prev,
+      { name: trimmed, description: newDesc.trim(), status: newStatus },
+    ]);
+    setNewName("");
+    setNewDesc("");
+    setNewStatus("operational");
+  }
+
+  function removeComponent(idx: number) {
+    setComponents((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  const cfg = q.data;
+  const inputCls =
+    "w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]";
+
+  return (
+    <Card className="flex flex-col gap-3 md:col-span-2 lg:col-span-3">
+      <CardHeader>
+        <span className="text-sm font-medium">Componentes da Status Page</span>
+        <Badge variant="muted">
+          {components.length} componente{components.length !== 1 ? "s" : ""}
+        </Badge>
+      </CardHeader>
+
+      {q.isLoading ? (
+        <Spinner className="w-4 h-4" />
+      ) : !cfg?.configured ? (
+        <p className="text-xs text-[var(--text-muted)]">
+          Configure a Status Page primeiro antes de definir os componentes.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {/* Configured components list */}
+          {components.length > 0 && (
+            <div className="space-y-1">
+              {components.map((comp, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-[var(--surface-2)] border border-[var(--border)]"
+                >
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium text-[var(--text)]">{comp.name}</span>
+                    {comp.description && (
+                      <span className="text-[var(--text-muted)] ml-1">— {comp.description}</span>
+                    )}
+                  </div>
+                  <span
+                    className="text-[10px] shrink-0 font-medium"
+                    style={{ color: COMP_STATUS_COLOR[comp.status] }}
+                  >
+                    {COMP_STATUS_OPTIONS.find((o) => o.value === comp.status)?.label ?? comp.status}
+                  </span>
+                  <button
+                    onClick={() => removeComponent(idx)}
+                    className="text-[var(--text-muted)] hover:text-[var(--red)] text-[10px] shrink-0 transition-colors"
+                  >
+                    Remover
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add component form */}
+          <div className="border border-[var(--border)] rounded p-2.5 space-y-2">
+            <p className="text-[10px] font-medium text-[var(--text-muted)]">Adicionar componente</p>
+            <div className="flex flex-wrap gap-2 items-end">
+              <div className="space-y-0.5" style={{ minWidth: 120, flex: "1 1 120px" }}>
+                <label className="text-[10px] text-[var(--text-muted)]">Nome *</label>
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addComponent()}
+                  placeholder="CRM"
+                  maxLength={80}
+                  className={inputCls}
+                />
+              </div>
+              <div className="space-y-0.5" style={{ minWidth: 160, flex: "2 1 160px" }}>
+                <label className="text-[10px] text-[var(--text-muted)]">Descrição (opcional)</label>
+                <input
+                  type="text"
+                  value={newDesc}
+                  onChange={(e) => setNewDesc(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addComponent()}
+                  placeholder="Sistema de relacionamento"
+                  maxLength={120}
+                  className={inputCls}
+                />
+              </div>
+              <div className="space-y-0.5">
+                <label className="text-[10px] text-[var(--text-muted)]">Status</label>
+                <select
+                  value={newStatus}
+                  onChange={(e) => setNewStatus(e.target.value as ComponentItem["status"])}
+                  className="text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]"
+                >
+                  {COMP_STATUS_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={addComponent}
+                disabled={!newName.trim()}
+              >
+                Adicionar
+              </Button>
+            </div>
+          </div>
+
+          {err && <p className="text-[10px] text-[var(--red)]">{err}</p>}
+          {saved && (
+            <p className="text-[10px]" style={{ color: "#6fdc8c" }}>
+              Componentes salvos com sucesso.
+            </p>
+          )}
+
+          <Button
+            size="sm"
+            onClick={() => {
+              setErr(null);
+              mut.mutate();
+            }}
+            disabled={mut.isPending}
+          >
+            {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}
+            Salvar componentes
+          </Button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function PlatformPage({ tenantId: _tenantId }: { tenantId: string }) {
   const tenantId = _tenantId;
   const healthQ = useQuery({
@@ -444,6 +654,9 @@ export function PlatformPage({ tenantId: _tenantId }: { tenantId: string }) {
 
         {/* Branding */}
         <BrandingCard tenantId={tenantId} />
+
+        {/* Status page components */}
+        <StatusPageComponentsCard tenantId={tenantId} />
 
         {/* Release outcomes */}
         <Card className="flex flex-col gap-3">

@@ -5,6 +5,9 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { useToast } from "@/components/ui/toast";
+
+const AVAILABLE_SCOPES = ["read", "write", "admin"] as const;
 
 interface ApiKey {
   key_id: string;
@@ -75,67 +78,116 @@ function CreateKeyForm({
   onCreated: (rawKey: string) => void;
 }) {
   const [label, setLabel] = useState("");
+  const [scopes, setScopes] = useState<string[]>(["read"]);
+  const [expiresAt, setExpiresAt] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const qc = useQueryClient();
+  const { toast } = useToast();
+
+  function toggleScope(s: string) {
+    setScopes((prev) =>
+      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
+    );
+  }
 
   const mut = useMutation({
-    mutationFn: () =>
-      api.post<{ raw_key: string }>("/api/v1/api-keys", {
-        label,
-        scopes: ["read"],
-      }),
+    mutationFn: () => {
+      const body: Record<string, unknown> = { label, scopes };
+      if (expiresAt) body.expires_at = new Date(expiresAt).toISOString();
+      return api.post<{ raw_key: string }>("/api/v1/api-keys", body);
+    },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["api-keys"] });
       setLabel("");
+      setScopes(["read"]);
+      setExpiresAt("");
+      toast("Chave criada", "success");
       onCreated(data.raw_key);
     },
     onError: (e: unknown) => {
-      setErr((e as Error)?.message ?? "Failed to create key.");
+      const msg = (e as Error)?.message ?? "Failed to create key.";
+      setErr(msg);
+      toast(msg, "error");
     },
   });
 
   return (
-    <div className="flex gap-2 items-end">
-      <div className="flex-1 space-y-0.5">
-        <label className="text-[10px] text-[var(--text-muted)]">Label</label>
-        <input
-          type="text"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && label.trim() && mut.mutate()}
-          placeholder="CI pipeline"
-          maxLength={80}
-          className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]"
-        />
+    <div className="space-y-3">
+      <div className="flex gap-2 items-end flex-wrap">
+        <div className="flex-1 min-w-[160px] space-y-0.5">
+          <label className="text-[10px] text-[var(--text-muted)]">Label</label>
+          <input
+            type="text"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && label.trim() && scopes.length > 0 && mut.mutate()}
+            placeholder="CI pipeline"
+            maxLength={80}
+            className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]"
+          />
+        </div>
+        <div className="space-y-0.5">
+          <label className="text-[10px] text-[var(--text-muted)]">Expira em (opcional)</label>
+          <input
+            type="date"
+            value={expiresAt}
+            onChange={(e) => setExpiresAt(e.target.value)}
+            className="text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]"
+          />
+        </div>
+        <Button
+          size="sm"
+          onClick={() => { setErr(null); mut.mutate(); }}
+          disabled={!label.trim() || scopes.length === 0 || mut.isPending}
+        >
+          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}
+          Create
+        </Button>
       </div>
-      <Button
-        size="sm"
-        onClick={() => { setErr(null); mut.mutate(); }}
-        disabled={!label.trim() || mut.isPending}
-      >
-        {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}
-        Create
-      </Button>
+
+      <div className="flex gap-4 items-center">
+        <span className="text-[10px] text-[var(--text-muted)]">Scopes:</span>
+        {AVAILABLE_SCOPES.map((s) => (
+          <label key={s} className="flex items-center gap-1 cursor-pointer text-xs">
+            <input
+              type="checkbox"
+              checked={scopes.includes(s)}
+              onChange={() => toggleScope(s)}
+              className="cursor-pointer"
+            />
+            {s}
+          </label>
+        ))}
+      </div>
+
       {err && <p className="text-[10px] text-[var(--red)]">{err}</p>}
     </div>
   );
 }
 
-export function ApiKeysPage({ tenantId: _tenantId }: { tenantId: string }) {
+export function ApiKeysPage({ tenantId }: { tenantId: string }) {
   const [pendingRawKey, setPendingRawKey] = useState<string | null>(null);
+  const [locallyRemoved, setLocallyRemoved] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
+  const { toast } = useToast();
 
   const keysQ = useQuery({
-    queryKey: ["api-keys", _tenantId],
+    queryKey: ["api-keys", tenantId],
     queryFn: () => api.get<ApiKey[]>("/api/v1/api-keys"),
   });
 
   const revoke = useMutation({
     mutationFn: (key_id: string) => api.delete(`/api/v1/api-keys/${key_id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["api-keys"] });
+      toast("Chave revogada", "success");
+    },
+    onError: (e: unknown) => {
+      toast((e as Error)?.message ?? "Erro ao revogar chave.", "error");
+    },
   });
 
-  const keys = keysQ.data ?? [];
+  const keys = (keysQ.data ?? []).filter((k) => !locallyRemoved.has(k.key_id));
   const active = keys.filter((k) => k.state === "active");
   const revoked = keys.filter((k) => k.state === "revoked");
 
@@ -221,7 +273,7 @@ export function ApiKeysPage({ tenantId: _tenantId }: { tenantId: string }) {
                         </Badge>
                       </td>
                       <td className="px-4 py-2.5">
-                        {k.state === "active" && (
+                        {k.state === "active" ? (
                           <Button
                             size="sm"
                             variant="secondary"
@@ -229,6 +281,16 @@ export function ApiKeysPage({ tenantId: _tenantId }: { tenantId: string }) {
                             disabled={revoke.isPending}
                           >
                             Revoke
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() =>
+                              setLocallyRemoved((prev) => new Set([...prev, k.key_id]))
+                            }
+                          >
+                            Remover da lista
                           </Button>
                         )}
                       </td>

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { DeviceDetail } from "./DeviceDetail";
 
@@ -41,10 +42,15 @@ function fmtTs(iso?: string) {
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }
 
+const PAGE_LIMIT = 50;
+
 export function InventoryPage({ tenantId }: { tenantId: string }) {
   const [search, setSearch] = useState("");
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [selectedResource, setSelectedResource] = useState<{ sourceId: string; resourceId: string } | null>(null);
+  // cursor-based pagination: null = first page
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [cursorStack, setCursorStack] = useState<(string | null)[]>([]);
 
   const sourcesQ = useQuery({
     queryKey: ["sources", tenantId],
@@ -54,15 +60,27 @@ export function InventoryPage({ tenantId }: { tenantId: string }) {
   const sources = sourcesQ.data ?? [];
   const activeSource = selectedSource ?? sources[0]?.monitoring_source_id ?? null;
 
+  function selectSource(id: string) {
+    setSelectedSource(id);
+    // Reset pagination when switching sources
+    setCursor(null);
+    setCursorStack([]);
+  }
+
+  const cursorParam = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+
   const resourcesQ = useQuery({
-    queryKey: ["resources", tenantId, activeSource],
+    queryKey: ["resources", tenantId, activeSource, cursor],
     queryFn: () =>
       api.get<{ items: Resource[]; generation_state?: string; next_cursor?: string }>(
-        `/api/v1/monitoring/sources/${activeSource}/resources?limit=200`,
+        `/api/v1/monitoring/sources/${activeSource}/resources?limit=${PAGE_LIMIT}${cursorParam}`,
       ),
     enabled: activeSource !== null,
     refetchInterval: 60_000,
   });
+
+  const nextCursor = resourcesQ.data?.next_cursor ?? null;
+  const pageNumber = cursorStack.length + 1;
 
   const resources = (resourcesQ.data?.items ?? []).filter(
     (r) =>
@@ -91,7 +109,12 @@ export function InventoryPage({ tenantId }: { tenantId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h2 className="text-base font-semibold">Resource Inventory</h2>
+        <div>
+          <h2 className="text-base font-semibold">Resource Inventory</h2>
+          <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+            {resources.length} dispositivos · página {pageNumber}
+          </p>
+        </div>
         <div className="flex items-center gap-3">
           <div className="flex gap-2 text-xs">
             <span className="text-[var(--green)]">{counts.healthy} healthy</span>
@@ -109,7 +132,7 @@ export function InventoryPage({ tenantId }: { tenantId: string }) {
           sources.map((s) => (
             <button
               key={s.monitoring_source_id}
-              onClick={() => setSelectedSource(s.monitoring_source_id)}
+              onClick={() => selectSource(s.monitoring_source_id)}
               className={[
                 "px-3 py-1 rounded-full text-xs cursor-pointer border transition-colors",
                 activeSource === s.monitoring_source_id
@@ -149,42 +172,74 @@ export function InventoryPage({ tenantId }: { tenantId: string }) {
           </p>
         </Card>
       ) : (
-        <Card className="p-0 overflow-hidden">
-          <table className="w-full text-xs">
-            <thead className="bg-[var(--surface-2)]">
-              <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                <th className="px-4 py-2.5 font-medium">Name</th>
-                <th className="px-4 py-2.5 font-medium">Kind</th>
-                <th className="px-4 py-2.5 font-medium">Health</th>
-                <th className="px-4 py-2.5 font-medium">Last seen</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--border)]">
-              {resources.map((r) => (
-                <tr
-                  key={r.monitoring_resource_id}
-                  className="hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
-                  onClick={() => activeSource && setSelectedResource({ sourceId: activeSource, resourceId: r.monitoring_resource_id })}
-                >
-                  <td className="px-4 py-2.5 text-[var(--brand)] font-medium max-w-xs truncate underline-offset-2 hover:underline">
-                    {r.display_name ?? r.monitoring_resource_id}
-                  </td>
-                  <td className="px-4 py-2.5 text-[var(--text-muted)]">
-                    {r.resource_kind ?? "—"}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Badge variant={healthVariant(r)}>
-                      {healthLabel(r)}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-2.5 text-[var(--text-muted)] whitespace-nowrap">
-                    {fmtTs(r.last_observed_at)}
-                  </td>
+        <>
+          <Card className="p-0 overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-[var(--surface-2)]">
+                <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
+                  <th className="px-4 py-2.5 font-medium">Name</th>
+                  <th className="px-4 py-2.5 font-medium">Kind</th>
+                  <th className="px-4 py-2.5 font-medium">Health</th>
+                  <th className="px-4 py-2.5 font-medium">Last seen</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+              </thead>
+              <tbody className="divide-y divide-[var(--border)]">
+                {resources.map((r) => (
+                  <tr
+                    key={r.monitoring_resource_id}
+                    className="hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                    onClick={() => activeSource && setSelectedResource({ sourceId: activeSource, resourceId: r.monitoring_resource_id })}
+                  >
+                    <td className="px-4 py-2.5 text-[var(--brand)] font-medium max-w-xs truncate underline-offset-2 hover:underline">
+                      {r.display_name ?? r.monitoring_resource_id}
+                    </td>
+                    <td className="px-4 py-2.5 text-[var(--text-muted)]">
+                      {r.resource_kind ?? "—"}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <Badge variant={healthVariant(r)}>
+                        {healthLabel(r)}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-2.5 text-[var(--text-muted)] whitespace-nowrap">
+                      {fmtTs(r.last_observed_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                const prev = cursorStack[cursorStack.length - 1] ?? null;
+                setCursorStack((s) => s.slice(0, -1));
+                setCursor(prev);
+              }}
+              disabled={cursorStack.length === 0 || resourcesQ.isFetching}
+            >
+              ← Anterior
+            </Button>
+            <span className="text-xs text-[var(--text-muted)]">Página {pageNumber}</span>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (nextCursor) {
+                  setCursorStack((s) => [...s, cursor]);
+                  setCursor(nextCursor);
+                }
+              }}
+              disabled={!nextCursor || resourcesQ.isFetching}
+            >
+              Próxima →
+            </Button>
+          </div>
+        </>
       )}
     </div>
   );

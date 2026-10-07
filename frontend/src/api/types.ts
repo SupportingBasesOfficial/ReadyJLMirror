@@ -44,12 +44,10 @@ export interface Resource {
 
 export interface Alert {
   alert_id: string;
-  severity: string;
-  title: string;
-  state: string;
-  ack_state?: string;
-  source_id?: string;
-  resource_id?: string;
+  severity?: string;
+  lifecycle_state: string;
+  monitoring_source_id?: string;
+  monitoring_resource_id?: string;
   resource_name?: string;
   opened_at: string;
   resolved_at?: string;

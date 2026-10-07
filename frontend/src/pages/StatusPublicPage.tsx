@@ -2,6 +2,12 @@ import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle, AlertTriangle, AlertOctagon, HelpCircle, RefreshCw } from "lucide-react";
 
+interface ComponentItem {
+  name: string;
+  description?: string;
+  status: "operational" | "degraded" | "outage" | "maintenance";
+}
+
 // BFF JSON format from /api/public/status/{slug}
 interface StatusData {
   public_name: string;
@@ -9,6 +15,7 @@ interface StatusData {
   active_alerts: number;
   critical_alerts: number;
   source_count: number;
+  components?: ComponentItem[];
 }
 
 const STATUS_CONFIG = {
@@ -33,6 +40,13 @@ const STATUS_CONFIG = {
     border: "rgba(255,107,107,0.2)",
     Icon: AlertOctagon,
   },
+  maintenance: {
+    label: "Em manutenção",
+    color: "#8b93a5",
+    bg: "rgba(139,147,165,0.08)",
+    border: "rgba(139,147,165,0.2)",
+    Icon: HelpCircle,
+  },
   unknown: {
     label: "Status desconhecido",
     color: "#8b93a5",
@@ -40,6 +54,14 @@ const STATUS_CONFIG = {
     border: "rgba(139,147,165,0.2)",
     Icon: HelpCircle,
   },
+};
+
+const COMPONENT_LABEL: Record<string, string> = {
+  operational: "Operacional",
+  degraded: "Degradado",
+  outage: "Incidente ativo",
+  maintenance: "Manutenção",
+  unknown: "Desconhecido",
 };
 
 async function fetchStatus(slug: string): Promise<StatusData> {
@@ -65,6 +87,19 @@ function Dot({ color }: { color: string }) {
   );
 }
 
+function monitoringStatus(d: StatusData): keyof typeof STATUS_CONFIG {
+  if (d.critical_alerts > 0) return "outage";
+  if (d.active_alerts > 0) return "degraded";
+  if (d.source_count > 0) return "operational";
+  return "unknown";
+}
+
+function alertsStatus(d: StatusData): keyof typeof STATUS_CONFIG {
+  if (d.critical_alerts > 0) return "outage";
+  if (d.active_alerts > 0) return "degraded";
+  return "operational";
+}
+
 export function StatusPublicPage() {
   const { slug } = useParams<{ slug: string }>();
 
@@ -86,8 +121,8 @@ export function StatusPublicPage() {
     <div
       style={{
         minHeight: "100vh",
-        background: "#0f1115",
-        color: "#e6e8ec",
+        background: "var(--bg)",
+        color: "var(--text)",
         fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
         fontSize: 14,
         display: "flex",
@@ -97,8 +132,8 @@ export function StatusPublicPage() {
       {/* Header */}
       <header
         style={{
-          background: "#161a22",
-          borderBottom: "1px solid #262c3a",
+          background: "var(--surface)",
+          borderBottom: "1px solid var(--border)",
           padding: "0 24px",
           height: 56,
           display: "flex",
@@ -118,7 +153,7 @@ export function StatusPublicPage() {
             alignItems: "center",
             gap: 6,
             fontSize: 12,
-            color: "#8b93a5",
+            color: "var(--text-muted)",
             background: "none",
             border: "none",
             cursor: "pointer",
@@ -134,7 +169,7 @@ export function StatusPublicPage() {
       {/* Body */}
       <main style={{ flex: 1, maxWidth: 640, margin: "0 auto", width: "100%", padding: "40px 24px" }}>
         {isLoading && (
-          <div style={{ textAlign: "center", paddingTop: 80, color: "#8b93a5" }}>
+          <div style={{ textAlign: "center", paddingTop: 80, color: "var(--text-muted)" }}>
             Carregando status…
           </div>
         )}
@@ -144,11 +179,11 @@ export function StatusPublicPage() {
             style={{
               textAlign: "center",
               paddingTop: 80,
-              color: "#8b93a5",
+              color: "var(--text-muted)",
             }}
           >
             <HelpCircle size={40} style={{ margin: "0 auto 16px", opacity: 0.3 }} />
-            <p style={{ fontSize: 16, marginBottom: 8, color: "#e6e8ec" }}>
+            <p style={{ fontSize: 16, marginBottom: 8, color: "var(--text)" }}>
               Página de status não encontrada
             </p>
             <p style={{ fontSize: 13 }}>
@@ -158,7 +193,7 @@ export function StatusPublicPage() {
         )}
 
         {isError && (error as Error)?.message !== "not_found" && (
-          <div style={{ textAlign: "center", paddingTop: 80, color: "#ff6b6b" }}>
+          <div style={{ textAlign: "center", paddingTop: 80, color: "var(--red)" }}>
             Não foi possível carregar o status. Tente novamente em instantes.
           </div>
         )}
@@ -183,7 +218,7 @@ export function StatusPublicPage() {
                 <div style={{ fontWeight: 600, fontSize: 17, color: cfg.color }}>
                   {cfg.label}
                 </div>
-                <div style={{ fontSize: 12, color: "#8b93a5", marginTop: 2 }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
                   Atualizado em {now}
                 </div>
               </div>
@@ -199,24 +234,24 @@ export function StatusPublicPage() {
               }}
             >
               {[
-                { label: "Alertas ativos", value: data.active_alerts, color: "#e6e8ec" },
-                { label: "Críticos", value: data.critical_alerts, color: data.critical_alerts > 0 ? "#ff6b6b" : "#8b93a5" },
-                { label: "Fontes monitoradas", value: data.source_count, color: "#6ea8fe" },
+                { label: "Alertas ativos", value: data.active_alerts, color: "var(--text)" },
+                { label: "Críticos", value: data.critical_alerts, color: data.critical_alerts > 0 ? "var(--red)" : "var(--text-muted)" },
+                { label: "Fontes monitoradas", value: data.source_count, color: "var(--brand)" },
               ].map(({ label, value, color }) => (
                 <div
                   key={label}
                   style={{
                     padding: "16px 18px",
                     borderRadius: 10,
-                    background: "#161a22",
-                    border: "1px solid #262c3a",
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
                     textAlign: "center",
                   }}
                 >
                   <div style={{ fontSize: 24, fontWeight: 700, color, fontVariantNumeric: "tabular-nums" }}>
                     {value}
                   </div>
-                  <div style={{ fontSize: 11, color: "#8b93a5", marginTop: 4 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
                     {label}
                   </div>
                 </div>
@@ -227,18 +262,18 @@ export function StatusPublicPage() {
             <div
               style={{
                 borderRadius: 10,
-                border: "1px solid #262c3a",
-                background: "#161a22",
+                border: "1px solid var(--border)",
+                background: "var(--surface)",
                 overflow: "hidden",
               }}
             >
               <div
                 style={{
                   padding: "12px 18px",
-                  borderBottom: "1px solid #262c3a",
+                  borderBottom: "1px solid var(--border)",
                   fontSize: 12,
                   fontWeight: 600,
-                  color: "#8b93a5",
+                  color: "var(--text-muted)",
                   textTransform: "uppercase",
                   letterSpacing: "0.06em",
                 }}
@@ -246,54 +281,60 @@ export function StatusPublicPage() {
                 Componentes
               </div>
 
-              {[
-                {
-                  name: "Monitoramento",
-                  ok: data.critical_alerts === 0,
-                  status: data.critical_alerts > 0 ? "Incidente ativo" : data.active_alerts > 0 ? "Degradado" : "Operacional",
-                  statusColor: data.critical_alerts > 0 ? "#ff6b6b" : data.active_alerts > 0 ? "#e6b450" : "#6fdc8c",
-                },
-                {
-                  name: "Coleta de dados",
-                  ok: data.source_count > 0,
-                  status: data.source_count > 0 ? `${data.source_count} fonte${data.source_count !== 1 ? "s" : ""} ativa${data.source_count !== 1 ? "s" : ""}` : "Nenhuma fonte configurada",
-                  statusColor: data.source_count > 0 ? "#6fdc8c" : "#e6b450",
-                },
-                {
-                  name: "Sistema geral",
-                  ok: data.status === "operational",
-                  status: STATUS_CONFIG[data.status]?.label ?? "Desconhecido",
-                  statusColor: cfg.color,
-                },
-              ].map(({ name, status, statusColor }) => (
-                <div
-                  key={name}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "13px 18px",
-                    borderBottom: "1px solid #1c2130",
-                  }}
-                >
-                  <span style={{ fontSize: 13, color: "#e6e8ec" }}>{name}</span>
-                  <span
+              {(data.components && data.components.length > 0
+                ? data.components.map((comp) => ({
+                    name: comp.name,
+                    description: comp.description,
+                    statusKey: comp.status as keyof typeof STATUS_CONFIG,
+                  }))
+                : [
+                    { name: "Monitoramento", description: undefined, statusKey: monitoringStatus(data) },
+                    { name: "Alertas", description: undefined, statusKey: alertsStatus(data) },
+                    { name: "Plataforma", description: undefined, statusKey: "operational" as const },
+                  ]
+              ).map(({ name, description, statusKey }) => {
+                const compCfg = STATUS_CONFIG[statusKey] ?? STATUS_CONFIG.unknown;
+                return (
+                  <div
+                    key={name}
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: 6,
-                      fontSize: 12,
-                      color: statusColor,
+                      justifyContent: "space-between",
+                      padding: "13px 18px",
+                      borderBottom: "1px solid var(--border)",
                     }}
                   >
-                    <Dot color={statusColor} />
-                    {status}
-                  </span>
-                </div>
-              ))}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <span style={{ fontSize: 13, color: "var(--text)" }}>{name}</span>
+                      {description && (
+                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{description}</span>
+                      )}
+                    </div>
+                    <span
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 12,
+                        color: compCfg.color,
+                      }}
+                    >
+                      <Dot color={compCfg.color} />
+                      {COMPONENT_LABEL[statusKey] ?? statusKey}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
 
-            <div style={{ marginTop: 40, textAlign: "center", fontSize: 12, color: "#5a6274" }}>
+            {data.active_alerts === 0 && (
+              <div style={{ marginTop: 24, textAlign: "center", fontSize: 13, color: "var(--text-muted)" }}>
+                Nenhum incidente registrado nos últimos 90 dias.
+              </div>
+            )}
+
+            <div style={{ marginTop: 16, textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>
               Atualização automática a cada 60 segundos
             </div>
           </>
@@ -305,13 +346,14 @@ export function StatusPublicPage() {
         style={{
           textAlign: "center",
           padding: "16px 24px",
-          borderTop: "1px solid #1c2130",
+          borderTop: "1px solid var(--border)",
           fontSize: 11,
-          color: "#5a6274",
+          color: "var(--text-muted)",
         }}
       >
+        <div style={{ marginBottom: 4 }}>Atualizado em {now}</div>
         Monitorado por{" "}
-        <span style={{ color: "#6ea8fe", fontWeight: 500 }}>JLMirror</span>
+        <span style={{ color: "var(--brand)", fontWeight: 500 }}>JLMirror</span>
       </footer>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

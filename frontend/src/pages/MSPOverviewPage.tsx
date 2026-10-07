@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
-import { AlertTriangle, CheckCircle2, HelpCircle, RefreshCw, Activity, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, HelpCircle, RefreshCw, Activity, X, ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/ui/toast";
 
 interface ClientHealth {
   tenant_id: string;
@@ -26,6 +28,9 @@ interface ClientAlert {
   severity: string | null;
   monitoring_resource_id: string | null;
   opened_at: string | null;
+  // possible name fields from the API response
+  name?: string | null;
+  problem_name?: string | null;
 }
 
 interface ClientDetail {
@@ -97,13 +102,22 @@ function fmtTs(iso: string | null) {
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }
 
+function alertDisplayTitle(a: ClientAlert): string {
+  return a.name || a.problem_name || a.monitoring_resource_id || a.source_kind;
+}
+
 function ClientDetailPanel({
   client,
   onClose,
+  onSelectTenant,
 }: {
   client: ClientHealth;
   onClose: () => void;
+  onSelectTenant?: (tenant_id: string) => void;
 }) {
+  const { toast } = useToast();
+  const [isSwitching, setIsSwitching] = useState(false);
+
   const q = useQuery<ClientDetail>({
     queryKey: ["msp-client-detail", client.tenant_id],
     queryFn: () => api.get<ClientDetail>(`/api/v1/msp/clients/${client.tenant_id}/detail`),
@@ -111,6 +125,23 @@ function ClientDetailPanel({
   });
 
   const alerts = q.data?.alerts ?? [];
+
+  const handleOpenDashboard = useCallback(async () => {
+    toast("Alternando para workspace do cliente...", "info");
+    if (onSelectTenant) {
+      onSelectTenant(client.tenant_id);
+      return;
+    }
+    try {
+      setIsSwitching(true);
+      await api.post("/api/tenant/select", { tenant_id: client.tenant_id });
+      window.location.href = "/";
+    } catch {
+      toast("Erro ao alternar tenant", "error");
+    } finally {
+      setIsSwitching(false);
+    }
+  }, [client.tenant_id, onSelectTenant, toast]);
 
   return (
     <>
@@ -188,6 +219,19 @@ function ClientDetailPanel({
           ))}
         </div>
 
+        {/* Open dashboard button */}
+        <div className="px-4 py-2.5 border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
+          <button
+            onClick={handleOpenDashboard}
+            disabled={isSwitching}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border w-full justify-center transition-colors hover:bg-[var(--surface-2)] disabled:opacity-60 disabled:cursor-not-allowed"
+            style={{ color: "var(--brand)", borderColor: "var(--brand)" }}
+          >
+            <ExternalLink size={12} />
+            {isSwitching ? "Alternando…" : "Abrir dashboard do cliente"}
+          </button>
+        </div>
+
         {/* Alert list */}
         <div className="flex-1 overflow-y-auto">
           <div
@@ -222,7 +266,7 @@ function ClientDetailPanel({
                 <div key={a.alert_id} className="px-4 py-3 flex flex-col gap-1">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-medium truncate" style={{ color: "var(--text)" }}>
-                      {a.source_kind}
+                      {alertDisplayTitle(a)}
                     </span>
                     <Badge variant={sevVariant(a.severity)}>
                       {a.severity ?? "N/A"}
@@ -327,7 +371,8 @@ function ClientCard({
   );
 }
 
-export function MSPOverviewPage({ tenantId }: { tenantId: string }) {
+export function MSPOverviewPage({ tenantId, onSelectTenant }: { tenantId: string; onSelectTenant?: (tenant_id: string) => void }) {
+  const navigate = useNavigate();
   const [selectedClient, setSelectedClient] = useState<ClientHealth | null>(null);
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery<MSPData>({
@@ -426,10 +471,17 @@ export function MSPOverviewPage({ tenantId }: { tenantId: string }) {
           <div className="text-center">
             <Activity size={28} className="mx-auto mb-3" style={{ color: "var(--text-dim)" }} />
             <p className="text-sm font-medium mb-1" style={{ color: "var(--text-muted)" }}>
-              Nenhum cliente gerenciado
+              Nenhum cliente configurado
             </p>
             <p className="text-xs" style={{ color: "var(--text-dim)" }}>
-              Clientes aparecem aqui quando delegated_grants são configurados.
+              Adicione clientes em{" "}
+              <button
+                onClick={() => navigate("/platform-admin")}
+                className="text-[var(--brand)] hover:underline"
+              >
+                Administração da Plataforma
+              </button>
+              {" "}para visualizá-los aqui.
             </p>
           </div>
         </div>
@@ -455,6 +507,7 @@ export function MSPOverviewPage({ tenantId }: { tenantId: string }) {
         <ClientDetailPanel
           client={selectedClient}
           onClose={() => setSelectedClient(null)}
+          onSelectTenant={onSelectTenant}
         />
       )}
     </div>

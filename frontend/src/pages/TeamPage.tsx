@@ -5,6 +5,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { useToast } from "@/components/ui/toast";
 
 interface Member {
   membership_id: string;
@@ -46,10 +47,13 @@ function roleVariant(role: string): "success" | "warning" | "muted" {
 
 function MembersSection() {
   const qc = useQueryClient();
+  const { toast } = useToast();
   const [showAdd, setShowAdd] = useState(false);
   const [principalId, setPrincipalId] = useState("");
   const [role, setRole] = useState("viewer");
   const [addError, setAddError] = useState<string | null>(null);
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [editingRoleValue, setEditingRoleValue] = useState("");
 
   const q = useQuery({
     queryKey: ["team-members"],
@@ -73,7 +77,22 @@ function MembersSection() {
   const revoke = useMutation({
     mutationFn: (membership_id: string) =>
       api.post(`/api/v1/tenant/members/${membership_id}/revoke`, {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["team-members"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["team-members"] });
+      toast("Acesso revogado", "success");
+    },
+    onError: () => toast("Erro ao revogar acesso", "error"),
+  });
+
+  const changeRole = useMutation({
+    mutationFn: ({ membership_id, role }: { membership_id: string; role: string }) =>
+      api.patch(`/api/v1/tenant/members/${membership_id}`, { role }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["team-members"] });
+      setEditingRoleId(null);
+      toast("Função atualizada", "success");
+    },
+    onError: () => toast("Erro ao atualizar função", "error"),
   });
 
   const members = q.data ?? [];
@@ -107,10 +126,13 @@ function MembersSection() {
               <input
                 value={principalId}
                 onChange={(e) => setPrincipalId(e.target.value)}
-                placeholder="user@example.com or sub-uuid"
+                placeholder="Email do usuário (ex: joao@empresa.com)"
                 className="w-full px-2 py-1.5 rounded border border-[var(--border)]
                   bg-[var(--surface-2)] text-[var(--text)] font-mono text-xs"
               />
+              <p className="text-[10px] text-[var(--text-muted)] mt-1">
+                O sistema buscará o principal_id pelo email automaticamente.
+              </p>
             </div>
             <div>
               <label className="block text-xs text-[var(--text-muted)] mb-1">Role</label>
@@ -161,7 +183,43 @@ function MembersSection() {
                     {m.principal_id}
                   </td>
                   <td className="px-2 py-2">
-                    <Badge variant={roleVariant(m.role)}>{m.role}</Badge>
+                    {editingRoleId === m.membership_id ? (
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          autoFocus
+                          value={editingRoleValue}
+                          onChange={(e) => setEditingRoleValue(e.target.value)}
+                          className="px-1 py-0.5 rounded border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] text-xs cursor-pointer"
+                        >
+                          {BUILTIN_ROLES.map((r) => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => changeRole.mutate({ membership_id: m.membership_id, role: editingRoleValue })}
+                          disabled={changeRole.isPending || editingRoleValue === m.role}
+                          className="text-[10px] text-[var(--brand)] hover:underline cursor-pointer disabled:opacity-50"
+                        >
+                          {changeRole.isPending ? <Spinner className="w-3 h-3" /> : "Salvar"}
+                        </button>
+                        <button
+                          onClick={() => setEditingRoleId(null)}
+                          className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant={roleVariant(m.role)}>{m.role}</Badge>
+                        <button
+                          onClick={() => { setEditingRoleId(m.membership_id); setEditingRoleValue(m.role); }}
+                          className="text-[10px] text-[var(--text-muted)] hover:text-[var(--brand)] cursor-pointer underline"
+                        >
+                          Alterar função
+                        </button>
+                      </div>
+                    )}
                   </td>
                   <td className="px-2 py-2 text-[var(--text-muted)]">
                     {fmt(m.created_at)}

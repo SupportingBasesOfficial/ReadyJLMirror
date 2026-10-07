@@ -119,17 +119,60 @@ function fmtTs(iso?: string) {
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }
 
-function fmtMetricValue(value: unknown, unit?: string): string {
-  if (!value || typeof value !== "object") return "—";
+// Strip the Zabbix "!" raw-display prefix from units before showing them.
+function cleanUnit(unit?: string): string | undefined {
+  return unit?.startsWith("!") ? unit.slice(1) : unit;
+}
+
+function fmtBytes(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1_099_511_627_776) return `${(n / 1_099_511_627_776).toFixed(2)} TB`;
+  if (abs >= 1_073_741_824)    return `${(n / 1_073_741_824).toFixed(2)} GB`;
+  if (abs >= 1_048_576)        return `${(n / 1_048_576).toFixed(2)} MB`;
+  if (abs >= 1_024)            return `${(n / 1_024).toFixed(2)} KB`;
+  return `${n} B`;
+}
+
+function fmtNumber(n: number, rawUnit?: string): string {
+  const unit = cleanUnit(rawUnit);
+  if (unit === "B") return fmtBytes(n);
+  const rounded = parseFloat(n.toFixed(2));
+  const formatted = rounded.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  return unit ? `${formatted} ${unit}` : formatted;
+}
+
+function fmtTick(n: number, rawUnit?: string): string {
+  const unit = cleanUnit(rawUnit);
+  if (unit === "B") {
+    const abs = Math.abs(n);
+    if (abs >= 1_073_741_824) return `${(n / 1_073_741_824).toFixed(1)}G`;
+    if (abs >= 1_048_576)     return `${(n / 1_048_576).toFixed(1)}M`;
+    if (abs >= 1_024)         return `${(n / 1_024).toFixed(1)}K`;
+    return `${n}`;
+  }
+  if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (Math.abs(n) >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return parseFloat(n.toFixed(2)).toString();
+}
+
+function fmtMetricValue(value: unknown, rawUnit?: string): string {
+  if (value === null || value === undefined || typeof value !== "object") return "—";
   const v = value as Record<string, unknown>;
   if ("n" in v) {
     const n = Number(v.n);
     if (isNaN(n)) return "—";
-    const formatted = Number.isInteger(n) ? String(n) : n.toFixed(2);
-    return unit ? `${formatted} ${unit}` : formatted;
+    return fmtNumber(n, rawUnit);
   }
   if ("s" in v) return String(v.s).slice(0, 80);
   return "—";
+}
+
+function isZeroValue(m: MetricState): boolean {
+  const v = m.value;
+  if (!v || typeof v !== "object") return true;
+  const rec = v as Record<string, unknown>;
+  if ("n" in rec) return Number(rec.n) === 0;
+  return false;
 }
 
 function toChartData(points: HistoryPoint[]): { t: number; v: number }[] {
@@ -190,15 +233,22 @@ function MetricChart({
   unit?: string;
   period: PeriodKey;
 }) {
-  const till = Math.floor(Date.now() / 1000);
-  const from = till - (PERIODS.find(p => p.key === period)?.sec ?? 86_400);
+  // Stable values for axis/tick formatting — only need approximate range for formatting decisions.
+  const periodSec = PERIODS.find(p => p.key === period)?.sec ?? 86_400;
+  const renderTill = Math.floor(Date.now() / 1000);
+  const renderFrom = renderTill - periodSec;
 
   const q = useQuery({
     queryKey: ["metric-history", sourceId, metricId, period],
-    queryFn: () =>
-      api.get<{ items: HistoryPoint[] }>(
+    queryFn: () => {
+      // Recompute till at fetch time so the window advances when the query is re-run
+      // (e.g. after a manual refetch or if a parent adds a refresh interval).
+      const till = Math.floor(Date.now() / 1000);
+      const from = till - periodSec;
+      return api.get<{ items: HistoryPoint[] }>(
         `/api/v1/monitoring/sources/${sourceId}/metrics/${metricId}/history?window_from=${from}&window_till=${till}`,
-      ),
+      );
+    },
   });
 
   if (q.isLoading) {
@@ -215,8 +265,8 @@ function MetricChart({
 
   const tickFmt = (t: number) => {
     const d = new Date(t);
-    if (from > till - 3_601) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    if (from > till - 86_401) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (renderFrom > renderTill - 3_601) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (renderFrom > renderTill - 86_401) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     return d.toLocaleDateString([], { month: "short", day: "numeric" });
   };
 
@@ -237,7 +287,7 @@ function MetricChart({
           tickLine={false}
           axisLine={false}
           width={40}
-          tickFormatter={(v: number) => unit ? `${v}${unit}` : String(v)}
+          tickFormatter={(v: number) => fmtTick(v, unit)}
         />
         <Tooltip
           contentStyle={{
@@ -247,7 +297,7 @@ function MetricChart({
             fontSize: 12,
           }}
           labelFormatter={(t) => new Date(Number(t)).toLocaleString()}
-          formatter={(v) => [unit ? `${v} ${unit}` : v, ""]}
+          formatter={(v) => [fmtNumber(Number(v), unit), ""]}
         />
         <Line
           type="monotone"
@@ -333,6 +383,7 @@ export function DeviceDetail({
 }) {
   const [period, setPeriod] = useState<PeriodKey>("24h");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [hideZeros, setHideZeros] = useState(true);
 
   const resourceQ = useQuery({
     queryKey: ["resource-detail", sourceId, resourceId],
@@ -389,7 +440,8 @@ export function DeviceDetail({
   const ev = r.normalized_evidence;
   const inv = ev?.inventory;
   const primaryIface = ev?.interfaces?.find(i => i.main) ?? ev?.interfaces?.[0];
-  const metrics = currentQ.data?.items ?? [];
+  const allMetrics = currentQ.data?.items ?? [];
+  const metrics = hideZeros ? allMetrics.filter(m => !isZeroValue(m)) : allMetrics;
   const problems = problemsQ.data?.items ?? [];
   const activeProblems = problems.filter(p => !p.resolved_at);
 
@@ -528,22 +580,43 @@ export function DeviceDetail({
       {/* Metrics */}
       <Card>
         <CardHeader>
-          <span className="text-sm font-medium">Métricas</span>
-          <div className="flex items-center gap-1">
-            {PERIODS.map(p => (
-              <button
-                key={p.key}
-                onClick={() => setPeriod(p.key)}
-                className={[
-                  "px-2 py-1 rounded text-xs transition-colors",
-                  period === p.key
-                    ? "bg-[var(--brand)] text-white"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]",
-                ].join(" ")}
-              >
-                {p.label}
-              </button>
-            ))}
+          <span className="text-sm font-medium">
+            Métricas
+            {allMetrics.length > 0 && (
+              <span className="ml-2 text-xs font-normal text-[var(--text-muted)]">
+                {metrics.length}{hideZeros && metrics.length < allMetrics.length ? ` / ${allMetrics.length}` : ""}
+              </span>
+            )}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setHideZeros(h => !h)}
+              className={[
+                "px-2 py-1 rounded text-xs transition-colors border",
+                hideZeros
+                  ? "border-[var(--brand)] text-[var(--brand)]"
+                  : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]",
+              ].join(" ")}
+              title="Mostrar ou ocultar métricas com valor zero"
+            >
+              {hideZeros ? "≠ 0" : "= 0"}
+            </button>
+            <div className="flex items-center gap-1">
+              {PERIODS.map(p => (
+                <button
+                  key={p.key}
+                  onClick={() => setPeriod(p.key)}
+                  className={[
+                    "px-2 py-1 rounded text-xs transition-colors",
+                    period === p.key
+                      ? "bg-[var(--brand)] text-white"
+                      : "text-[var(--text-muted)] hover:text-[var(--text)]",
+                  ].join(" ")}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
         </CardHeader>
 
@@ -552,7 +625,21 @@ export function DeviceDetail({
         ) : currentQ.isError ? (
           <p className="text-xs text-[var(--red)]">Falha ao carregar métricas.</p>
         ) : metrics.length === 0 ? (
-          <p className="text-xs text-[var(--text-muted)]">Nenhuma métrica disponível.</p>
+          <div className="text-xs text-[var(--text-muted)] space-y-2">
+            {allMetrics.length > 0 ? (
+              <>
+                <p>Todas as métricas estão com valor zero.</p>
+                <button
+                  onClick={() => setHideZeros(false)}
+                  className="text-[var(--brand)] hover:underline"
+                >
+                  Mostrar todas
+                </button>
+              </>
+            ) : (
+              <p>Nenhuma métrica disponível.</p>
+            )}
+          </div>
         ) : (
           <>
             <p className="text-xs text-[var(--text-muted)] mb-3">

@@ -1220,7 +1220,7 @@ async def public_status_json(slug: str) -> JSONResponse:
         async with db_connection() as conn:
             cur = await conn.execute(
                 """
-                SELECT tenant_id, public_name
+                SELECT tenant_id, public_name, components
                   FROM g1.tenant_status_config
                  WHERE status_slug = %s AND enabled = true
                 """, (slug,))
@@ -1231,7 +1231,8 @@ async def public_status_json(slug: str) -> JSONResponse:
     if row is None:
         return JSONResponse({"status": "unknown"},
                             status_code=404)
-    tenant_id, public_name = row
+    tenant_id, public_name, components_raw = row
+    components = components_raw if components_raw is not None else []
 
     try:
         async with db_connection() as conn:
@@ -1282,6 +1283,7 @@ async def public_status_json(slug: str) -> JSONResponse:
         "active_alerts": active,
         "critical_alerts": critical,
         "source_count": sources,
+        "components": components,
     })
 
 

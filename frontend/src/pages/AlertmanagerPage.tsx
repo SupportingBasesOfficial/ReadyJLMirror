@@ -2,6 +2,9 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { useToast } from "@/components/ui/toast";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 interface Source {
   source_id: string;
@@ -300,12 +303,14 @@ function TokenModal({
 
 export function AlertmanagerPage({ tenantId }: { tenantId: string }) {
   const qc = useQueryClient();
+  const { toast } = useToast();
   const [selectedSource, setSelectedSource] = useState<Source | null>(null);
   const [newToken, setNewToken] = useState<{
     token: string;
     sourceId: string;
     name: string;
   } | null>(null);
+  const [confirmDisableId, setConfirmDisableId] = useState<string | null>(null);
 
   const { data: sources = [], isLoading } = useQuery<Source[]>({
     queryKey: ["amgr-sources", tenantId],
@@ -319,7 +324,10 @@ export function AlertmanagerPage({ tenantId }: { tenantId: string }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["amgr-sources"] });
       if (selectedSource) setSelectedSource(null);
+      setConfirmDisableId(null);
+      toast("Fonte desabilitada", "success");
     },
+    onError: () => toast("Erro ao desabilitar", "error"),
   });
 
   const rotate = useMutation({
@@ -328,7 +336,9 @@ export function AlertmanagerPage({ tenantId }: { tenantId: string }) {
         `/api/v1/sources/alertmanager/${sourceId}/rotate-token`),
     onSuccess: (data) => {
       setNewToken({ token: data.token, sourceId: data.source_id, name: "" });
+      toast("Token rotacionado", "success");
     },
+    onError: () => toast("Erro ao rotacionar", "error"),
   });
 
   return (
@@ -339,6 +349,18 @@ export function AlertmanagerPage({ tenantId }: { tenantId: string }) {
           sourceId={newToken.sourceId}
           name={newToken.name}
           onClose={() => setNewToken(null)}
+        />
+      )}
+
+      {confirmDisableId && (
+        <ConfirmModal
+          title="Desabilitar fonte"
+          description={`Desabilitar "${sources.find((s) => s.source_id === confirmDisableId)?.display_name ?? confirmDisableId}"? O ingest vai parar de aceitar eventos.`}
+          confirmLabel="Desabilitar"
+          destructive
+          isPending={disable.isPending}
+          onConfirm={() => disable.mutate(confirmDisableId)}
+          onCancel={() => setConfirmDisableId(null)}
         />
       )}
 
@@ -434,22 +456,15 @@ export function AlertmanagerPage({ tenantId }: { tenantId: string }) {
                     onClick={() => rotate.mutate(selectedSource.source_id)}
                     disabled={rotate.isPending}
                   >
-                    Rotate token
+                    {rotate.isPending ? <Spinner className="w-3 h-3" /> : "Rotate token"}
                   </Button>
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Disable source "${selectedSource.display_name}"? Ingest will stop accepting events.`
-                        )
-                      ) {
-                        disable.mutate(selectedSource.source_id);
-                      }
-                    }}
+                    onClick={() => setConfirmDisableId(selectedSource.source_id)}
+                    disabled={disable.isPending}
                   >
-                    Disable
+                    {disable.isPending ? <Spinner className="w-3 h-3" /> : "Disable"}
                   </Button>
                 </div>
               </div>

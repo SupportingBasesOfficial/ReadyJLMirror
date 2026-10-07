@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useToast } from "@/components/ui/toast";
@@ -73,7 +74,77 @@ function fmtTs(iso?: string) {
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }
 
-function EventDetail({ event, onBack }: { event: ErrorEvent; onBack: () => void }) {
+function EventDetail({
+  event,
+  tenantId,
+  onBack,
+}: {
+  event: ErrorEvent;
+  tenantId: string;
+  onBack: () => void;
+}) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [assignTo, setAssignTo] = useState("");
+  const [showAssignForm, setShowAssignForm] = useState(false);
+
+  const openTicketMut = useMutation({
+    mutationFn: () =>
+      api.post("/api/v1/itsm/changes", {
+        title: event.error_code || "Erro de aplicação",
+        description: event.error_message,
+        category:
+          event.severity_hint === "CRITICAL" || event.severity_hint === "HIGH"
+            ? "emergency"
+            : "normal",
+        risk:
+          event.severity_hint === "CRITICAL" ? "critical" :
+          event.severity_hint === "HIGH" ? "high" : "medium",
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["itsm-changes"] });
+      toast("Ticket ITSM criado com sucesso.", "success");
+    },
+    onError: () => {
+      toast("Erro ao criar ticket ITSM.", "error");
+    },
+  });
+
+  const markProcessedMut = useMutation({
+    mutationFn: () =>
+      api.patch(
+        `/api/v1/alerting/tenants/${tenantId}/application-error-events/${event.event_id}`,
+        { status: "processed" }
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["ir-events", tenantId] });
+      toast("Evento marcado como processado.", "success");
+      onBack();
+    },
+    onError: () => {
+      toast("Erro ao marcar evento como processado.", "error");
+    },
+  });
+
+  const assignMut = useMutation({
+    mutationFn: () =>
+      api.post("/api/v1/itsm/changes", {
+        title: event.error_code || "Erro de aplicação",
+        description: `${event.error_message}\n\nAtribuído a: ${assignTo}`,
+        category: "emergency",
+        risk: "high",
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["itsm-changes"] });
+      toast(`Evento atribuído a "${assignTo}" via ticket ITSM.`, "success");
+      setAssignTo("");
+      setShowAssignForm(false);
+    },
+    onError: () => {
+      toast("Erro ao atribuir evento.", "error");
+    },
+  });
+
   return (
     <div className="space-y-4">
       <button
@@ -99,6 +170,89 @@ function EventDetail({ event, onBack }: { event: ErrorEvent; onBack: () => void 
           <Row label="Principal" value={event.source_principal_id} mono />
         </div>
       </Card>
+
+      {/* Actions */}
+      <Card>
+        <CardHeader>
+          <span className="text-sm font-medium">Ações</span>
+        </CardHeader>
+        <div className="space-y-3">
+          {/* Open ITSM ticket */}
+          {event.status !== "processed" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                onClick={() => openTicketMut.mutate()}
+                disabled={openTicketMut.isPending}
+              >
+                {openTicketMut.isPending ? <Spinner className="w-4 h-4" /> : "Abrir ticket ITSM"}
+              </Button>
+              {openTicketMut.isError && (
+                <span className="text-xs text-[var(--red)]">Falha ao criar ticket.</span>
+              )}
+              {openTicketMut.isSuccess && (
+                <span className="text-xs text-[var(--green,#10b981)]">Ticket criado.</span>
+              )}
+            </div>
+          )}
+
+          {/* Mark as processed */}
+          {(event.status === "received" || event.status === "processing") && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => markProcessedMut.mutate()}
+                disabled={markProcessedMut.isPending}
+              >
+                {markProcessedMut.isPending ? (
+                  <Spinner className="w-4 h-4" />
+                ) : (
+                  "Marcar como processado"
+                )}
+              </Button>
+              {markProcessedMut.isError && (
+                <span className="text-xs text-[var(--red)]">Falha ao atualizar status.</span>
+              )}
+            </div>
+          )}
+
+          {/* Assign to */}
+          <div className="space-y-2">
+            {!showAssignForm ? (
+              <Button variant="secondary" onClick={() => setShowAssignForm(true)}>
+                Atribuir a…
+              </Button>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={assignTo}
+                  onChange={(e) => setAssignTo(e.target.value)}
+                  placeholder="Nome ou e-mail do responsável"
+                  className="flex-1 min-w-[180px] bg-[var(--surface-2)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[var(--brand)]"
+                />
+                <Button
+                  onClick={() => assignMut.mutate()}
+                  disabled={!assignTo.trim() || assignMut.isPending}
+                >
+                  {assignMut.isPending ? <Spinner className="w-4 h-4" /> : "Atribuir"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setShowAssignForm(false);
+                    setAssignTo("");
+                  }}
+                >
+                  Cancelar
+                </Button>
+                {assignMut.isError && (
+                  <span className="text-xs text-[var(--red)]">Falha ao atribuir.</span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -120,11 +274,14 @@ function EventsTab({ tenantId }: { tenantId: string }) {
     queryFn: () =>
       api.get<{ events: ErrorEvent[] }>(
         `/api/v1/alerting/tenants/${tenantId}/application-error-events`
-      ).then((r: any) => r.events as ErrorEvent[]),
+      ).then((r) => {
+        if (!Array.isArray(r?.events)) throw new Error("Unexpected response shape");
+        return r.events;
+      }),
     refetchInterval: 30_000,
   });
 
-  if (selected) return <EventDetail event={selected} onBack={() => setSelected(null)} />;
+  if (selected) return <EventDetail event={selected} tenantId={tenantId} onBack={() => setSelected(null)} />;
 
   const events = q.data ?? [];
 
@@ -201,6 +358,7 @@ function ChannelPicker({
   selected: string[];
   onChange: (ids: string[]) => void;
 }) {
+  const navigate = useNavigate();
   const q = useQuery<Destination[]>({
     queryKey: ["notif-channels", tenantId],
     queryFn: () => api.get<Destination[]>("/api/v1/alerting/notification-channels"),
@@ -220,7 +378,16 @@ function ChannelPicker({
     return (
       <p className="text-xs text-[var(--text-muted)]">
         Nenhum canal configurado.{" "}
-        <span className="text-[var(--brand)]">Adicione em Canais de Notificação.</span>
+        <a
+          href="/channels"
+          className="text-[var(--brand)] hover:underline cursor-pointer"
+          onClick={(e) => {
+            e.preventDefault();
+            navigate("/channels");
+          }}
+        >
+          Adicione em Canais de Notificação.
+        </a>
       </p>
     );
   }
@@ -278,7 +445,9 @@ function ScriptPicker({
     return (
       <p className="text-xs text-[var(--text-muted)]">
         Nenhum script de automação ativo.{" "}
-        <span className="text-[var(--brand)]">Crie em Automação.</span>
+        <button onClick={() => navigate("/automation")} className="text-[var(--brand)] hover:underline">
+          Crie em Automação.
+        </button>
       </p>
     );
   }
@@ -319,7 +488,13 @@ function PolicyTab({ tenantId }: { tenantId: string }) {
   });
 
   const [form, setForm] = useState<Policy | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
   const policy = form ?? q.data ?? null;
+
+  function updateForm(patch: Partial<Policy>) {
+    setForm((prev) => ({ ...(prev ?? q.data!), ...patch }));
+    setIsDirty(true);
+  }
 
   const mut = useMutation({
     mutationFn: (body: Policy) =>
@@ -333,6 +508,7 @@ function PolicyTab({ tenantId }: { tenantId: string }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ir-policy", tenantId] });
       setForm(null);
+      setIsDirty(false);
       toast("Política salva com sucesso.", "success");
     },
   });
@@ -340,7 +516,7 @@ function PolicyTab({ tenantId }: { tenantId: string }) {
   if (q.isLoading) return <div className="flex justify-center py-8"><Spinner /></div>;
   if (!policy) return <p className="text-xs text-[var(--red)] p-4">Falha ao carregar política.</p>;
 
-  const dirty = form !== null;
+  const dirty = isDirty;
   const selectedChannels = policy.notify_channels ?? [];
   const selectedScripts = (policy.automation_triggers ?? []).map((t) => t.script_id);
 
@@ -369,7 +545,7 @@ function PolicyTab({ tenantId }: { tenantId: string }) {
             <select
               value={policy.severity_threshold}
               onChange={(e) =>
-                setForm({ ...(form ?? policy), severity_threshold: e.target.value as Policy["severity_threshold"] })
+                updateForm({ severity_threshold: e.target.value as Policy["severity_threshold"] })
               }
               className="w-full bg-[var(--surface-2)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--brand)]"
             >
@@ -385,7 +561,7 @@ function PolicyTab({ tenantId }: { tenantId: string }) {
               type="checkbox"
               checked={policy.auto_open_ticket}
               onChange={(e) =>
-                setForm({ ...(form ?? policy), auto_open_ticket: e.target.checked })
+                updateForm({ auto_open_ticket: e.target.checked })
               }
               className="accent-[var(--brand)] w-4 h-4"
             />
@@ -403,7 +579,7 @@ function PolicyTab({ tenantId }: { tenantId: string }) {
               type="checkbox"
               checked={policy.manual_override_only}
               onChange={(e) =>
-                setForm({ ...(form ?? policy), manual_override_only: e.target.checked })
+                updateForm({ manual_override_only: e.target.checked })
               }
               className="accent-[var(--brand)] w-4 h-4"
             />
@@ -424,9 +600,7 @@ function PolicyTab({ tenantId }: { tenantId: string }) {
             <ChannelPicker
               tenantId={tenantId}
               selected={selectedChannels}
-              onChange={(ids) =>
-                setForm({ ...(form ?? policy), notify_channels: ids })
-              }
+              onChange={(ids) => updateForm({ notify_channels: ids })}
             />
           </div>
 
@@ -440,10 +614,7 @@ function PolicyTab({ tenantId }: { tenantId: string }) {
               tenantId={tenantId}
               selected={selectedScripts}
               onChange={(ids) =>
-                setForm({
-                  ...(form ?? policy),
-                  automation_triggers: ids.map((id) => ({ script_id: id })),
-                })
+                updateForm({ automation_triggers: ids.map((id) => ({ script_id: id })) })
               }
             />
           </div>
@@ -457,7 +628,7 @@ function PolicyTab({ tenantId }: { tenantId: string }) {
               {mut.isPending ? <Spinner className="w-4 h-4" /> : "Salvar política"}
             </Button>
             {dirty && (
-              <Button variant="secondary" onClick={() => setForm(null)}>
+              <Button variant="secondary" onClick={() => { setForm(null); setIsDirty(false); }}>
                 Cancelar
               </Button>
             )}
@@ -466,7 +637,7 @@ function PolicyTab({ tenantId }: { tenantId: string }) {
           {mut.isError && (
             <p className="text-xs text-[var(--red)]">Falha ao salvar. Tente novamente.</p>
           )}
-          {mut.isSuccess && !dirty && (
+          {mut.isSuccess && !isDirty && (
             <p className="text-xs text-[var(--green)]">Política salva com sucesso.</p>
           )}
         </div>

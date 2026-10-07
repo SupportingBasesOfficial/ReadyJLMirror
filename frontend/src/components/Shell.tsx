@@ -11,7 +11,7 @@ import {
   Webhook, Server, Wrench, Settings2,
   MessageSquare, PhoneCall, Users, UserPlus, KeyRound,
   ScrollText, BookOpen, ChevronLeft, ChevronRight,
-  ChevronDown, LogOut, Building2,
+  ChevronDown, LogOut, Building2, ShieldCheck,
 } from "lucide-react";
 import { api, logout } from "@/api/client";
 import { AlertsPage } from "@/pages/AlertsPage";
@@ -39,6 +39,7 @@ import { KnowledgeBasePage } from "@/pages/KnowledgeBasePage";
 import { IncidentResponsePage } from "@/pages/IncidentResponsePage";
 import { MSPOverviewPage } from "@/pages/MSPOverviewPage";
 import { UsersAdminPage } from "@/pages/UsersAdminPage";
+import { PlatformAdminPage } from "@/pages/PlatformAdminPage";
 import { useBranding } from "@/hooks/useBranding";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -68,6 +69,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   msp: "/msp",
   kb: "/kb",
   users: "/admin/users",
+  "platform-admin": "/platform-admin",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -100,11 +102,24 @@ export function Shell() {
     } catch { return new Set<string>(); }
   });
 
+  const [sessionExpired, setSessionExpired] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handler = () => setSessionExpired(true);
+    window.addEventListener("jlm:session-expired", handler);
+    return () => window.removeEventListener("jlm:session-expired", handler);
+  }, []);
+
   const selectTenant = useMutation({
     mutationFn: (tenant_id: string) =>
       api.post("/api/tenant/select", { tenant_id }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["session"] }),
   });
+
+  const handleSelectTenant = (tenant_id: string) => {
+    selectTenant.mutate(tenant_id);
+    navigate("/");
+  };
 
   const { data: mspData } = useQuery<{ clients: { tenant_id: string }[] }>({
     queryKey: ["msp-clients-check", session?.tenant_id],
@@ -171,6 +186,14 @@ export function Shell() {
     refetchInterval: 60_000,
     enabled: session?.state === "ready",
     select: (d) => (Array.isArray(d) ? d.filter((n) => n.current_state === "failed" || n.current_state === "permanently_failed").length : 0),
+  });
+
+  const { data: criticalAlertCount } = useQuery({
+    queryKey: ["nav-badge-critical", session?.tenant_id],
+    queryFn: () => api.get<unknown[]>("/api/v1/alerting/alerts?lifecycle_state=active&severity=critical"),
+    refetchInterval: 30_000,
+    enabled: session?.state === "ready",
+    select: (d) => (Array.isArray(d) ? d.length : 0),
   });
 
   // Restore last visited path per tenant on first load
@@ -353,6 +376,19 @@ export function Shell() {
         { id: "msp" as View, label: "Portfólio de Clientes", icon: Building2, description: "Clientes MSP" },
       ],
     }] : []),
+    // Visible to platform_admin permission holders.
+    // Falls back to tenant:admin if platform_admin is not yet present in the permission set.
+    ...((has("platform_admin") || has("tenant:admin")) ? [{
+      label: "Plataforma",
+      items: [
+        {
+          id: "platform-admin" as View,
+          label: "Administração da Plataforma",
+          icon: ShieldCheck,
+          description: "Configurações globais da plataforma",
+        },
+      ],
+    }] : []),
   ];
 
   const toggleCollapsed = () => {
@@ -378,6 +414,22 @@ export function Shell() {
 
   return (
     <div className="flex min-h-screen bg-[var(--bg)]">
+      {sessionExpired && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 9999,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-10 min-w-[320px] max-w-md text-center shadow-2xl">
+            <p className="text-sm font-medium mb-5" style={{ color: "var(--text)" }}>
+              Sua sessão expirou.
+            </p>
+            <Button onClick={() => logout()}>Fazer login novamente</Button>
+          </div>
+        </div>
+      )}
       {/* Sidebar */}
       <aside
         style={{ width: collapsed ? 52 : 220, transition: "width 0.22s cubic-bezier(0.4,0,0.2,1)" }}
@@ -579,12 +631,45 @@ export function Shell() {
             {currentLabel}
           </h1>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => goTo("alerts")}
+              title="Alertas críticos"
+              className="relative p-1.5 rounded-lg hover:bg-[var(--surface-2)] transition-colors"
+              style={{ color: "var(--text-muted)" }}
+            >
+              <Bell size={15} strokeWidth={1.8} />
+              {!!criticalAlertCount && criticalAlertCount > 0 && (
+                <span style={{
+                  position: "absolute", top: 2, right: 2,
+                  background: "var(--red, #ef4444)", color: "#fff",
+                  borderRadius: 999, fontSize: 9, fontWeight: 700,
+                  minWidth: 14, height: 14,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  padding: "0 3px", lineHeight: 1,
+                }}>
+                  {criticalAlertCount > 99 ? "99+" : criticalAlertCount}
+                </span>
+              )}
+            </button>
             <span className="text-xs px-2 py-0.5 rounded-full border"
               style={{ color: "var(--text-muted)", borderColor: "var(--border)", background: "var(--surface-2)" }}>
               {s.tenant_id}
             </span>
           </div>
         </header>
+
+        {/* MSP back banner */}
+        {hasMSPClients && view !== "msp" && (
+          <div className="flex items-center gap-2 px-4 py-1.5 bg-[var(--surface-2)] border-b border-[var(--border)] text-xs text-[var(--text-muted)]">
+            <span>Visualizando como cliente</span>
+            <button
+              onClick={() => goTo("msp")}
+              className="text-[var(--brand)] hover:underline cursor-pointer font-medium"
+            >
+              ← Voltar para MSP
+            </button>
+          </div>
+        )}
 
         {/* Main content */}
         <main className="flex-1 p-5 overflow-auto min-w-0">
@@ -610,8 +695,9 @@ export function Shell() {
           {view === "infra" && <InfraPage tenantId={s.tenant_id!} />}
           {view === "kb" && <KnowledgeBasePage tenantId={s.tenant_id!} />}
           {view === "incidents" && <IncidentResponsePage tenantId={s.tenant_id!} />}
-          {view === "msp" && <MSPOverviewPage tenantId={s.tenant_id!} />}
+          {view === "msp" && <MSPOverviewPage tenantId={s.tenant_id!} onSelectTenant={handleSelectTenant} />}
           {view === "users" && <UsersAdminPage tenantId={s.tenant_id!} />}
+          {view === "platform-admin" && <PlatformAdminPage tenantId={s.tenant_id!} />}
         </main>
       </div>
     </div>
