@@ -169,6 +169,11 @@ services:
     volumes:
       - ./secrets:/run/secrets:ro
       - ./secrets-tokens:/run/secret-bindings
+      # Dev hot-reload: mount Python source so docker restart api picks up
+      # code changes without an image rebuild.
+      - ./api:/app/api:ro
+      - ./shared:/app/shared:ro
+      - ./workers:/app/workers:ro
     healthcheck:
       test: ["CMD-SHELL",
              "python -c \"import os,httpx,sys; mtls=os.environ.get('API_MTLS'); port=os.environ.get('API_PORT','8000'); kw={'cert':('/run/secrets/tls/bff-cert.pem','/run/secrets/tls/bff-key.pem'),'verify':'/run/secrets/tls/ca.pem'} if mtls else {}; scheme='https' if mtls else 'http'; sys.exit(0 if httpx.get(f'{scheme}://localhost:{port}/health',timeout=3,**kw).status_code==200 else 1)\""]
@@ -215,6 +220,9 @@ services:
       TLS_KEY_FILE: ${TLS_KEY_FILE:-}
     volumes:
       - ./secrets:/run/secrets:ro
+      # Dev hot-reload: mount shell assets so npm run build + restart bff
+      # is enough — no image rebuild needed after frontend changes.
+      - ./bff/shell:/app/bff/shell:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -283,6 +291,10 @@ services:
     volumes:
       - ./secrets:/run/secrets:ro
       - ./secrets-tokens:/run/secret-bindings:ro
+      # Dev hot-reload: mount Python source so docker restart worker picks
+      # up code changes without an image rebuild.
+      - ./workers:/app/workers:ro
+      - ./shared:/app/shared:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
