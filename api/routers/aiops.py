@@ -6,14 +6,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from shared.audit import record_audit_event
+from shared.db import db_tenant_connection
+
 
 def _get_context(request: Request) -> dict:
     ctx = getattr(request.state, "jlmirror_context", None)
     if ctx is None:
         raise HTTPException(status_code=401, detail="authentication required")
     return ctx
-
-from shared.db import db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/aiops", tags=["aiops"])
 
@@ -105,10 +106,15 @@ async def dismiss_finding(request: Request, finding_id: str) -> dict:
             (tenant_id, finding_id),
         )
         row = await cur.fetchone()
+        if row is None:
+            raise HTTPException(
+                status_code=404, detail="finding not found or already dismissed")
+        principal_id = ctx.get("principal_id")
+        await record_audit_event(
+            conn, tenant_id,
+            action="aiops.finding.dismissed",
+            actor_kind="principal", actor_id=principal_id,
+            subject_type="aiops_finding", subject_id=row[0])
         await conn.commit()
-
-    if row is None:
-        raise HTTPException(
-            status_code=404, detail="finding not found or already dismissed")
 
     return {"finding_id": row[0], "dismissed": True}
