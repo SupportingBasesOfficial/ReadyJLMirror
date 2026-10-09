@@ -50,6 +50,11 @@ from jlmirror_monitoring.validation_worker import (
 
 _INTERFACE_TYPES = {1: "agent", 2: "snmp", 3: "ipmi", 4: "jmx"}
 
+_HOST_STATUS_MAP    = {"0": "enabled",     "1": "disabled"}
+_AVAILABILITY_MAP   = {"0": "unknown",     "1": "available",  "2": "unavailable"}
+_MAINTENANCE_STATUS = {"0": "none",        "1": "active"}
+_MAINTENANCE_TYPE   = {"0": "with_data",   "1": "no_data"}
+
 # Zabbix item value_type -> normalized native value type
 _ITEM_VALUE_TYPES = {
     0: ZabbixNativeValueType.FLOAT,
@@ -264,7 +269,13 @@ class ZabbixClient:
             endpoint.api_url,
             "host.get",
             {
-                "output": ["hostid", "host", "name"],
+                "output": [
+                    "hostid", "host", "name",
+                    "status", "available", "snmp_available",
+                    "ipmi_available", "jmx_available",
+                    "error", "snmp_error",
+                    "maintenance_status", "maintenance_type",
+                ],
                 "groupids": list(host_group_refs),
                 "selectInterfaces": [
                     "interfaceid", "type", "main", "useip", "ip", "dns", "port"
@@ -289,21 +300,47 @@ class ZabbixClient:
     def _map_host(item: Any) -> ZabbixHostEvidence:
         if not isinstance(item, dict) or "hostid" not in item:
             raise ProviderProtocolError("host.get malformed entry")
+
+        def _inv(key: str, max_len: int = 2048) -> str | None:
+            v = raw_inventory.get(key)
+            return str(v)[:max_len] if v else None
+
+        def _err(key: str) -> str | None:
+            v = item.get(key)
+            return str(v)[:2048] if v else None
+
         try:
             raw_inventory = item.get("inventory") or {}
             inventory = ZabbixInventoryEvidence(
-                device_type=raw_inventory.get("type") or None,
-                device_type_full=raw_inventory.get("type_full") or None,
-                os=raw_inventory.get("os") or None,
-                os_full=raw_inventory.get("os_full") or None,
-                vendor=raw_inventory.get("vendor") or None,
-                model=raw_inventory.get("model") or None,
-                serial_primary=raw_inventory.get("serialno_a") or None,
-                serial_secondary=raw_inventory.get("serialno_b") or None,
-                asset_tag=raw_inventory.get("tag") or None,
-                hardware=raw_inventory.get("hardware") or None,
-                software=raw_inventory.get("software") or None,
-                location=raw_inventory.get("location") or None,
+                device_type=_inv("type", 512),
+                device_type_full=_inv("type_full"),
+                os=_inv("os", 512),
+                os_full=_inv("os_full"),
+                vendor=_inv("vendor", 512),
+                model=_inv("model", 512),
+                serial_primary=_inv("serialno_a", 512),
+                serial_secondary=_inv("serialno_b", 512),
+                asset_tag=_inv("asset_tag", 512),
+                hardware=_inv("hardware"),
+                hardware_full=_inv("hardware_full"),
+                software=_inv("software"),
+                software_full=_inv("software_full"),
+                location=_inv("location", 1024),
+                mac_primary=_inv("macaddress_a", 32),
+                mac_secondary=_inv("macaddress_b", 32),
+                contact=_inv("contact", 512),
+                poc_1_name=_inv("poc_1_name", 512),
+                poc_1_email=_inv("poc_1_email", 255),
+                poc_1_phone=_inv("poc_1_phone_a", 64),
+                poc_2_name=_inv("poc_2_name", 512),
+                poc_2_email=_inv("poc_2_email", 255),
+                poc_2_phone=_inv("poc_2_phone_a", 64),
+                site_city=_inv("site_city", 255),
+                site_rack=_inv("site_rack", 255),
+                site_notes=_inv("site_notes"),
+                url_a=_inv("url_a", 512),
+                url_b=_inv("url_b", 512),
+                url_c=_inv("url_c", 512),
             )
             interfaces = tuple(
                 ZabbixHostInterfaceEvidence(
@@ -337,7 +374,15 @@ class ZabbixClient:
                     tag=str(t["tag"]), value=str(t.get("value", ""))
                 )
                 for t in item.get("tags") or []
+                if isinstance(t, dict) and t.get("tag")
             )
+            maint_status = _MAINTENANCE_STATUS.get(
+                str(item.get("maintenance_status", "0")), "none")
+            maint_type: str | None = None
+            if maint_status == "active":
+                maint_type = _MAINTENANCE_TYPE.get(
+                    str(item.get("maintenance_type", "0")))
+
             return ZabbixHostEvidence(
                 hostid=str(item["hostid"]),
                 technical_name=str(item.get("host", "")),
@@ -347,6 +392,20 @@ class ZabbixClient:
                 groups=groups,
                 templates=templates,
                 tags=tags,
+                host_status=_HOST_STATUS_MAP.get(
+                    str(item.get("status", "0")), "enabled"),
+                agent_availability=_AVAILABILITY_MAP.get(
+                    str(item.get("available", "0")), "unknown"),
+                snmp_availability=_AVAILABILITY_MAP.get(
+                    str(item.get("snmp_available", "0")), "unknown"),
+                ipmi_availability=_AVAILABILITY_MAP.get(
+                    str(item.get("ipmi_available", "0")), "unknown"),
+                jmx_availability=_AVAILABILITY_MAP.get(
+                    str(item.get("jmx_available", "0")), "unknown"),
+                agent_error=_err("error"),
+                snmp_error=_err("snmp_error"),
+                maintenance_status=maint_status,
+                maintenance_type=maint_type,
             )
         except (KeyError, AttributeError, TypeError, ValueError) as exc:
             raise ProviderProtocolError(
