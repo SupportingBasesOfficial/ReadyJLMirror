@@ -32,10 +32,10 @@ def _collect_alert_summary(conn: psycopg.Connection,
     cur = conn.execute(
         """
         SELECT severity, COUNT(*) AS cnt,
-               COUNT(*) FILTER (WHERE state IN ('resolved', 'closed')) AS resolved
+               COUNT(*) FILTER (WHERE lifecycle_state IN ('resolved', 'closed')) AS resolved
           FROM alerting.alert
          WHERE tenant_id = %s
-           AND raised_at >= %s AND raised_at < %s
+           AND opened_at >= %s AND opened_at < %s
          GROUP BY severity
          ORDER BY cnt DESC
         """,
@@ -164,10 +164,12 @@ def _send_email(recipient: str, subject: str, text: str, html: str) -> None:
 
     if tls_mode == "ssl":
         server = smtplib.SMTP_SSL(host, port, timeout=10)
-    else:
+    elif tls_mode == "starttls":
         server = smtplib.SMTP(host, port, timeout=10)
-        if tls_mode == "starttls":
-            server.starttls()
+        server.starttls()
+    else:
+        logger.warning("SMTP_TLS=%r is not recognized; using plaintext SMTP", tls_mode)
+        server = smtplib.SMTP(host, port, timeout=10)
     if user and password:
         server.login(user, password)
     server.sendmail(from_addr, [recipient], msg.as_string())

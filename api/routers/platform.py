@@ -11,7 +11,7 @@ from __future__ import annotations
 import secrets
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from shared import access
@@ -812,7 +812,8 @@ class UserPasswordReset(BaseModel):
 
 
 @router.post("/users", status_code=201)
-async def provision_user(request: Request, body: UserProvision) -> dict:
+async def provision_user(request: Request, body: UserProvision,
+                         response: Response) -> dict:
     """Create a Keycloak account, register the principal, and add the user
     to the target tenant with the requested role — all in one operation.
 
@@ -876,6 +877,7 @@ async def provision_user(request: Request, body: UserProvision) -> dict:
                     "role": body.role, "membership_id": membership_id})
         await conn.commit()
 
+    response.headers["Cache-Control"] = "no-store"
     return {
         "principal_id": user_id,
         "email": body.email,
@@ -944,7 +946,8 @@ async def enable_user(request: Request, user_id: str) -> dict:
 
 @router.post("/users/{user_id}/reset-password")
 async def reset_user_password(
-    request: Request, user_id: str, body: UserPasswordReset
+    request: Request, user_id: str, body: UserPasswordReset,
+    response: Response,
 ) -> dict:
     """Reset a user's password. If new_password is omitted a fresh
     temporary password is generated and returned."""
@@ -964,5 +967,6 @@ async def reset_user_password(
             actor_kind="platform_admin", actor_id=actor,
             subject_type="principal", subject_id=user_id)
         await conn.commit()
+    response.headers["Cache-Control"] = "no-store"
     return {"principal_id": user_id, "temp_password": new_pw,
             "must_change_password": True}

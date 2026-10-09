@@ -12,7 +12,8 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from shared.db import db_tenant_connection
+from shared import access
+from shared.db import db_connection, db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/automation", tags=["automation"])
 
@@ -40,10 +41,26 @@ class CreateSchedule(BaseModel):
 
 
 def _require_tenant(request: Request) -> str:
-    tid = request.state.jlmirror_context.get("tenant_id")
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
+    tid = ctx.get("tenant_id")
     if not tid:
         raise HTTPException(status_code=403, detail="tenant context required")
     return tid
+
+
+async def _require_operator(request: Request) -> str:
+    """Require monitoring:operate or tenant:admin — write operations on automation."""
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
+    tenant_id = ctx.get("tenant_id")
+    principal_id = ctx.get("principal_id")
+    if not tenant_id or not principal_id:
+        raise HTTPException(status_code=403, detail="tenant context required")
+    async with db_connection() as conn:
+        perms = await access.effective_permissions(conn, principal_id, tenant_id)
+    if "monitoring:operate" not in perms and "tenant:admin" not in perms:
+        raise HTTPException(status_code=403,
+                            detail="monitoring:operate permission required")
+    return tenant_id
 
 
 # ── Scripts ───────────────────────────────────────────────────────────────────
@@ -68,7 +85,7 @@ async def list_scripts(request: Request) -> list:
 
 @router.post("/scripts", status_code=status.HTTP_201_CREATED)
 async def create_script(request: Request, body: CreateScript) -> dict:
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_operator(request)
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="name is required")
@@ -101,7 +118,7 @@ async def create_script(request: Request, body: CreateScript) -> dict:
 @router.put("/scripts/{script_id}")
 async def update_script(request: Request, script_id: str,
                         body: UpdateScript) -> dict:
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_operator(request)
     if body.script_type and body.script_type not in _VALID_TYPES:
         raise HTTPException(status_code=422,
                             detail=f"script_type must be one of {sorted(_VALID_TYPES)}")
@@ -142,7 +159,7 @@ async def update_script(request: Request, script_id: str,
 @router.post("/scripts/{script_id}/trigger", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_script(request: Request, script_id: str) -> dict:
     """Queue a manual run. Actual execution is on the next worker tick."""
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_operator(request)
     async with db_tenant_connection(tenant_id) as conn:
         row = await conn.execute(
             "SELECT script_id, enabled FROM g1.automation_script "
@@ -193,7 +210,7 @@ async def list_schedules(request: Request) -> list:
 
 @router.post("/schedules", status_code=status.HTTP_201_CREATED)
 async def create_schedule(request: Request, body: CreateSchedule) -> dict:
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_operator(request)
     if body.interval_secs < 60:
         raise HTTPException(status_code=422,
                             detail="interval_secs must be at least 60")
@@ -223,7 +240,7 @@ async def create_schedule(request: Request, body: CreateSchedule) -> dict:
 
 @router.delete("/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_schedule(request: Request, schedule_id: str) -> Response:
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_operator(request)
     async with db_tenant_connection(tenant_id) as conn:
         row = await conn.execute(
             "SELECT schedule_id FROM g1.automation_schedule "

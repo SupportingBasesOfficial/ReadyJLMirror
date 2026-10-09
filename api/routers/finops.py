@@ -4,7 +4,14 @@ Read-only. No pricing, no quota enforcement.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
+
+
+def _get_context(request: Request) -> dict:
+    ctx = getattr(request.state, "jlmirror_context", None)
+    if ctx is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    return ctx
 
 from shared.db import db_connection
 
@@ -14,7 +21,7 @@ router = APIRouter(prefix="/api/v1/finops", tags=["finops"])
 @router.get("/summary")
 async def finops_summary(request: Request) -> dict:
     """Contract + entitlements + latest meter snapshot for the tenant."""
-    ctx = request.state.jlmirror_context
+    ctx = _get_context(request)
     tenant_id = ctx["tenant_id"]
 
     async with db_connection() as conn:
@@ -99,7 +106,7 @@ async def finops_usage(
     limit: int = 200,
 ) -> list[dict]:
     """Meter history for the tenant (default last 7 days)."""
-    ctx = request.state.jlmirror_context
+    ctx = _get_context(request)
     tenant_id = ctx["tenant_id"]
     days = min(max(days, 1), 90)
     limit = min(limit, 500)

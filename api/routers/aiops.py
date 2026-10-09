@@ -6,6 +6,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+
+def _get_context(request: Request) -> dict:
+    ctx = getattr(request.state, "jlmirror_context", None)
+    if ctx is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    return ctx
+
 from shared.db import db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/aiops", tags=["aiops"])
@@ -31,7 +38,7 @@ def _ser_finding(r) -> dict:
 @router.get("/findings")
 async def list_findings(request: Request, limit: int = 50,
                         include_dismissed: bool = False) -> list[dict]:
-    ctx = request.state.jlmirror_context
+    ctx = _get_context(request)
     tenant_id = ctx["tenant_id"]
     limit = min(limit, 200)
     dismissed_clause = "" if include_dismissed else "AND dismissed_at IS NULL"
@@ -58,7 +65,7 @@ async def list_findings(request: Request, limit: int = 50,
 
 @router.get("/findings/{finding_id}")
 async def get_finding(request: Request, finding_id: str) -> dict:
-    ctx = request.state.jlmirror_context
+    ctx = _get_context(request)
     tenant_id = ctx["tenant_id"]
 
     async with db_tenant_connection(tenant_id) as conn:
@@ -82,7 +89,7 @@ async def get_finding(request: Request, finding_id: str) -> dict:
 
 @router.post("/findings/{finding_id}/dismiss")
 async def dismiss_finding(request: Request, finding_id: str) -> dict:
-    ctx = request.state.jlmirror_context
+    ctx = _get_context(request)
     tenant_id = ctx["tenant_id"]
 
     async with db_tenant_connection(tenant_id) as conn:

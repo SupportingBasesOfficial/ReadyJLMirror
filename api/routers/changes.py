@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
+from shared.audit import record_audit_event
 from shared.db import db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/itsm", tags=["changes"])
@@ -61,7 +62,7 @@ _VALID_DECISIONS   = {"approved", "rejected"}
 
 
 def _require_tenant(request: Request) -> str:
-    ctx = request.state.jlmirror_context
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
     tid = ctx.get("tenant_id")
     if not tid:
         raise HTTPException(status_code=403, detail="tenant context required")
@@ -69,7 +70,7 @@ def _require_tenant(request: Request) -> str:
 
 
 def _require_principal(request: Request) -> str:
-    ctx = request.state.jlmirror_context
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
     pid = ctx.get("principal_id")
     if not pid:
         raise HTTPException(status_code=403, detail="principal context required")
@@ -127,6 +128,12 @@ async def create_change(request: Request, body: CreateRFC) -> dict:
              body.planned_start, body.planned_end,
              body.incident_id, principal),
         )
+        await record_audit_event(
+            conn, tenant_id,
+            action="itsm.change.created",
+            actor_kind="principal", actor_id=principal,
+            subject_type="change_request", subject_id=rfc_id,
+            detail={"title": title, "category": body.category, "risk": body.risk})
         await conn.commit()
     return {"rfc_id": rfc_id, "state": "draft"}
 
@@ -213,6 +220,15 @@ async def update_change(request: Request, rfc_id: str, body: UpdateRFC) -> dict:
             f"WHERE tenant_id=%s AND rfc_id=%s",
             vals,
         )
+        principal_id = (getattr(request.state, "jlmirror_context", None) or {}).get("principal_id")
+        await record_audit_event(
+            conn, tenant_id,
+            action="itsm.change.updated",
+            actor_kind="principal", actor_id=principal_id,
+            subject_type="change_request", subject_id=rfc_id,
+            detail={f: getattr(body, f) for f in ("title", "description", "category",
+                    "risk", "state", "planned_start", "planned_end")
+                    if getattr(body, f) is not None})
         await conn.commit()
     return {"rfc_id": rfc_id, "updated": True}
 
@@ -242,6 +258,13 @@ async def create_task(request: Request, rfc_id: str, body: CreateTask) -> dict:
             """,
             (task_id, rfc_id, tenant_id, title, body.assignee_ref),
         )
+        principal_id = (getattr(request.state, "jlmirror_context", None) or {}).get("principal_id")
+        await record_audit_event(
+            conn, tenant_id,
+            action="itsm.change_task.created",
+            actor_kind="principal", actor_id=principal_id,
+            subject_type="change_task", subject_id=task_id,
+            detail={"rfc_id": rfc_id, "title": title})
         await conn.commit()
     return {"task_id": task_id, "state": "open"}
 
@@ -277,6 +300,14 @@ async def update_task(request: Request, rfc_id: str,
             f"WHERE rfc_id=%s AND task_id=%s AND tenant_id=%s",
             vals,
         )
+        principal_id = (getattr(request.state, "jlmirror_context", None) or {}).get("principal_id")
+        await record_audit_event(
+            conn, tenant_id,
+            action="itsm.change_task.updated",
+            actor_kind="principal", actor_id=principal_id,
+            subject_type="change_task", subject_id=task_id,
+            detail={f: getattr(body, f) for f in ("title", "state", "assignee_ref")
+                    if getattr(body, f) is not None})
         await conn.commit()
     return {"task_id": task_id, "updated": True}
 
@@ -321,5 +352,13 @@ async def record_approval(request: Request, rfc_id: str,
                 """,
                 (tenant_id, rfc_id),
             )
+        principal_id = (getattr(request.state, "jlmirror_context", None) or {}).get("principal_id")
+        await record_audit_event(
+            conn, tenant_id,
+            action="itsm.change.approval_recorded",
+            actor_kind="principal", actor_id=principal_id,
+            subject_type="change_request", subject_id=rfc_id,
+            detail={"approval_id": approval_id, "approver_ref": body.approver_ref.strip(),
+                    "decision": body.decision})
         await conn.commit()
     return {"approval_id": approval_id, "decision": body.decision}

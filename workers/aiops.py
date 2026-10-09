@@ -130,19 +130,29 @@ def _process_pending(conn) -> int:
 def _run_all_tenants(conn, api_key: str) -> int:
     import anthropic
 
-    cur = conn.execute("SELECT tenant_id FROM g1.tenants LIMIT 20")
-    tenants = [row[0] for row in cur.fetchall()]
-    if not tenants:
-        return 0
-
     client = anthropic.Anthropic(api_key=api_key)
     total = 0
-    for tenant_id in tenants:
-        try:
-            total += _analyze_tenant(conn, client, tenant_id)
-        except Exception:
-            conn.rollback()
-            logger.exception("aiops: tenant %s failed", tenant_id)
+    last_id = ""
+    page = 100
+    while True:
+        cur = conn.execute(
+            "SELECT tenant_id FROM g1.tenants "
+            "WHERE state = 'active' AND tenant_id > %s "
+            "ORDER BY tenant_id LIMIT %s",
+            (last_id, page),
+        )
+        tenants = [row[0] for row in cur.fetchall()]
+        if not tenants:
+            break
+        for tenant_id in tenants:
+            try:
+                total += _analyze_tenant(conn, client, tenant_id)
+            except Exception:
+                conn.rollback()
+                logger.exception("aiops: tenant %s failed", tenant_id)
+        if len(tenants) < page:
+            break
+        last_id = tenants[-1]
 
     return total
 

@@ -9,7 +9,8 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from shared.db import db_tenant_connection
+from shared import access
+from shared.db import db_connection, db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
 
@@ -28,10 +29,26 @@ class CreateSchedule(BaseModel):
 
 
 def _require_tenant(request: Request) -> str:
-    tid = request.state.jlmirror_context.get("tenant_id")
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
+    tid = ctx.get("tenant_id")
     if not tid:
         raise HTTPException(status_code=403, detail="tenant context required")
     return tid
+
+
+async def _require_operator(request: Request) -> str:
+    """Require monitoring:operate or tenant:admin — write operations on reports."""
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
+    tenant_id = ctx.get("tenant_id")
+    principal_id = ctx.get("principal_id")
+    if not tenant_id or not principal_id:
+        raise HTTPException(status_code=403, detail="tenant context required")
+    async with db_connection() as conn:
+        perms = await access.effective_permissions(conn, principal_id, tenant_id)
+    if "monitoring:operate" not in perms and "tenant:admin" not in perms:
+        raise HTTPException(status_code=403,
+                            detail="monitoring:operate permission required")
+    return tenant_id
 
 
 # ── Templates ─────────────────────────────────────────────────────────────────
@@ -56,7 +73,7 @@ async def list_templates(request: Request) -> list:
 
 @router.post("/templates", status_code=status.HTTP_201_CREATED)
 async def create_template(request: Request, body: CreateTemplate) -> dict:
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_operator(request)
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="name is required")
@@ -85,7 +102,7 @@ async def create_template(request: Request, body: CreateTemplate) -> dict:
 
 @router.delete("/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def disable_template(request: Request, template_id: str) -> Response:
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_operator(request)
     async with db_tenant_connection(tenant_id) as conn:
         row = await conn.execute(
             "SELECT template_id FROM g1.report_template "
@@ -106,7 +123,7 @@ async def disable_template(request: Request, template_id: str) -> Response:
 @router.post("/templates/{template_id}/trigger", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_template(request: Request, template_id: str) -> dict:
     """Enqueue an immediate one-off report generation for the template."""
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_operator(request)
     async with db_tenant_connection(tenant_id) as conn:
         row = await conn.execute(
             "SELECT template_id, report_type FROM g1.report_template "
@@ -156,7 +173,7 @@ async def list_schedules(request: Request) -> list:
 
 @router.post("/schedules", status_code=status.HTTP_201_CREATED)
 async def create_schedule(request: Request, body: CreateSchedule) -> dict:
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_operator(request)
     if body.interval_secs < 3600:
         raise HTTPException(status_code=422,
                             detail="interval_secs must be at least 3600 (1 hour)")
@@ -186,7 +203,7 @@ async def create_schedule(request: Request, body: CreateSchedule) -> dict:
 
 @router.delete("/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_schedule(request: Request, schedule_id: str) -> Response:
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_operator(request)
     async with db_tenant_connection(tenant_id) as conn:
         row = await conn.execute(
             "SELECT report_schedule_id FROM g1.report_schedule "
@@ -242,7 +259,7 @@ async def list_subscribers(request: Request, schedule_id: str) -> list:
 @router.post("/schedules/{schedule_id}/subscribers", status_code=status.HTTP_201_CREATED)
 async def add_subscriber(request: Request, schedule_id: str, body: AddSubscriber) -> dict:
     """Add an email address to the subscriber list of the given schedule."""
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_operator(request)
     email = body.email.strip().lower()
     if not _valid_email(email):
         raise HTTPException(status_code=422, detail="invalid email address")
@@ -281,7 +298,7 @@ async def add_subscriber(request: Request, schedule_id: str, body: AddSubscriber
 )
 async def remove_subscriber(request: Request, schedule_id: str, email: str) -> Response:
     """Remove an email address from the subscriber list of the given schedule."""
-    tenant_id = _require_tenant(request)
+    tenant_id = await _require_operator(request)
     email = email.strip().lower()
 
     async with db_tenant_connection(tenant_id) as conn:
