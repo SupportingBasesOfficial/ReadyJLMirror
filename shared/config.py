@@ -141,6 +141,8 @@ class Settings:
     dev_credential_generation: str = field(
         default_factory=lambda: _env("DEV_CREDENTIAL_GENERATION", "credential-gen-dev-1")
     )
+    # Role granted to JIT-provisioned principals in development (never used in production).
+    dev_jit_role: str = field(default_factory=lambda: _env("DEV_JIT_ROLE", "admin"))
 
     # Worker
     worker_poll_interval_seconds: int = field(

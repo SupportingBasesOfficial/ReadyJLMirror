@@ -48,6 +48,7 @@ from api.routers import (
     infra,
     itsm,
     kb,
+    layout,
     maintenance,
     monitoring,
     msp,
@@ -514,6 +515,7 @@ app.include_router(status_page.router)
 app.include_router(status_page._public_router)
 app.include_router(noc_stream.router)
 app.include_router(msp.router)
+app.include_router(layout.router)
 
 
 @app.get("/metrics", tags=["health"])

@@ -271,6 +271,7 @@ async def add_subscriber(request: Request, schedule_id: str, body: AddSubscriber
               FROM g1.report_schedule s
               JOIN g1.report_template t ON t.template_id = s.template_id
              WHERE s.tenant_id = %s AND s.report_schedule_id = %s
+               FOR UPDATE OF t
             """,
             (tenant_id, schedule_id),
         )
@@ -308,6 +309,7 @@ async def remove_subscriber(request: Request, schedule_id: str, email: str) -> R
               FROM g1.report_schedule s
               JOIN g1.report_template t ON t.template_id = s.template_id
              WHERE s.tenant_id = %s AND s.report_schedule_id = %s
+               FOR UPDATE OF t
             """,
             (tenant_id, schedule_id),
         )

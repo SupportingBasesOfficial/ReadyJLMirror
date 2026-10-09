@@ -1,9 +1,12 @@
 """Worker entry point — runs all responsibility loops on one process.
 
-Dev consolidation: every pending-work processor runs on a shared
-connection in a single tick loop, so `docker compose up worker`
-keeps the whole pipeline alive. `--once` runs a single pass —
-the verification shape used by the dev E2E.
+Dev consolidation: every pending-work processor runs in a single tick
+loop, so `docker compose up worker` keeps the whole pipeline alive.
+`--once` runs a single pass — the verification shape used by the dev E2E.
+
+Each processor owns a persistent psycopg connection keyed by name.
+A failure in one worker never dirties another's transaction; reconnects
+happen lazily on the next tick.
 
 In production each responsibility runs as its own service; only the
 scheduling differs.
@@ -68,26 +71,53 @@ _PROCESSORS = (
     ("cert_checker", cert_checker),
 )
 
+# One persistent connection per processor, keyed by name.
+# "heartbeat" is also an entry here.
+_connections: dict[str, psycopg.Connection] = {}
 
-def tick(conn) -> int:
+
+def _get_conn(name: str, dsn: str) -> psycopg.Connection:
+    """Return the live connection for *name*, creating one if absent or closed."""
+    conn = _connections.get(name)
+    if conn is None or conn.closed:
+        conn = psycopg.connect(dsn, autocommit=False, connect_timeout=10)
+        _connections[name] = conn
+    return conn
+
+
+def tick(dsn: str) -> int:
     """One full pipeline pass — every processor drains its pending work."""
     total = 0
     for name, fn in _PROCESSORS:
         try:
+            conn = _get_conn(name, dsn)
             n = fn(conn)
             if n:
                 logger.info("%s processed %s", name, n)
             total += n or 0
+        except psycopg.OperationalError:
+            # Dead connection — drop it so _get_conn reconnects next tick.
+            _connections.pop(name, None)
+            logger.exception(
+                "%s tick failed — connection dropped, will reconnect next tick",
+                name)
         except Exception:
-            conn.rollback()
+            # Soft failure — roll back this processor's transaction and keep going.
+            conn = _connections.get(name)
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
             logger.exception("%s tick failed", name)
-    _heartbeat(conn, total)
+    _heartbeat(dsn, total)
     return total
 
 
-def _heartbeat(conn, processed: int) -> None:
+def _heartbeat(dsn: str, processed: int) -> None:
     """Durable liveness: one upsert per tick so operators/readiness
     can distinguish a live pipeline from a silently dead one."""
+    conn = _get_conn("heartbeat", dsn)
     try:
         conn.execute(
             """
@@ -102,8 +132,15 @@ def _heartbeat(conn, processed: int) -> None:
             """,
             (processed,))
         conn.commit()
+    except psycopg.OperationalError:
+        _connections.pop("heartbeat", None)
+        logger.exception(
+            "heartbeat failed — connection dropped, will reconnect next tick")
     except Exception:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         logger.exception("heartbeat failed")
 
 
@@ -112,23 +149,20 @@ def main() -> None:
     once = "--once" in sys.argv
     interval = settings.worker_poll_interval_seconds
     logger.info("workers starting (once=%s, poll=%ss)", once, interval)
+    backoff = interval
     while True:
         try:
-            with psycopg.connect(
-                    settings.db_dsn, autocommit=False,
-                    connect_timeout=10) as conn:
-                while True:
-                    tick(conn)
-                    if once:
-                        return
-                    time.sleep(interval)
-        except psycopg.OperationalError:
-            # DB restart/failover — drop the dead connection and
-            # re-enter; processors resume from durable outbox state.
-            logger.exception("db connection lost; reconnecting")
+            tick(settings.db_dsn)
+            backoff = interval
+            if once:
+                return
+            time.sleep(interval)
+        except Exception:
+            logger.exception("tick loop error; retrying in %ss", backoff)
             if once:
                 raise
-            time.sleep(interval)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 30)
 
 
 if __name__ == "__main__":

@@ -67,13 +67,14 @@ async def resolve_or_provision_principal(
             """
             INSERT INTO g1.tenant_memberships
                 (membership_id, tenant_id, principal_id, role, state)
-            VALUES (%s, %s, %s, 'member', 'active')
+            VALUES (%s, %s, %s, %s, 'active')
             ON CONFLICT (tenant_id, principal_id) DO NOTHING
             """,
             (
                 f"membership.{secrets.token_urlsafe(16)}",
                 settings.dev_tenant_id,
                 principal_id,
+                settings.dev_jit_role,
             ),
         )
     return {
