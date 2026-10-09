@@ -16,14 +16,14 @@ router = APIRouter(prefix="/api/v1/kb", tags=["kb"])
 
 
 def _require_tenant(request: Request) -> str:
-    tid = request.state.jlmirror_context.get("tenant_id")
+    tid = (getattr(request.state, "jlmirror_context", None) or {}).get("tenant_id")
     if not tid:
         raise HTTPException(status_code=403, detail="tenant context required")
     return tid
 
 
 def _require_principal(request: Request) -> str:
-    return request.state.jlmirror_context.get("principal_id", "system")
+    return (getattr(request.state, "jlmirror_context", None) or {}).get("principal_id", "system")
 
 
 def _slugify(name: str) -> str:

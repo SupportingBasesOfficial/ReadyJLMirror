@@ -94,7 +94,7 @@ async def list_msp_clients(request: Request) -> JSONResponse:
     Excludes the principal's own bound tenant (own infra is shown in NOC).
     Results are fetched in parallel — one DB round-trip per client.
     """
-    ctx = request.state.jlmirror_context
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
     principal_id = ctx.get("principal_id")
     own_tenant   = ctx.get("tenant_id")
 
@@ -124,7 +124,7 @@ async def list_msp_clients(request: Request) -> JSONResponse:
 @router.get("/clients/{client_tenant_id}/detail")
 async def get_client_detail(client_tenant_id: str, request: Request) -> JSONResponse:
     """Return recent active alerts for a specific managed client tenant."""
-    ctx = request.state.jlmirror_context
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
     principal_id = ctx.get("principal_id")
     own_tenant = ctx.get("tenant_id")
 
