@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -44,6 +45,11 @@ from bff.sessions import PgSessionStore, digest_handle, digest_token
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=settings.log_level)
+
+# Shell index.html cached in memory — nonce is injected per-request at serve time.
+# The process restarts on file change in development (reload=True in uvicorn),
+# so simple module-level caching requires no invalidation logic.
+_INDEX_CACHE: str | None = None
 
 SESSION_COOKIE = "jl_session"
 CSRF_COOKIE = "jl_csrf"
@@ -109,22 +115,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: StarletteRequest, call_next):
+        # Nonce must be generated BEFORE call_next so the route handler
+        # can read request.state.nonce when injecting it into HTML.
+        nonce = secrets.token_urlsafe(16)
+        request.state.nonce = nonce
+
         response = await call_next(request)
+
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        # Lock down browser features the BFF+shell never use.
         response.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=(), "
             "payment=(), usb=(), interest-cohort=()"
         )
+        # strict-dynamic lets nonced entry-point scripts load further chunks
+        # (Vite lazy routes) without listing each hash individually.
+        response.headers["Content-Security-Policy"] = (
+            f"default-src 'self'; "
+            f"script-src 'nonce-{nonce}' 'strict-dynamic'; "
+            f"style-src 'self' 'unsafe-inline'; "
+            f"img-src 'self' data:; "
+            f"font-src 'self' data:; "
+            f"connect-src 'self'; "
+            f"object-src 'none'; "
+            f"base-uri 'self'; "
+            f"frame-ancestors 'none';"
+        )
         # HSTS: only meaningful when TLS is active (cookie_secure is the proxy).
-        # min-age=15768000 (≈6 months); no includeSubDomains to avoid blast radius
-        # on shared parent domains during rollout.
+        # max-age=15768000 (≈6 months); no includeSubDomains during staged rollout.
         if settings.cookie_secure:
-            response.headers["Strict-Transport-Security"] = (
-                "max-age=15768000"
-            )
+            response.headers["Strict-Transport-Security"] = "max-age=15768000"
         return response
 
 
@@ -1348,7 +1369,7 @@ async def public_status_json(slug: str) -> JSONResponse:
 
 
 @app.get("/status/{slug}", include_in_schema=False)
-async def public_status_page(slug: str) -> Response:
+async def public_status_page(slug: str, request: Request) -> Response:
     """Serve the public status page HTML without authentication."""
     try:
         async with db_connection() as conn:
@@ -1366,6 +1387,10 @@ async def public_status_page(slug: str) -> Response:
     import html as _html
     safe_name = _html.escape(str(row[0]))
     rendered = _STATUS_PAGE_HTML.replace("{{TENANT_NAME}}", safe_name)
+    # Status page has inline JS — inject the per-request nonce so the CSP
+    # set by SecurityHeadersMiddleware allows it to execute.
+    nonce = request.state.nonce
+    rendered = re.sub(r"<script(\s|>)", f'<script nonce="{nonce}"\\1', rendered)
     return Response(content=rendered, media_type="text/html",
                     headers={"Cache-Control": "no-cache"})
 
@@ -1384,13 +1409,21 @@ async def shell_cache_control(request: Request, call_next):
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
-async def spa_catch_all(full_path: str) -> Response:
+async def spa_catch_all(request: Request, full_path: str) -> Response:
     """Serve static asset if it exists, otherwise return index.html for SPA routing."""
+    global _INDEX_CACHE
     candidate = (SHELL_DIR / full_path).resolve()
     if candidate.is_file() and candidate.is_relative_to(SHELL_DIR.resolve()):
         return FileResponse(candidate)
-    index = SHELL_DIR / "index.html"
-    return FileResponse(index, headers={"Cache-Control": "no-cache"})
+    # Serve the SPA shell with nonce injected into every <script> tag so the
+    # Content-Security-Policy (set by SecurityHeadersMiddleware) allows them.
+    nonce = request.state.nonce
+    if _INDEX_CACHE is None:
+        index = SHELL_DIR / "index.html"
+        _INDEX_CACHE = index.read_text(encoding="utf-8")
+    html = re.sub(r"<script(\s|>)", f'<script nonce="{nonce}"\\1', _INDEX_CACHE)
+    return Response(content=html, media_type="text/html",
+                    headers={"Cache-Control": "no-cache"})
 
 
 app.mount("/", StaticFiles(directory=SHELL_DIR, html=True), name="shell")

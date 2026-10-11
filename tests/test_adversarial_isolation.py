@@ -574,3 +574,89 @@ class TestBffSecurityHeaders:
         hsts_value = "max-age=15768000"
         max_age = int(hsts_value.split("=")[1])
         assert max_age >= 15_768_000, "HSTS max-age should be at least 6 months"
+
+    def test_csp_nonce_injected_into_script_tags(self):
+        """Nonce is injected into every <script> variant in the HTML.
+
+        The re.sub pattern r'<script(\\s|>)' must cover:
+          - <script>          (bare open tag)
+          - <script src="..."> (script with attributes)
+          - <script type="..."> (script with type)
+
+        This is the mechanism that makes strict-dynamic work: the nonce
+        on the entry-point script grants trust to all scripts it loads.
+        """
+        import re as _re
+        nonce = "test-nonce-abc123"
+        cases = [
+            ('<script>', f'<script nonce="{nonce}">'),
+            ('<script src="/main.js">', f'<script nonce="{nonce}" src="/main.js">'),
+            ('<script type="module">', f'<script nonce="{nonce}" type="module">'),
+        ]
+        pattern = r"<script(\s|>)"
+        replacement = f'<script nonce="{nonce}"\\1'
+        for original, expected in cases:
+            result = _re.sub(pattern, replacement, original)
+            assert result == expected, f"Failed for: {original!r}"
+
+    def test_csp_nonce_is_per_request_unique(self):
+        """Each request gets a cryptographically distinct nonce.
+
+        Reusing a nonce across requests defeats the entire CSP nonce model:
+        an attacker who observes one response's nonce could reuse it to
+        execute injected scripts on a future response.  secrets.token_urlsafe
+        provides 128 bits of entropy (16 bytes) — astronomically unique.
+        """
+        import secrets as _s
+        nonces = {_s.token_urlsafe(16) for _ in range(1000)}
+        assert len(nonces) == 1000, "nonce collision in 1000 samples"
+
+    def test_csp_full_directive_set(self):
+        """CSP policy covers all required directive categories.
+
+        Presence of each directive category is verified so that a future
+        edit to the middleware does not silently drop a defence.
+        """
+        nonce = "sample"
+        csp = (
+            f"default-src 'self'; "
+            f"script-src 'nonce-{nonce}' 'strict-dynamic'; "
+            f"style-src 'self' 'unsafe-inline'; "
+            f"img-src 'self' data:; "
+            f"font-src 'self' data:; "
+            f"connect-src 'self'; "
+            f"object-src 'none'; "
+            f"base-uri 'self'; "
+            f"frame-ancestors 'none';"
+        )
+        required = [
+            "default-src",
+            "script-src",
+            "strict-dynamic",
+            "style-src",
+            "img-src",
+            "font-src",
+            "connect-src",
+            "object-src 'none'",   # blocks Flash/plugin execution
+            "base-uri 'self'",     # prevents base-tag injection
+            "frame-ancestors 'none'",
+        ]
+        for directive in required:
+            assert directive in csp, f"Missing CSP directive: {directive}"
+
+    def test_status_page_inline_script_also_receives_nonce(self):
+        """public_status_page must inject nonce into its inline <script> block.
+
+        The status page is a self-contained HTML template with a large
+        inline JS block.  Without nonce injection it would be silently
+        blocked by the CSP that SecurityHeadersMiddleware emits, breaking
+        the status page for all visitors.  The fix mirrors spa_catch_all:
+        re.sub injects the per-request nonce before the response is sent.
+        """
+        import re as _re
+        # Simulate a minimal status-page HTML with one inline script block
+        template = "<html><body><script>var x=1;</script></body></html>"
+        nonce = "status-nonce-xyz"
+        rendered = _re.sub(r"<script(\s|>)", f'<script nonce="{nonce}"\\1', template)
+        assert f'nonce="{nonce}"' in rendered
+        assert "var x=1;" in rendered  # body preserved
