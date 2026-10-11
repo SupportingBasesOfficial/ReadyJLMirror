@@ -133,6 +133,9 @@ def main() -> None:
                                   migration_count > 0,
                                   f"{migration_count} rows in _migrations"))
 
+            # worker_heartbeat.tenant_id = 'system' is outside any app
+            # tenant scope, so the app role needs the GUC set to read it.
+            conn.execute("SET jlmirror.tenant_id = 'system'")
             cur = conn.execute(
                 """
                 SELECT count(*) FROM monitoring.worker_heartbeat
@@ -140,6 +143,7 @@ def main() -> None:
                 """
             )
             heartbeat_alive = cur.fetchone()[0] > 0
+            conn.execute("RESET jlmirror.tenant_id")
             results.append(_check("Worker heartbeat alive (last 120 s)",
                                   heartbeat_alive))
 
