@@ -8,6 +8,9 @@ from pathlib import Path
 # settings singleton reads env once at first import.
 os.environ.setdefault("APP_ENVIRONMENT", "development")
 os.environ.setdefault("DEV_AUTH_BYPASS", "true")
+# TestClient sends HTTP (not HTTPS); Secure cookies are silently dropped by
+# httpx, breaking session resolution.  Force insecure cookies in tests only.
+os.environ.setdefault("COOKIE_SECURE", "false")
 # Fake provider hosts are unresolvable/offline — skip the DNS screen in
 # unit tests (the screen itself is covered by dedicated tests).
 os.environ.setdefault("EGRESS_ALLOW_PRIVATE_IPS", "true")

@@ -97,7 +97,7 @@ def test_logout_retires_session(client):
     client.post("/api/tenant/select",
                 json={"tenant_id": "tenant:test"}, headers=_csrf(client))
 
-    r = client.post("/auth/logout", follow_redirects=False)
+    r = client.post("/auth/logout", follow_redirects=False, headers=_csrf(client))
     assert r.status_code == 302
 
     # Cookies cleared server-side too: session must be retired
