@@ -248,7 +248,7 @@ services:
       DB_PORT: "5432"
       DB_NAME: jlmirror
       DB_USER: jlmirror_worker
-      DB_PASSWORD: ${DB_PASSWORD:-jlmirror_dev}
+      DB_PASSWORD: ${WORKER_DB_PASSWORD:-jlmirror_dev}
       CREDENTIALS_DIR: /run/secret-bindings
       SECRETS_DIR: /run/secrets
       # Dev webhook: real HTTP delivery to the API sink — leave
@@ -302,7 +302,7 @@ services:
       # Durable heartbeat written each tick — a wedged loop stops
       # beating even while the process stays alive.
       test: ["CMD-SHELL",
-             "python -c \"import os,psycopg,sys; sd=os.environ.get('SECRETS_DIR','/run/secrets'); pf=os.path.join(sd,'db_password'); pwd=open(pf).read().strip() if os.path.exists(pf) else os.environ.get('DB_PASSWORD','jlmirror_dev'); c=psycopg.connect(host=os.environ['DB_HOST'],port=int(os.environ['DB_PORT']),dbname=os.environ['DB_NAME'],user=os.environ['DB_USER'],password=pwd,connect_timeout=5); r=c.execute(\\\"SELECT count(*) FROM monitoring.worker_heartbeat WHERE last_seen_at > now() - interval '120 seconds'\\\").fetchone(); sys.exit(0 if r and r[0]>0 else 1)\""]
+             "python -c \"import os,psycopg,sys; sd=os.environ.get('SECRETS_DIR','/run/secrets'); u=os.environ.get('DB_USER','jlmirror_app'); pf_u=os.path.join(sd,f'db_password_{u}'); pf=os.path.join(sd,'db_password'); pwd=open(pf_u).read().strip() if os.path.exists(pf_u) else (open(pf).read().strip() if os.path.exists(pf) else os.environ.get('DB_PASSWORD','jlmirror_dev')); c=psycopg.connect(host=os.environ['DB_HOST'],port=int(os.environ['DB_PORT']),dbname=os.environ['DB_NAME'],user=u,password=pwd,connect_timeout=5); r=c.execute(\\\"SELECT count(*) FROM monitoring.worker_heartbeat WHERE last_seen_at > now() - interval '120 seconds'\\\").fetchone(); sys.exit(0 if r and r[0]>0 else 1)\""]
       interval: 30s
       timeout: 10s
       retries: 3

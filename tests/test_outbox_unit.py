@@ -8,6 +8,7 @@ Covers the dispatch state machine on a fake psycopg connection:
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 
 import workers.outbox_dispatcher as disp
 
@@ -43,6 +44,14 @@ class _FakeConn:
 
     def commit(self):
         self.commits += 1
+
+    def rollback(self):
+        pass
+
+    @contextmanager
+    def transaction(self):
+        """Passthrough savepoint for unit tests — no real DB."""
+        yield
 
 
 def _row(record_id=1, attempts=0):
