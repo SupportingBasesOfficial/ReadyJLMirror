@@ -595,6 +595,20 @@ async def proxy_to_api(request: Request, path: str) -> Response:
     digest = session["handle_digest"]
     tenant = session["bound_tenant_id"]
     corr = telemetry.extract_correlation_id(request.headers)
+
+    # Re-check membership on every proxied request.  Session bind is
+    # done once at POST /api/tenant/select, but membership can be
+    # revoked after that point.  Without this guard a principal whose
+    # membership was revoked would continue reaching data endpoints
+    # until their session cookie expired.
+    if tenant:
+        async with db_connection() as conn:
+            membership = await check_membership(
+                conn, session["principal_id"], tenant)
+        if membership is None:
+            return JSONResponse({"state": "forbidden",
+                                 "reason": "membership_revoked"},
+                                status_code=status.HTTP_403_FORBIDDEN)
     signature = _sign_internal_context(
         session["principal_id"], tenant, digest, ts, corr
     )

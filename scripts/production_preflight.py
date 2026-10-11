@@ -94,6 +94,20 @@ def main() -> None:
                           db_user not in ("jlmirror_owner", "postgres", ""),
                           db_user or "unset"))
 
+    session_secret = os.environ.get("SESSION_SECRET", "")
+    results.append(_check("SESSION_SECRET overridden",
+                          bool(session_secret)
+                          and session_secret not in (
+                              "dev-session-secret-change-me",
+                              "changeme", "secret", ""),
+                          "still default" if not session_secret else "ok"))
+
+    bao_addr = os.environ.get("BAO_ADDR", "")
+    results.append(_check("BAO_ADDR set (OpenBao required for Zabbix creds)",
+                          bool(bao_addr),
+                          "credential fallback to env vars is not acceptable "
+                          "in production"))
+
     # ------------------------------------------------------------------
     # Data plane
     # ------------------------------------------------------------------
@@ -128,6 +142,22 @@ def main() -> None:
             results.append(_check("Worker heartbeat alive (last 120 s)",
                                   heartbeat_alive))
 
+            # RLS sanity: app role without GUC must see zero monitoring rows.
+            # A failure here means RLS is not enforced — critical pre-launch
+            # blocker.
+            try:
+                conn.execute("RESET jlmirror.tenant_id")
+                cur = conn.execute(
+                    "SELECT count(*) FROM monitoring.monitoring_source")
+                rls_count = cur.fetchone()[0]
+                results.append(_check("RLS enforced: no GUC → 0 rows",
+                                      rls_count == 0,
+                                      f"saw {rls_count} rows without tenant "
+                                      f"GUC — RLS may be disabled"))
+            except Exception as rls_exc:
+                results.append(_check("RLS enforced: no GUC → 0 rows",
+                                      False, str(rls_exc)))
+
     except ImportError:
         results.append(_check("DB reachable", False,
                               "psycopg not installed"))
@@ -142,10 +172,6 @@ def main() -> None:
         _warn("ANTHROPIC_API_KEY not set — AIOps will be disabled")
     else:
         print("  [INFO] ANTHROPIC_API_KEY set — AIOps enabled")
-
-    bao_addr = os.environ.get("BAO_ADDR", "")
-    if not bao_addr:
-        _warn("BAO_ADDR not set — OpenBao secret resolution disabled")
 
     # ------------------------------------------------------------------
     # Summary

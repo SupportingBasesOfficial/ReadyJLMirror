@@ -113,7 +113,16 @@ async def db_tenant_connection(tenant_id: str) -> AsyncIterator[AsyncConnection]
                 await conn.execute(
                     "SELECT set_config('jlmirror.tenant_id', '', false)")
             except Exception:
-                pass
+                # Cleanup failure means this connection carries a stale tenant
+                # GUC.  Closing it forces the pool to discard it and open a
+                # fresh connection for the next borrower — no cross-tenant leak.
+                logger.error(
+                    "GUC cleanup failed; closing connection to prevent tenant leak",
+                    exc_info=True)
+                try:
+                    await conn.close()
+                except Exception:
+                    pass
 
 
 @asynccontextmanager
