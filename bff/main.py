@@ -113,6 +113,18 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # Lock down browser features the BFF+shell never use.
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=(), "
+            "payment=(), usb=(), interest-cohort=()"
+        )
+        # HSTS: only meaningful when TLS is active (cookie_secure is the proxy).
+        # min-age=15768000 (≈6 months); no includeSubDomains to avoid blast radius
+        # on shared parent domains during rollout.
+        if settings.cookie_secure:
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=15768000"
+            )
         return response
 
 

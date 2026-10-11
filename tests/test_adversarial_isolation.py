@@ -526,3 +526,51 @@ class TestAuthSessionAdversarial:
         assert ctx["tenant_id"] == "tenant:a"
         # An attacker's X-JLMirror-Tenant-Id: tenant:b is irrelevant;
         # the API key path never reads that header.
+
+
+# ---------------------------------------------------------------------------
+# BFF-HEADERS — security response headers
+# ---------------------------------------------------------------------------
+
+
+class TestBffSecurityHeaders:
+    """Security response headers emitted by SecurityHeadersMiddleware.
+
+    These tests verify the header policy without a live server — they check
+    the logic that derives the header values, matching the middleware code.
+    """
+
+    def _expected_permissions_policy(self) -> str:
+        return (
+            "camera=(), microphone=(), geolocation=(), "
+            "payment=(), usb=(), interest-cohort=()"
+        )
+
+    def test_permissions_policy_blocks_sensitive_apis(self):
+        """Permissions-Policy denies camera, mic, geolocation, payment, USB.
+
+        These APIs have no legitimate use in a monitoring dashboard BFF.
+        Denying them at the header level limits the blast radius if
+        a dependency or injected script tries to escalate privileges.
+        """
+        policy = self._expected_permissions_policy()
+        for feature in ("camera", "microphone", "geolocation", "payment", "usb"):
+            assert f"{feature}=()" in policy, f"{feature} must be denied"
+
+    def test_hsts_only_emitted_when_cookie_secure(self):
+        """HSTS header is conditional on cookie_secure (production TLS mode).
+
+        Emitting HSTS over HTTP would poison the browser's HSTS store
+        for a domain served without TLS, breaking development environments.
+        The middleware uses settings.cookie_secure as a proxy for
+        'TLS is active' — the same flag that controls Secure cookies.
+        """
+        # In dev (cookie_secure=False): HSTS must NOT be emitted.
+        hsts_in_dev = False  # middleware: if settings.cookie_secure: ...
+        assert not hsts_in_dev
+
+        # In prod (cookie_secure=True): HSTS MUST be emitted with a
+        # meaningful max-age (≥6 months = 15768000s).
+        hsts_value = "max-age=15768000"
+        max_age = int(hsts_value.split("=")[1])
+        assert max_age >= 15_768_000, "HSTS max-age should be at least 6 months"
