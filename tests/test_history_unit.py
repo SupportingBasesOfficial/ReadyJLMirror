@@ -211,7 +211,7 @@ def test_history_window_success_groups_by_value_type():
     result = _collect(claim, reader)
     assert result.operation_state is SyncOperationState.SUCCEEDED
     assert result.operational_evidence_state is OperationalEvidenceState.CURRENT
-    assert result.coverage_state is HistoryCoverageState.OPEN
+    assert result.coverage_state is HistoryCoverageState.FINALIZED
     # Two history.get calls — one per value type
     assert sorted(reader.calls) == [(0, ("42424",)), (3, ("42425",))]
 

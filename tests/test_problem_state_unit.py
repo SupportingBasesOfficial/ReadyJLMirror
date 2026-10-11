@@ -124,7 +124,7 @@ def test_read_recovery_events_binds_r_eventid():
     assert result[0].clock == 1700003600
 
 
-def test_read_trigger_associations_first_host():
+def test_read_trigger_associations_all_hosts():
     client = ZabbixClient()
     rows = [
         {"triggerid": "42", "hosts": [{"hostid": "10084"}]},
@@ -137,7 +137,7 @@ def test_read_trigger_associations_first_host():
         mock_client.post.return_value = _rpc_response(rows)
         pairs = client.read_trigger_associations(
             _endpoint(), _credential(), max_rows=100)
-    assert pairs == [("42", "10084"), ("44", "10085")]
+    assert pairs == [("42", "10084"), ("44", "10085"), ("44", "10086")]
 
 
 # ---------------------------------------------------------------------------
