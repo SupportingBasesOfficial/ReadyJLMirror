@@ -16,6 +16,7 @@ import hmac
 import logging
 import os
 import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -49,6 +50,36 @@ CSRF_COOKIE = "jl_csrf"
 ID_TOKEN_COOKIE = "jl_id_hint"
 CSRF_HEADER = "x-csrf-token"
 SHELL_DIR = Path(__file__).resolve().parent / "shell"
+
+# Membership revocation cache — eliminates a DB round-trip on every proxied
+# request while still enforcing revocations within the TTL window.
+# Single-process cache; no cross-replica invalidation needed because a 10s
+# grace period is within industry-standard token/session staleness bounds.
+_MEMBERSHIP_CACHE_TTL = 10  # seconds
+_membership_cache: dict[tuple[str, str], tuple[Optional[dict], float]] = {}
+
+
+def _prune_membership_cache() -> None:
+    now = time.monotonic()
+    stale = [k for k, (_, exp) in _membership_cache.items() if now >= exp]
+    for k in stale:
+        del _membership_cache[k]
+
+
+async def _check_membership_cached(principal_id: str, tenant_id: str) -> Optional[dict]:
+    now = time.monotonic()
+    key = (principal_id, tenant_id)
+    entry = _membership_cache.get(key)
+    if entry is not None:
+        result, expire = entry
+        if now < expire:
+            return result
+    async with db_connection() as conn:
+        result = await check_membership(conn, principal_id, tenant_id)
+    _membership_cache[key] = (result, now + _MEMBERSHIP_CACHE_TTL)
+    if len(_membership_cache) > 2000:
+        _prune_membership_cache()
+    return result
 
 
 @asynccontextmanager
@@ -600,11 +631,11 @@ async def proxy_to_api(request: Request, path: str) -> Response:
     # done once at POST /api/tenant/select, but membership can be
     # revoked after that point.  Without this guard a principal whose
     # membership was revoked would continue reaching data endpoints
-    # until their session cookie expired.
+    # until their session cookie expired.  The cache reduces DB pressure
+    # while bounding the revocation grace period to _MEMBERSHIP_CACHE_TTL.
     if tenant:
-        async with db_connection() as conn:
-            membership = await check_membership(
-                conn, session["principal_id"], tenant)
+        membership = await _check_membership_cached(
+            session["principal_id"], tenant)
         if membership is None:
             return JSONResponse({"state": "forbidden",
                                  "reason": "membership_revoked"},
