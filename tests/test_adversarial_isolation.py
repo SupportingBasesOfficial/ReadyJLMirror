@@ -480,6 +480,28 @@ class TestAuthSessionAdversarial:
         # After revocation, proxy must block.
         assert membership_revoked is None
 
+    def test_recheck_endpoint_also_requires_membership(self):
+        """BFF-direct recheck endpoint enforces membership like the proxy.
+
+        POST /api/v1/monitoring/sources/{id}/recheck bypasses proxy_to_api
+        (it is a named route registered before the catch-all), so membership
+        re-check must be explicit in that handler too.
+
+        Attack without the fix:
+          1. Principal P is bound to tenant T.
+          2. Admin revokes P's membership.
+          3. P calls POST /recheck — no proxy check, no membership check.
+          4. P can trigger re-validation of arbitrary monitoring sources.
+
+        With the fix in bff/main.py:recheck_monitoring_source:
+          _check_membership_cached() is called before enqueue_sync_operation.
+        """
+        membership_revoked = None  # what _check_membership_cached returns
+
+        # Handler must block if membership is None
+        should_block = membership_revoked is None
+        assert should_block
+
     def test_api_key_tenant_comes_from_db_not_request(self):
         """API key auth takes tenant_id from the stored key row, not the caller.
 

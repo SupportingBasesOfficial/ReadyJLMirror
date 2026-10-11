@@ -565,6 +565,9 @@ async def recheck_monitoring_source(source_id: str, request: Request) -> JSONRes
     tenant_id = session.get("bound_tenant_id")
     if not tenant_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "no tenant bound")
+    membership = await _check_membership_cached(session["principal_id"], tenant_id)
+    if membership is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "membership_revoked")
     from shared.monitoring_repo import enqueue_sync_operation
     async with db_tenant_connection(tenant_id) as conn:
         try:
