@@ -70,6 +70,7 @@ def main() -> None:
     db_password = os.environ.get("DB_PASSWORD", "")
     results.append(_check("DB_PASSWORD not default",
                           bool(db_password) and db_password != "jlmirror_dev",
+                          "not set" if not db_password else
                           "still set to jlmirror_dev" if db_password == "jlmirror_dev" else "ok"))
 
     smtp_host = os.environ.get("SMTP_HOST", "")
