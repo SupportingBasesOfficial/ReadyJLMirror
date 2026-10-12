@@ -3008,21 +3008,22 @@ class PgProblemStateRepository:
                 source_instance_generation, trigger_ref, resource_id,
             ))
         if params_list:
-            self._conn.executemany(
-                """
-                INSERT INTO monitoring.monitoring_trigger_binding
-                    (tenant_id, monitoring_source_id,
-                     source_instance_generation, provider_trigger_ref,
-                     monitoring_resource_id)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (tenant_id, monitoring_source_id,
-                             source_instance_generation, provider_trigger_ref)
-                DO UPDATE SET monitoring_resource_id =
-                                  EXCLUDED.monitoring_resource_id,
-                              updated_at = transaction_timestamp()
-                """,
-                params_list,
-            )
+            with self._conn.cursor() as _cur:
+                _cur.executemany(
+                    """
+                    INSERT INTO monitoring.monitoring_trigger_binding
+                        (tenant_id, monitoring_source_id,
+                         source_instance_generation, provider_trigger_ref,
+                         monitoring_resource_id)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (tenant_id, monitoring_source_id,
+                                 source_instance_generation, provider_trigger_ref)
+                    DO UPDATE SET monitoring_resource_id =
+                                      EXCLUDED.monitoring_resource_id,
+                                  updated_at = transaction_timestamp()
+                    """,
+                    params_list,
+                )
         self._conn.commit()
         return len(params_list)
 
