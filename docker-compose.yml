@@ -222,7 +222,8 @@ services:
       - ./secrets:/run/secrets:ro
       # Dev hot-reload: mount shell assets so npm run build + restart bff
       # is enough — no image rebuild needed after frontend changes.
-      - ./bff/shell:/app/bff/shell:ro
+      # NOTE: SHELL_DIR = Path(__file__).parent / "shell" resolves to /srv/bff/shell
+      - ./bff/shell:/srv/bff/shell:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
