@@ -169,11 +169,10 @@ services:
     volumes:
       - ./secrets:/run/secrets:ro
       - ./secrets-tokens:/run/secret-bindings
-      # Dev hot-reload: mount Python source so docker restart api picks up
-      # code changes without an image rebuild.
-      - ./api:/app/api:ro
-      - ./shared:/app/shared:ro
-      - ./workers:/app/workers:ro
+      # Dev hot-reload: mount Python source — watchfiles picks up changes live.
+      - ./api:/srv/api:ro
+      - ./shared:/srv/shared:ro
+      - ./workers:/srv/workers:ro
     healthcheck:
       test: ["CMD-SHELL",
              "python -c \"import os,httpx,sys; mtls=os.environ.get('API_MTLS'); port=os.environ.get('API_PORT','8000'); kw={'cert':('/run/secrets/tls/bff-cert.pem','/run/secrets/tls/bff-key.pem'),'verify':'/run/secrets/tls/ca.pem'} if mtls else {}; scheme='https' if mtls else 'http'; sys.exit(0 if httpx.get(f'{scheme}://localhost:{port}/health',timeout=3,**kw).status_code==200 else 1)\""]
@@ -220,10 +219,10 @@ services:
       TLS_KEY_FILE: ${TLS_KEY_FILE:-}
     volumes:
       - ./secrets:/run/secrets:ro
-      # Dev hot-reload: mount shell assets so npm run build + restart bff
-      # is enough — no image rebuild needed after frontend changes.
-      # NOTE: SHELL_DIR = Path(__file__).parent / "shell" resolves to /srv/bff/shell
-      - ./bff/shell:/srv/bff/shell:ro
+      # Dev hot-reload: Python + shell assets mounted live — watchfiles picks
+      # up .py changes; npm run build updates the frontend without image rebuild.
+      - ./bff:/srv/bff:ro
+      - ./shared:/srv/shared:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

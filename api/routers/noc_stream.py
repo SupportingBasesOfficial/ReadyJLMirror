@@ -50,7 +50,7 @@ async def _snapshot(tenant: str) -> dict:
         scur = await conn.execute(
             """
             SELECT monitoring_source_id, display_name, operational_evidence_state
-              FROM monitoring.source
+              FROM monitoring.monitoring_source
              ORDER BY display_name
             """,
         )
