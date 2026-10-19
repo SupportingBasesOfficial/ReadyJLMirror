@@ -11,7 +11,8 @@ import {
   Webhook, Server, Wrench, Settings2,
   MessageSquare, PhoneCall, Users, UserPlus, KeyRound,
   ScrollText, BookOpen, ChevronLeft, ChevronRight,
-  ChevronDown, LogOut, Building2, ShieldCheck,
+  ChevronDown, LogOut, Building2, ShieldCheck, Network, Radio, CalendarClock,
+  LayoutGrid, Globe,
 } from "lucide-react";
 import { api, logout } from "@/api/client";
 import { AlertsPage } from "@/pages/AlertsPage";
@@ -27,6 +28,9 @@ import { TeamPage } from "@/pages/TeamPage";
 import { MaintenancePage } from "@/pages/MaintenancePage";
 import { NotificationChannelsPage } from "@/pages/NotificationChannelsPage";
 import { EscalationPage } from "@/pages/EscalationPage";
+import { SyntheticPage } from "@/pages/SyntheticPage";
+import { OncallPage } from "@/pages/OncallPage";
+import { CustomDashboardPage } from "@/pages/CustomDashboardPage";
 import { OnboardingPage } from "@/pages/OnboardingPage";
 import { ApiKeysPage } from "@/pages/ApiKeysPage";
 import { ITSMPage } from "@/pages/ITSMPage";
@@ -36,10 +40,12 @@ import { ReportsPage } from "@/pages/ReportsPage";
 import { AlertmanagerPage } from "@/pages/AlertmanagerPage";
 import { InfraPage } from "@/pages/InfraPage";
 import { KnowledgeBasePage } from "@/pages/KnowledgeBasePage";
-import { IncidentResponsePage } from "@/pages/IncidentResponsePage";
+import { IncidentsPage } from "@/pages/IncidentsPage";
 import { MSPOverviewPage } from "@/pages/MSPOverviewPage";
 import { UsersAdminPage } from "@/pages/UsersAdminPage";
 import { PlatformAdminPage } from "@/pages/PlatformAdminPage";
+import { TeiaPage } from "@/pages/TeiaPage";
+import { StatusPageAdminPage } from "@/pages/StatusPageAdminPage";
 import { useBranding } from "@/hooks/useBranding";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -68,8 +74,13 @@ const VIEW_TO_PATH: Record<string, string> = {
   audit: "/audit",
   msp: "/msp",
   kb: "/kb",
+  teia: "/teia",
   users: "/admin/users",
   "platform-admin": "/platform-admin",
+  synthetic: "/synthetic",
+  oncall: "/oncall",
+  custom_dashboard: "/dashboard",
+  status_page: "/status-page-admin",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -139,7 +150,7 @@ export function Shell() {
 
   const { data: openIncidentCount } = useQuery({
     queryKey: ["nav-badge-incidents", session?.tenant_id],
-    queryFn: () => api.get<unknown[]>(`/api/v1/alerting/tenants/${session?.tenant_id}/application-error-events`),
+    queryFn: () => api.get<unknown[]>("/api/v1/alerting/incidents?state=open"),
     refetchInterval: 60_000,
     enabled: session?.state === "ready",
     select: (d) => (Array.isArray(d) ? d.length : 0),
@@ -313,6 +324,7 @@ export function Shell() {
       label: "Operações",
       items: [
         { id: "noc", label: "NOC", icon: LayoutDashboard, description: "Painel em tempo real" },
+        { id: "custom_dashboard" as View, label: "Meu Dashboard", icon: LayoutGrid, description: "Dashboard personalizado com widgets" },
         { id: "alerts", label: "Alertas", icon: Bell, description: "Alertas ativos" },
         { id: "incidents", label: "Incidentes", icon: Siren, description: "Gestão de incidentes" },
         { id: "policies", label: "Políticas", icon: Shield, description: "Regras de alerta" },
@@ -339,6 +351,8 @@ export function Shell() {
       items: [
         { id: "monitoring" as View, label: "Monitoramento", icon: Activity, description: "Fontes e integrações" },
         { id: "inventory" as View, label: "Inventário", icon: Package, description: "Hosts e ativos" },
+        { id: "teia" as View, label: "Teia", icon: Network, description: "Mapa relacional do tenant" },
+        { id: "synthetic" as View, label: "Sintético", icon: Radio, description: "Checks HTTP periódicos" },
         ...(has("monitoring:operate") ? [{ id: "alertmanager" as View, label: "Alertmanager", icon: Webhook, description: "Regras Prometheus" }] : []),
       ],
     },
@@ -350,6 +364,7 @@ export function Shell() {
           { id: "maintenance" as View, label: "Manutenção", icon: Wrench, description: "Janelas de manutenção" },
         ] : []),
         { id: "platform" as View, label: "Plataforma", icon: Settings2, description: "Configurações gerais" },
+        { id: "status_page" as View, label: "Página de Status", icon: Globe, description: "Status público do tenant" },
       ],
     },
     ...(has("monitoring:operate") ? [{
@@ -357,6 +372,7 @@ export function Shell() {
       items: [
         { id: "channels" as View, label: "Canais", icon: MessageSquare, description: "Canais de notificação" },
         { id: "escalation" as View, label: "Escalonamento", icon: PhoneCall, description: "Políticas de escalonamento" },
+        { id: "oncall" as View, label: "Plantão", icon: CalendarClock, description: "Escalas de on-call" },
       ],
     }] : []),
     ...((has("tenant:admin") || has("audit:read")) ? [{
@@ -576,18 +592,27 @@ export function Shell() {
             collapsed ? "justify-center" : "",
           ].join(" ")}>
             <div
-              className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold"
+              className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold relative"
               style={{ background: "color-mix(in srgb, var(--brand) 20%, var(--surface-2))", color: "var(--brand)" }}
+              title={s.is_platform_admin ? "Platform Admin" : undefined}
             >
               {initials || "?"}
+              {s.is_platform_admin && (
+                <span style={{
+                  position: "absolute", bottom: -2, right: -2,
+                  width: 8, height: 8, borderRadius: "50%",
+                  background: "var(--brand, #6366f1)",
+                  border: "1.5px solid var(--surface)",
+                }} />
+              )}
             </div>
             {!collapsed && (
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-medium truncate leading-tight" style={{ color: "var(--text)" }}>
-                  {displayName}
+                  {s.display_name || displayName}
                 </div>
                 <div className="text-[10px] truncate leading-tight" style={{ color: "var(--text-dim)" }}>
-                  {s.tenant_id}
+                  {s.is_platform_admin ? "Platform Admin" : (s.email || s.tenant_id)}
                 </div>
               </div>
             )}
@@ -631,6 +656,12 @@ export function Shell() {
             {currentLabel}
           </h1>
           <div className="flex items-center gap-2">
+            {s.is_platform_admin && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                style={{ background: "color-mix(in srgb, var(--brand) 15%, transparent)", color: "var(--brand)", border: "1px solid color-mix(in srgb, var(--brand) 30%, transparent)" }}>
+                Platform Admin
+              </span>
+            )}
             <button
               onClick={() => goTo("alerts")}
               title="Alertas críticos"
@@ -652,27 +683,30 @@ export function Shell() {
               )}
             </button>
             <span className="text-xs px-2 py-0.5 rounded-full border"
-              style={{ color: "var(--text-muted)", borderColor: "var(--border)", background: "var(--surface-2)" }}>
-              {s.tenant_id}
+              title={s.tenant_id}
+              style={{ color: "var(--text-muted)", borderColor: "var(--border)", background: "var(--surface-2)", cursor: "default" }}>
+              {s.tenant?.display_name ?? s.tenant_id}
             </span>
           </div>
         </header>
 
-        {/* MSP back banner */}
+        {/* MSP shortcut banner — shown on MSP's own tenant when not on the MSP overview */}
         {hasMSPClients && view !== "msp" && (
           <div className="flex items-center gap-2 px-4 py-1.5 bg-[var(--surface-2)] border-b border-[var(--border)] text-xs text-[var(--text-muted)]">
-            <span>Visualizando como cliente</span>
+            <span>Você possui {(mspData?.clients?.length ?? 0) === 1 ? "1 cliente gerenciado" : `${mspData?.clients?.length ?? 0} clientes gerenciados`}</span>
             <button
               onClick={() => goTo("msp")}
               className="text-[var(--brand)] hover:underline cursor-pointer font-medium"
             >
-              ← Voltar para MSP
+              Ver painel de clientes →
             </button>
           </div>
         )}
 
         {/* Main content */}
         <main className="flex-1 p-5 overflow-auto min-w-0">
+          {/* key=tenant_id forces full remount on tenant switch — prevents stale data flash */}
+          <div key={s.tenant_id} className="contents">
           {view === "noc" && <NOCDashboard tenantId={s.tenant_id!} />}
           {view === "alerts" && <AlertsPage tenantId={s.tenant_id!} />}
           {view === "monitoring" && <MonitoringPage tenantId={s.tenant_id!} />}
@@ -686,6 +720,9 @@ export function Shell() {
           {view === "maintenance" && <MaintenancePage tenantId={s.tenant_id!} />}
           {view === "channels" && <NotificationChannelsPage tenantId={s.tenant_id!} />}
           {view === "escalation" && <EscalationPage tenantId={s.tenant_id!} />}
+          {view === "synthetic" && <SyntheticPage tenantId={s.tenant_id!} />}
+          {view === "oncall" && <OncallPage tenantId={s.tenant_id!} />}
+          {view === "custom_dashboard" && <CustomDashboardPage tenantId={s.tenant_id!} />}
           {view === "apikeys" && <ApiKeysPage tenantId={s.tenant_id!} />}
           {view === "changes" && <ITSMPage tenantId={s.tenant_id!} />}
           {view === "sla" && <SLAPage tenantId={s.tenant_id!} />}
@@ -693,11 +730,14 @@ export function Shell() {
           {view === "reports" && <ReportsPage tenantId={s.tenant_id!} />}
           {view === "alertmanager" && <AlertmanagerPage tenantId={s.tenant_id!} />}
           {view === "infra" && <InfraPage tenantId={s.tenant_id!} />}
+          {view === "status_page" && <StatusPageAdminPage tenantId={s.tenant_id!} />}
           {view === "kb" && <KnowledgeBasePage tenantId={s.tenant_id!} />}
-          {view === "incidents" && <IncidentResponsePage tenantId={s.tenant_id!} />}
+          {view === "incidents" && <IncidentsPage tenantId={s.tenant_id!} />}
           {view === "msp" && <MSPOverviewPage tenantId={s.tenant_id!} onSelectTenant={handleSelectTenant} />}
           {view === "users" && <UsersAdminPage tenantId={s.tenant_id!} />}
           {view === "platform-admin" && <PlatformAdminPage tenantId={s.tenant_id!} />}
+          {view === "teia" && <TeiaPage tenantId={s.tenant_id!} />}
+          </div>
         </main>
       </div>
     </div>

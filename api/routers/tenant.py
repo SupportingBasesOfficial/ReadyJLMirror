@@ -36,14 +36,17 @@ async def list_members(request: Request) -> list[dict]:
         cur = await conn.execute(
             """
             SELECT m.membership_id, m.principal_id, m.role, m.state,
-                   m.created_at
+                   m.created_at, p.display_name, p.email
               FROM g1.tenant_memberships m
+              JOIN g1.principals p USING (principal_id)
              WHERE m.tenant_id = %s
              ORDER BY m.created_at
             """, (tenant,))
         return [{"membership_id": r[0], "principal_id": r[1],
                  "role": r[2], "state": r[3],
-                 "created_at": r[4].isoformat()}
+                 "created_at": r[4].isoformat(),
+                 "display_name": r[5] or "",
+                 "email": r[6] or ""}
                 for r in await cur.fetchall()]
 
 

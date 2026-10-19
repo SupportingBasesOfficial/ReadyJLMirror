@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
-import { UserPlus, Copy, Check, X, ShieldOff, ShieldCheck, Trash2 } from "lucide-react";
+import { UserPlus, Copy, Check, X, ShieldOff, ShieldCheck, Trash2, KeyRound } from "lucide-react";
 
 interface User {
   principal_id: string;
@@ -36,7 +36,14 @@ function fmt(iso: string | null): string {
 }
 
 function fullName(u: User): string {
-  return [u.first_name, u.last_name].filter(Boolean).join(" ") || u.email;
+  return [u.first_name, u.last_name].filter(Boolean).join(" ") || u.email || u.idp_subject_ref;
+}
+
+function initials(u: User): string {
+  const name = [u.first_name, u.last_name].filter(Boolean).join(" ");
+  if (name) return name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+  if (u.email) return u.email[0].toUpperCase();
+  return "?";
 }
 
 // ── Copy button ─────────────────────────────────────────────────────────────
@@ -341,7 +348,7 @@ function RoleCell({ user }: { user: User }) {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-export function UsersAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
+export function UsersAdminPage({ tenantId }: { tenantId: string }) {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [showInvite, setShowInvite] = useState(false);
@@ -352,7 +359,7 @@ export function UsersAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
   } | null>(null);
 
   const q = useQuery({
-    queryKey: ["admin-users"],
+    queryKey: ["admin-users", tenantId],
     queryFn: () => api.get<User[]>("/api/admin/users"),
     refetchInterval: 60_000,
   });
@@ -385,6 +392,16 @@ export function UsersAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
       toast("Usuário removido", "success");
     },
     onError: (e: Error) => toast(e.message || "Erro na operação", "error"),
+  });
+
+  const resetPwd = useMutation({
+    mutationFn: (u: User) =>
+      api.post<{ temp_password: string }>(`/api/admin/users/${u.principal_id}/reset-password`, {}),
+    onSuccess: (data, u) => {
+      setTempPwd({ email: u.email, pwd: data.temp_password });
+      toast("Senha redefinida", "success");
+    },
+    onError: (e: Error) => toast(e.message || "Erro ao redefinir senha", "error"),
   });
 
   const users = q.data ?? [];
@@ -445,7 +462,12 @@ export function UsersAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
                 {active.map((u) => (
                   <tr key={u.principal_id} className="border-b border-[var(--border)] hover:bg-[var(--surface-2)]">
                     <td className="px-2 py-2 font-medium" style={{ color: "var(--text)" }}>
-                      {fullName(u)}
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-[var(--brand)]/15 flex items-center justify-center text-[10px] font-semibold text-[var(--brand)] flex-shrink-0">
+                          {initials(u)}
+                        </div>
+                        <span>{fullName(u)}</span>
+                      </div>
                     </td>
                     <td className="px-2 py-2 text-[var(--text-muted)] truncate max-w-[200px]">
                       {u.email || <span className="italic">sem email</span>}
@@ -458,6 +480,15 @@ export function UsersAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
                     </td>
                     <td className="px-2 py-2">
                       <div className="flex items-center gap-1 justify-end">
+                        <button
+                          onClick={() => resetPwd.mutate(u)}
+                          disabled={resetPwd.isPending}
+                          className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--brand)]
+                            cursor-pointer transition-colors"
+                          title="Redefinir senha"
+                        >
+                          <KeyRound size={13} />
+                        </button>
                         <button
                           onClick={() => setConfirmAction({ type: "deactivate", user: u })}
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--yellow)]
