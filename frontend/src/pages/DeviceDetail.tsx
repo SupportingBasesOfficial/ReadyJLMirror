@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  LineChart, Line, AreaChart, Area,
-  XAxis, YAxis, Tooltip, Legend,
+  AreaChart, Area,
+  XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
+  ReferenceLine, Brush,
 } from "recharts";
 import { api } from "@/api/client";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -98,7 +99,7 @@ interface HistoryPoint {
 }
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants — palette
 // ---------------------------------------------------------------------------
 
 const PERIODS = [
@@ -109,15 +110,31 @@ const PERIODS = [
   { key: "7d",  label: "7d",  sec: 604_800 },
 ] as const;
 
-type PeriodKey = (typeof PERIODS)[number]["key"];
+type PeriodKey = (typeof PERIODS)[number]["key"] | "custom";
 
-// Patterns used to identify headline metrics for the Overview section.
-// Matches common Zabbix template metric names (case-insensitive).
+interface CustomRange {
+  from: number; // unix seconds
+  till: number;
+}
+
+// Metric accent palette
+const ACCENT = {
+  cpu:    "#60a5fa", // blue-400
+  mem:    "#34d399", // emerald-400
+  disk:   "#fb923c", // orange-400
+  net_in: "#f59e0b", // amber-400  (yellow)
+  net_out:"#a78bfa", // violet-400 (purple)
+  default:"#60a5fa",
+} as const;
+
+type AccentKey = keyof typeof ACCENT;
+
+// Headline metric regexes
 const RX_CPU     = /cpu.*(util|usage|load|percent)/i;
 const RX_MEM     = /mem.*(util|usage|used|available|free|percent)/i;
 const RX_DISK    = /(disk|storage|filesystem|fs).*(util|used|free|space|percent|%)/i;
-const RX_NET_IN  = /interface.*(in|received|rx).*bit|bit.*(receiv|in)\b/i;
-const RX_NET_OUT = /interface.*(out|sent|tx).*bit|bit.*(sent|out)\b/i;
+const RX_NET_IN  = /interface.*(in|received|rx).*bit|bit.*(receiv|in)\b|interface.*bits.*(receiv|incoming|in\b)/i;
+const RX_NET_OUT = /interface.*(out|sent|tx).*bit|bit.*(sent|out)\b|interface.*bits.*(sent|outgoing|out\b)/i;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -149,9 +166,18 @@ function fmtBytes(n: number): string {
   return `${n} B`;
 }
 
+function fmtBits(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)} Gbps`;
+  if (abs >= 1_000_000)     return `${(n / 1_000_000).toFixed(2)} Mbps`;
+  if (abs >= 1_000)         return `${(n / 1_000).toFixed(2)} Kbps`;
+  return `${n} bps`;
+}
+
 function fmtNumber(n: number, rawUnit?: string): string {
   const unit = cleanUnit(rawUnit);
   if (unit === "B") return fmtBytes(n);
+  if (unit === "bps" || rawUnit === "bps") return fmtBits(n);
   const rounded = parseFloat(n.toFixed(2));
   const formatted = rounded.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
   return unit ? `${formatted} ${unit}` : formatted;
@@ -164,6 +190,13 @@ function fmtTick(n: number, rawUnit?: string): string {
     if (abs >= 1_073_741_824) return `${(n / 1_073_741_824).toFixed(1)}G`;
     if (abs >= 1_048_576)     return `${(n / 1_048_576).toFixed(1)}M`;
     if (abs >= 1_024)         return `${(n / 1_024).toFixed(1)}K`;
+    return `${n}`;
+  }
+  if (unit === "bps" || rawUnit === "bps") {
+    const abs = Math.abs(n);
+    if (abs >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}G`;
+    if (abs >= 1_000_000)     return `${(n / 1_000_000).toFixed(1)}M`;
+    if (abs >= 1_000)         return `${(n / 1_000).toFixed(1)}K`;
     return `${n}`;
   }
   if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
@@ -206,12 +239,6 @@ function availVariant(a?: string): "success" | "warning" | "danger" | "muted" {
   return "muted";
 }
 
-function availLabel(a?: string): string {
-  if (a === "available") return "online";
-  if (a === "unavailable") return "offline";
-  return "desconhecido";
-}
-
 function sevVariant(s?: string): "danger" | "warning" | "info" | "muted" {
   if (s === "critical") return "danger";
   if (s === "degraded" || s === "warning") return "warning";
@@ -221,6 +248,21 @@ function sevVariant(s?: string): "danger" | "warning" | "info" | "muted" {
 
 function isNumeric(m: MetricState): boolean {
   return m.value_kind === "number" || m.value_kind === "integer";
+}
+
+function isPercent(unit?: string): boolean {
+  const u = cleanUnit(unit);
+  return u === "%" || u === "percent";
+}
+
+interface Threshold {
+  warning?: number;
+  critical?: number;
+}
+
+function autoThreshold(unit?: string): Threshold | undefined {
+  if (isPercent(unit)) return { warning: 80, critical: 95 };
+  return undefined;
 }
 
 function makeTickFmt(periodSec: number) {
@@ -238,7 +280,7 @@ function makeTickFmt(periodSec: number) {
 function KV({ label, value }: { label: string; value?: React.ReactNode }) {
   if (value === undefined || value === null || value === "") return null;
   return (
-    <div className="flex gap-2 py-1 border-b border-[var(--border)] last:border-0 text-xs">
+    <div className="flex gap-2 py-1.5 border-b border-[var(--border)] last:border-0 text-xs">
       <dt className="w-28 flex-shrink-0 text-[var(--text-muted)]">{label}</dt>
       <dd className="text-[var(--text)] break-all">{value}</dd>
     </div>
@@ -246,28 +288,199 @@ function KV({ label, value }: { label: string; value?: React.ReactNode }) {
 }
 
 // ---------------------------------------------------------------------------
-// Single-metric line chart
+// Period picker (com seleção personalizada de intervalo)
+// ---------------------------------------------------------------------------
+
+function toDatetimeLocal(unix: number): string {
+  const d = new Date(unix * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function PeriodPicker({
+  value, onChange, customRange, onCustomRange,
+}: {
+  value: PeriodKey;
+  onChange: (k: PeriodKey) => void;
+  customRange?: CustomRange;
+  onCustomRange: (r: CustomRange) => void;
+}) {
+  const now = Math.floor(Date.now() / 1000);
+  const defaultFrom = customRange?.from ?? now - 86_400;
+  const defaultTill = customRange?.till ?? now;
+
+  const [draftFrom, setDraftFrom] = useState(toDatetimeLocal(defaultFrom));
+  const [draftTill, setDraftTill] = useState(toDatetimeLocal(defaultTill));
+  const [open, setOpen]           = useState(false);
+
+  function applyCustom() {
+    const from = Math.floor(new Date(draftFrom).getTime() / 1000);
+    const till = Math.floor(new Date(draftTill).getTime() / 1000);
+    if (!from || !till || from >= till) return;
+    onCustomRange({ from, till });
+    onChange("custom");
+    setOpen(false);
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-0.5 relative">
+      <div className="flex items-center gap-0.5 bg-[var(--surface-2)] rounded-lg p-0.5">
+        {PERIODS.map(p => (
+          <button
+            key={p.key}
+            onClick={() => { onChange(p.key); setOpen(false); }}
+            className={[
+              "px-2.5 py-1 rounded-md text-xs font-medium transition-all",
+              value === p.key
+                ? "bg-[var(--surface)] text-[var(--text)] shadow-sm"
+                : "text-[var(--text-muted)] hover:text-[var(--text)]",
+            ].join(" ")}
+          >
+            {p.label}
+          </button>
+        ))}
+        <button
+          onClick={() => setOpen(o => !o)}
+          className={[
+            "px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1",
+            value === "custom" || open
+              ? "bg-[var(--surface)] text-[var(--brand)] shadow-sm"
+              : "text-[var(--text-muted)] hover:text-[var(--text)]",
+          ].join(" ")}
+          title="Selecionar intervalo personalizado"
+        >
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="2" y="2" width="12" height="12" rx="2" />
+            <line x1="5" y1="1" x2="5" y2="4" /><line x1="11" y1="1" x2="11" y2="4" />
+            <line x1="2" y1="6" x2="14" y2="6" />
+          </svg>
+          {value === "custom" ? "Personalizado" : "…"}
+        </button>
+      </div>
+
+      {open && (
+        <div
+          className="absolute top-full right-0 mt-1 z-50 rounded-xl border border-[var(--border)]
+                     bg-[var(--surface)] shadow-xl p-3 flex flex-col gap-2 min-w-[260px]"
+        >
+          <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">
+            Intervalo personalizado
+          </p>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] text-[var(--text-muted)]">De</span>
+            <input
+              type="datetime-local"
+              value={draftFrom}
+              onChange={e => setDraftFrom(e.target.value)}
+              className="text-xs rounded-lg border border-[var(--border)] bg-[var(--surface-2)]
+                         text-[var(--text)] px-2 py-1 outline-none focus:border-[var(--brand)]"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] text-[var(--text-muted)]">Até</span>
+            <input
+              type="datetime-local"
+              value={draftTill}
+              onChange={e => setDraftTill(e.target.value)}
+              className="text-xs rounded-lg border border-[var(--border)] bg-[var(--surface-2)]
+                         text-[var(--text)] px-2 py-1 outline-none focus:border-[var(--brand)]"
+            />
+          </label>
+          <div className="flex gap-2 mt-1">
+            <button
+              onClick={applyCustom}
+              className="flex-1 px-3 py-1.5 rounded-lg text-xs font-semibold
+                         bg-[var(--brand)] text-white hover:opacity-90 transition-opacity"
+            >
+              Aplicar
+            </button>
+            <button
+              onClick={() => setOpen(false)}
+              className="px-3 py-1.5 rounded-lg text-xs border border-[var(--border)]
+                         text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Custom recharts tooltip
+// ---------------------------------------------------------------------------
+
+function ChartTooltip({ active, payload, label, unit, formatter }: {
+  active?: boolean;
+  payload?: { value: number; name?: string; color?: string; dataKey?: string }[];
+  label?: number;
+  unit?: string;
+  formatter?: (v: number, key?: string) => string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{
+      background: "var(--surface)",
+      border: "1px solid var(--border)",
+      borderRadius: 10,
+      padding: "8px 12px",
+      fontSize: 12,
+      boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
+    }}>
+      <p style={{ color: "var(--text-muted)", marginBottom: 6 }}>
+        {label ? new Date(Number(label)).toLocaleString("pt-BR") : ""}
+      </p>
+      {payload.map((item, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: item.color, flexShrink: 0 }} />
+          <span style={{ color: "var(--text)" }}>
+            {formatter
+              ? formatter(Number(item.value), item.dataKey as string)
+              : fmtNumber(Number(item.value), unit)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Single-metric area chart
 // ---------------------------------------------------------------------------
 
 function MetricChart({
-  sourceId, metricId, unit, period,
+  sourceId, metricId, unit, period, accent = "default", height = 180,
+  thresholds, showBrush = false, windowFrom, windowTill,
 }: {
   sourceId: string;
   metricId: string;
   unit?: string;
   period: PeriodKey;
+  accent?: AccentKey;
+  height?: number;
+  thresholds?: Threshold;
+  showBrush?: boolean;
+  windowFrom?: number;
+  windowTill?: number;
 }) {
   const periodSec = PERIODS.find(p => p.key === period)?.sec ?? 86_400;
+  const color = ACCENT[accent];
+  const gradId = `grad-${metricId.replace(/[^a-z0-9]/gi, "")}`;
+
   const q = useQuery({
-    queryKey: ["metric-history", sourceId, metricId, period],
+    queryKey: ["metric-history", sourceId, metricId, period, windowFrom, windowTill],
     queryFn: () => {
-      const till = Math.floor(Date.now() / 1000);
-      const from = till - periodSec;
+      const till = windowTill ?? Math.floor(Date.now() / 1000);
+      const from = windowFrom ?? till - periodSec;
       return api.get<{ items: HistoryPoint[] }>(
         `/api/v1/monitoring/sources/${sourceId}/metrics/${metricId}/history?window_from=${from}&window_till=${till}`,
       );
     },
   });
+
+  const effectivePeriodSec = windowFrom && windowTill ? windowTill - windowFrom : periodSec;
 
   if (q.isLoading) return <div className="flex justify-center py-6"><Spinner className="w-4 h-4" /></div>;
   if (q.isError || !q.data?.items?.length) {
@@ -279,125 +492,246 @@ function MetricChart({
     return <p className="text-xs text-[var(--text-muted)] text-center py-4">Sem valores numéricos.</p>;
   }
 
-  const tickFmt = makeTickFmt(periodSec);
+  const tickFmt = makeTickFmt(effectivePeriodSec);
+  const effectiveHeight = showBrush ? height + 40 : height;
 
   return (
-    <ResponsiveContainer width="100%" height={140}>
-      <AreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
-        <defs>
-          <linearGradient id={`grad-${metricId}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="var(--brand)" stopOpacity={0.25} />
-            <stop offset="95%" stopColor="var(--brand)" stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-        <XAxis dataKey="t" tickFormatter={tickFmt}
-          tick={{ fontSize: 10, fill: "var(--text-muted)" }}
-          tickLine={false} axisLine={false} minTickGap={40} />
-        <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)" }}
-          tickLine={false} axisLine={false} width={42}
-          tickFormatter={(v: number) => fmtTick(v, unit)} />
-        <Tooltip
-          contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
-          labelFormatter={(t) => new Date(Number(t)).toLocaleString("pt-BR")}
-          formatter={(v) => [fmtNumber(Number(v), unit), ""]}
-        />
-        <Area type="monotone" dataKey="v" stroke="var(--brand)"
-          fill={`url(#grad-${metricId})`} dot={false} strokeWidth={1.5} activeDot={{ r: 3 }} />
-      </AreaChart>
-    </ResponsiveContainer>
+    <div>
+      {thresholds && (
+        <div className="flex items-center gap-3 mb-2 text-[10px]">
+          {thresholds.warning !== undefined && (
+            <span className="flex items-center gap-1">
+              <span style={{ width: 18, height: 2, background: "#f59e0b", display: "inline-block", borderRadius: 1 }} />
+              <span className="text-[var(--text-muted)]">Alerta {thresholds.warning}%</span>
+            </span>
+          )}
+          {thresholds.critical !== undefined && (
+            <span className="flex items-center gap-1">
+              <span style={{ width: 18, height: 2, background: "#ef4444", display: "inline-block", borderRadius: 1 }} />
+              <span className="text-[var(--text-muted)]">Crítico {thresholds.critical}%</span>
+            </span>
+          )}
+        </div>
+      )}
+      <ResponsiveContainer width="100%" height={effectiveHeight}>
+        <AreaChart data={data} margin={{ top: 6, right: 4, left: 0, bottom: showBrush ? 4 : 0 }}>
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%"  stopColor={color} stopOpacity={0.35} />
+              <stop offset="95%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" strokeOpacity={0.5} />
+          <XAxis dataKey="t" tickFormatter={tickFmt}
+            tick={{ fontSize: 10, fill: "var(--text-muted)" }}
+            tickLine={false} axisLine={false} minTickGap={40} />
+          <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)" }}
+            tickLine={false} axisLine={false} width={44}
+            tickFormatter={(v: number) => fmtTick(v, unit)} />
+          <Tooltip content={<ChartTooltip unit={unit} />} />
+          {thresholds?.warning !== undefined && (
+            <ReferenceLine
+              y={thresholds.warning}
+              stroke="#f59e0b"
+              strokeDasharray="4 3"
+              strokeWidth={1.5}
+              label={{ value: `▲ ${thresholds.warning}%`, position: "insideTopRight",
+                fontSize: 9, fill: "#f59e0b", fontWeight: 600 }}
+            />
+          )}
+          {thresholds?.critical !== undefined && (
+            <ReferenceLine
+              y={thresholds.critical}
+              stroke="#ef4444"
+              strokeDasharray="4 3"
+              strokeWidth={1.5}
+              label={{ value: `▲ ${thresholds.critical}%`, position: "insideTopRight",
+                fontSize: 9, fill: "#ef4444", fontWeight: 600 }}
+            />
+          )}
+          <Area type="monotone" dataKey="v" stroke={color}
+            fill={`url(#${gradId})`} dot={false} strokeWidth={2}
+            activeDot={{ r: 4, fill: color, stroke: "var(--surface)", strokeWidth: 2 }} />
+          {showBrush && (
+            <Brush
+              dataKey="t"
+              height={24}
+              stroke="var(--border)"
+              fill="var(--surface-2)"
+              travellerWidth={6}
+              tickFormatter={tickFmt}
+            />
+          )}
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Dual-line chart (network in / out)
+// Dual network chart — overlapping areas, yellow=in, purple=out
 // ---------------------------------------------------------------------------
 
-function DualLineChart({
-  sourceId, metricIdIn, metricIdOut, unitIn, period,
+type NetFocus = "both" | "in" | "out";
+
+function DualNetChart({
+  sourceId, metricIdIn, metricIdOut, unitIn, period, windowFrom, windowTill,
 }: {
   sourceId: string;
   metricIdIn: string;
   metricIdOut: string;
   unitIn?: string;
   period: PeriodKey;
+  windowFrom?: number;
+  windowTill?: number;
 }) {
+  const [focus, setFocus] = useState<NetFocus>("both");
   const periodSec = PERIODS.find(p => p.key === period)?.sec ?? 86_400;
-  const opts = {
-    queryFn: (mid: string) => {
-      const till = Math.floor(Date.now() / 1000);
-      const from = till - periodSec;
-      return api.get<{ items: HistoryPoint[] }>(
-        `/api/v1/monitoring/sources/${sourceId}/metrics/${mid}/history?window_from=${from}&window_till=${till}`,
-      );
-    },
+  const effectivePeriodSec = windowFrom && windowTill ? windowTill - windowFrom : periodSec;
+
+  const fetchHistory = (mid: string) => {
+    const till = windowTill ?? Math.floor(Date.now() / 1000);
+    const from = windowFrom ?? till - periodSec;
+    return api.get<{ items: HistoryPoint[] }>(
+      `/api/v1/monitoring/sources/${sourceId}/metrics/${mid}/history?window_from=${from}&window_till=${till}`,
+    );
   };
 
-  const inQ  = useQuery({ queryKey: ["metric-history", sourceId, metricIdIn, period],  queryFn: () => opts.queryFn(metricIdIn) });
-  const outQ = useQuery({ queryKey: ["metric-history", sourceId, metricIdOut, period], queryFn: () => opts.queryFn(metricIdOut) });
+  const inQ  = useQuery({ queryKey: ["metric-history", sourceId, metricIdIn,  period, windowFrom, windowTill], queryFn: () => fetchHistory(metricIdIn) });
+  const outQ = useQuery({ queryKey: ["metric-history", sourceId, metricIdOut, period, windowFrom, windowTill], queryFn: () => fetchHistory(metricIdOut) });
 
   if (inQ.isLoading || outQ.isLoading) {
     return <div className="flex justify-center py-6"><Spinner className="w-4 h-4" /></div>;
   }
 
-  // Merge by timestamp — align on the nearest second
-  const inMap = new Map<number, number>();
-  toChartData(inQ.data?.items ?? []).forEach(p => inMap.set(p.t, p.v));
+  const inMap  = new Map<number, number>();
   const outMap = new Map<number, number>();
+  toChartData(inQ.data?.items  ?? []).forEach(p => inMap.set(p.t, p.v));
   toChartData(outQ.data?.items ?? []).forEach(p => outMap.set(p.t, p.v));
 
   const allTs = Array.from(new Set([...inMap.keys(), ...outMap.keys()])).sort((a, b) => a - b);
-  const data = allTs.map(t => ({ t, in: inMap.get(t), out: outMap.get(t) }));
+  const data  = allTs.map(t => ({ t, in: inMap.get(t), out: outMap.get(t) }));
 
   if (data.length === 0) {
     return <p className="text-xs text-[var(--text-muted)] text-center py-4">Sem dados no período.</p>;
   }
 
-  const tickFmt = makeTickFmt(periodSec);
+  const tickFmt = makeTickFmt(effectivePeriodSec);
+
+  const inStroke  = ACCENT.net_in;   // amber/yellow
+  const outStroke = ACCENT.net_out;  // violet/purple
+
+  const inOpacity  = focus === "out"  ? 0.15 : 1;
+  const outOpacity = focus === "in"   ? 0.15 : 1;
+
+  const netFormatter = (v: number, key?: string) =>
+    `${key === "in" ? "▼ Entrada" : "▲ Saída"}: ${fmtNumber(v, unitIn)}`;
 
   return (
-    <ResponsiveContainer width="100%" height={160}>
-      <LineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-        <XAxis dataKey="t" tickFormatter={tickFmt}
-          tick={{ fontSize: 10, fill: "var(--text-muted)" }}
-          tickLine={false} axisLine={false} minTickGap={40} />
-        <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)" }}
-          tickLine={false} axisLine={false} width={42}
-          tickFormatter={(v: number) => fmtTick(v, unitIn)} />
-        <Tooltip
-          contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
-          labelFormatter={(t) => new Date(Number(t)).toLocaleString("pt-BR")}
-          formatter={(v, name) => [fmtNumber(Number(v), unitIn), name === "in" ? "Entrada" : "Saída"]}
-        />
-        <Legend formatter={(val) => val === "in" ? "Entrada" : "Saída"}
-          wrapperStyle={{ fontSize: 11 }} />
-        <Line type="monotone" dataKey="in"  stroke="var(--brand)"   dot={false} strokeWidth={1.5} activeDot={{ r: 3 }} />
-        <Line type="monotone" dataKey="out" stroke="var(--orange)"  dot={false} strokeWidth={1.5} activeDot={{ r: 3 }} />
-      </LineChart>
-    </ResponsiveContainer>
+    <div>
+      {/* Focus toggle */}
+      <div className="flex items-center gap-1.5 mb-3">
+        {(["both", "in", "out"] as NetFocus[]).map(f => {
+          const label = f === "both" ? "Ambos" : f === "in" ? "▼ Entrada" : "▲ Saída";
+          const active = focus === f;
+          const color  = f === "in" ? inStroke : f === "out" ? outStroke : undefined;
+          return (
+            <button
+              key={f}
+              onClick={() => setFocus(f)}
+              className="px-2.5 py-1 rounded-md text-xs font-medium transition-all border"
+              style={{
+                borderColor: active ? (color ?? "var(--brand)") : "var(--border)",
+                color:        active ? (color ?? "var(--text)") : "var(--text-muted)",
+                background:   active ? `${(color ?? "var(--brand)")}18` : "transparent",
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+        <div className="ml-auto flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
+          <span style={{ color: inStroke  }}>■</span><span>Entrada</span>
+          <span style={{ color: outStroke }}>■</span><span>Saída</span>
+        </div>
+      </div>
+
+      <ResponsiveContainer width="100%" height={220}>
+        <AreaChart data={data} margin={{ top: 6, right: 4, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="grad-net-in" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%"  stopColor={inStroke}  stopOpacity={0.4 * inOpacity} />
+              <stop offset="95%" stopColor={inStroke}  stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="grad-net-out" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%"  stopColor={outStroke} stopOpacity={0.4 * outOpacity} />
+              <stop offset="95%" stopColor={outStroke} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" strokeOpacity={0.5} />
+          <XAxis dataKey="t" tickFormatter={tickFmt}
+            tick={{ fontSize: 10, fill: "var(--text-muted)" }}
+            tickLine={false} axisLine={false} minTickGap={40} />
+          <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)" }}
+            tickLine={false} axisLine={false} width={48}
+            tickFormatter={(v: number) => fmtTick(v, unitIn)} />
+          <Tooltip content={<ChartTooltip formatter={netFormatter} />} />
+          <Area
+            type="monotone" dataKey="in"
+            stroke={inStroke} strokeWidth={focus === "in" ? 2.5 : 1.5}
+            strokeOpacity={inOpacity}
+            fill="url(#grad-net-in)"
+            dot={false}
+            activeDot={{ r: 4, fill: inStroke, stroke: "var(--surface)", strokeWidth: 2 }}
+          />
+          <Area
+            type="monotone" dataKey="out"
+            stroke={outStroke} strokeWidth={focus === "out" ? 2.5 : 1.5}
+            strokeOpacity={outOpacity}
+            fill="url(#grad-net-out)"
+            dot={false}
+            activeDot={{ r: 4, fill: outStroke, stroke: "var(--surface)", strokeWidth: 2 }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Overview chart card (always visible — headline metric)
+// Overview chart card
 // ---------------------------------------------------------------------------
 
 function OverviewChartCard({
-  title, value, unit, children,
+  title, value, unit, accent, children,
 }: {
   title: string;
   value?: string;
   unit?: string;
+  accent?: AccentKey;
   children: React.ReactNode;
 }) {
+  const color = accent ? ACCENT[accent] : "var(--brand)";
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
-      <div className="flex items-baseline justify-between mb-1 gap-2">
-        <span className="text-[11px] text-[var(--text-muted)] uppercase tracking-wider truncate">{title}</span>
+    <div
+      className="rounded-xl border bg-[var(--surface)] p-4 flex flex-col gap-2"
+      style={{ borderColor: `${color}30` }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className="text-[11px] font-semibold uppercase tracking-widest"
+          style={{ color }}
+        >
+          {title}
+        </span>
         {value && (
-          <span className="text-lg font-semibold tabular-nums text-[var(--text)] whitespace-nowrap">
-            {value}{unit ? <span className="text-xs font-normal text-[var(--text-muted)] ml-1">{cleanUnit(unit)}</span> : null}
+          <span className="text-2xl font-bold tabular-nums text-[var(--text)]">
+            {value}
+            {unit && (
+              <span className="text-xs font-normal text-[var(--text-muted)] ml-1">
+                {cleanUnit(unit)}
+              </span>
+            )}
           </span>
         )}
       </div>
@@ -407,48 +741,143 @@ function OverviewChartCard({
 }
 
 // ---------------------------------------------------------------------------
-// Metric card (click to expand in the "all metrics" grid)
+// Sparkline — tiny inline chart for MetricCard
+// ---------------------------------------------------------------------------
+
+function Sparkline({
+  sourceId, metricId, unit, period, color,
+}: {
+  sourceId: string;
+  metricId: string;
+  unit?: string;
+  period: PeriodKey;
+  color: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setVisible(true); obs.disconnect(); } },
+      { threshold: 0.1 },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  const periodSec = PERIODS.find(p => p.key === period)?.sec ?? 86_400;
+
+  const q = useQuery({
+    queryKey: ["metric-history", sourceId, metricId, period],
+    queryFn: () => {
+      const till = Math.floor(Date.now() / 1000);
+      const from = till - periodSec;
+      return api.get<{ items: HistoryPoint[] }>(
+        `/api/v1/monitoring/sources/${sourceId}/metrics/${metricId}/history?window_from=${from}&window_till=${till}`,
+      );
+    },
+    enabled: visible,
+    staleTime: 60_000,
+  });
+
+  const data = q.data?.items ? toChartData(q.data.items) : [];
+  const gradId = `spark-${metricId.replace(/[^a-z0-9]/gi, "")}`;
+
+  return (
+    <div ref={ref} style={{ height: 36, marginTop: 4 }}>
+      {q.isLoading && (
+        <div style={{ height: 36, background: `${color}08`, borderRadius: 4 }} />
+      )}
+      {data.length > 0 && (
+        <ResponsiveContainer width="100%" height={36}>
+          <AreaChart data={data} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+            <defs>
+              <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor={color} stopOpacity={0.4} />
+                <stop offset="95%" stopColor={color} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            {isPercent(unit) && (
+              <>
+                <ReferenceLine y={95} stroke="#ef4444" strokeDasharray="3 2" strokeWidth={1} />
+                <ReferenceLine y={80} stroke="#f59e0b" strokeDasharray="3 2" strokeWidth={1} />
+              </>
+            )}
+            <Area type="monotone" dataKey="v" stroke={color} strokeWidth={1.5}
+              fill={`url(#${gradId})`} dot={false} isAnimationActive={false} />
+          </AreaChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Metric card (click to expand)
 // ---------------------------------------------------------------------------
 
 function MetricCard({
-  metric, sourceId, period, expanded, onToggle,
+  metric, sourceId, period, expanded, onToggle, windowFrom, windowTill,
 }: {
   metric: MetricState;
   sourceId: string;
   period: PeriodKey;
   expanded: boolean;
   onToggle: () => void;
+  windowFrom?: number;
+  windowTill?: number;
 }) {
   const displayValue = fmtMetricValue(metric.value, metric.unit);
   const numeric = isNumeric(metric);
+  const sparkColor = ACCENT.default;
 
   return (
     <div
       className={[
-        "rounded-xl border p-3 transition-colors",
-        numeric ? "cursor-pointer hover:border-[var(--brand)]" : "",
-        expanded ? "border-[var(--brand)] bg-[var(--surface-2)]" : "border-[var(--border)] bg-[var(--surface)]",
+        "rounded-xl border p-3 transition-all select-none",
+        numeric ? "cursor-pointer hover:border-[var(--brand)] hover:shadow-md" : "",
+        expanded
+          ? "border-[var(--brand)] bg-[var(--surface-2)] shadow-md col-span-2"
+          : "border-[var(--border)] bg-[var(--surface)]",
       ].join(" ")}
+      style={{ transition: "border-color .15s, box-shadow .15s" }}
       onClick={numeric ? onToggle : undefined}
     >
-      <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1 truncate">
+      <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1.5 truncate leading-tight">
         {metric.name}
       </div>
-      <div className="text-xl font-semibold tabular-nums text-[var(--text)] leading-none">
+      <div className="text-xl font-bold tabular-nums leading-none"
+        style={{ color: expanded ? "var(--brand)" : "var(--text)" }}>
         {displayValue}
       </div>
       {metric.observed_at && (
-        <div className="text-[10px] text-[var(--text-muted)] mt-1.5">
-          {fmtTs(metric.observed_at)}
+        <div className="text-[10px] text-[var(--text-muted)] mt-1.5 font-mono">
+          {fmtTsShort(metric.observed_at)}
         </div>
       )}
+      {!expanded && numeric && (
+        <Sparkline
+          sourceId={sourceId}
+          metricId={metric.metric_definition_id}
+          unit={metric.unit}
+          period={period}
+          color={sparkColor}
+        />
+      )}
       {expanded && numeric && (
-        <div className="mt-3 -mx-1">
+        <div className="mt-4 -mx-1">
           <MetricChart
             sourceId={sourceId}
             metricId={metric.metric_definition_id}
             unit={metric.unit}
             period={period}
+            height={200}
+            thresholds={autoThreshold(metric.unit)}
+            showBrush
+            windowFrom={windowFrom}
+            windowTill={windowTill}
           />
         </div>
       )}
@@ -457,27 +886,54 @@ function MetricCard({
 }
 
 // ---------------------------------------------------------------------------
-// Period picker (shared control)
+// Severity color bar for problems
 // ---------------------------------------------------------------------------
 
-function PeriodPicker({ value, onChange }: { value: PeriodKey; onChange: (k: PeriodKey) => void }) {
+function SevBar({ sev }: { sev?: string }) {
+  const colors: Record<string, string> = {
+    critical: "#ef4444",
+    warning:  "#f59e0b",
+    degraded: "#f97316",
+    informational: "#60a5fa",
+  };
   return (
-    <div className="flex items-center gap-1">
-      {PERIODS.map(p => (
-        <button
-          key={p.key}
-          onClick={() => onChange(p.key)}
-          className={[
-            "px-2 py-1 rounded text-xs transition-colors",
-            value === p.key
-              ? "bg-[var(--brand)] text-white"
-              : "text-[var(--text-muted)] hover:text-[var(--text)]",
-          ].join(" ")}
-        >
-          {p.label}
-        </button>
-      ))}
-    </div>
+    <div style={{
+      width: 3, borderRadius: 2, flexShrink: 0, alignSelf: "stretch",
+      background: colors[sev ?? ""] ?? "var(--border)",
+    }} />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Status dot (with pulse for online)
+// ---------------------------------------------------------------------------
+
+function StatusDot({ avail }: { avail?: string }) {
+  const color = avail === "available" ? "#22c55e"
+    : avail === "unavailable" ? "#ef4444"
+    : "#6b7280";
+  const pulse = avail === "available";
+
+  return (
+    <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+      {pulse && (
+        <span style={{
+          position: "absolute", inset: 0, borderRadius: "50%",
+          background: color, opacity: 0.4,
+          animation: "pulse-ring 1.5s ease-out infinite",
+        }} />
+      )}
+      <span style={{
+        width: 10, height: 10, borderRadius: "50%", background: color,
+        display: "inline-block", flexShrink: 0,
+      }} />
+      <style>{`
+        @keyframes pulse-ring {
+          0% { transform: scale(1); opacity: .4; }
+          100% { transform: scale(2.4); opacity: 0; }
+        }
+      `}</style>
+    </span>
   );
 }
 
@@ -497,14 +953,17 @@ export function DeviceDetail({
   onBack: () => void;
 }) {
   const qc = useQueryClient();
-  const [period, setPeriod] = useState<PeriodKey>("24h");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [hideZeros, setHideZeros] = useState(true);
+  const [period, setPeriod]             = useState<PeriodKey>("24h");
+  const [customRange, setCustomRange]   = useState<CustomRange | undefined>();
+  const [expanded, setExpanded]         = useState<Set<string>>(new Set());
+  const [hideZeros, setHideZeros]       = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const layoutSaveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Layout persistence ────────────────────────────────────────────────────
+  const chartWindowFrom = period === "custom" ? customRange?.from : undefined;
+  const chartWindowTill = period === "custom" ? customRange?.till : undefined;
 
+  // Layout persistence
   const layoutQ = useQuery({
     queryKey: ["device-layout", resourceId],
     queryFn: () =>
@@ -514,12 +973,11 @@ export function DeviceDetail({
     staleTime: Infinity,
   });
 
-  // Restore layout from server on first load
   useEffect(() => {
     if (!layoutQ.data?.layout) return;
     const l = layoutQ.data.layout;
-    if (l.expanded) setExpanded(new Set(l.expanded));
-    if (l.period)   setPeriod(l.period);
+    if (l.expanded)  setExpanded(new Set(l.expanded));
+    if (l.period)    setPeriod(l.period);
     if (l.hideZeros !== undefined) setHideZeros(l.hideZeros);
   }, [layoutQ.data]);
 
@@ -527,23 +985,22 @@ export function DeviceDetail({
     if (layoutSaveTimeout.current) clearTimeout(layoutSaveTimeout.current);
     layoutSaveTimeout.current = setTimeout(() => {
       const payload = {
-        expanded: [...(next.expanded ?? expanded)],
-        period:    next.period    ?? period,
-        hideZeros: next.hideZeros ?? hideZeros,
+        expanded:  [...(next.expanded  ?? expanded)],
+        period:     next.period    ?? period,
+        hideZeros:  next.hideZeros ?? hideZeros,
       };
-      api.put(`/api/v1/layout?view_type=device_panel&view_key=${encodeURIComponent(resourceId)}`,
-              { layout: payload }).catch(() => {/* best-effort */});
+      api.put(
+        `/api/v1/layout?view_type=device_panel&view_key=${encodeURIComponent(resourceId)}`,
+        { layout: payload },
+      ).catch(() => {});
     }, 800);
   }
 
-  // ── Queries ───────────────────────────────────────────────────────────────
-
+  // Queries
   const resourceQ = useQuery({
     queryKey: ["resource-detail", sourceId, resourceId],
     queryFn: () =>
-      api.get<ResourceDetail>(
-        `/api/v1/monitoring/sources/${sourceId}/resources/${resourceId}`,
-      ),
+      api.get<ResourceDetail>(`/api/v1/monitoring/sources/${sourceId}/resources/${resourceId}`),
   });
 
   const currentQ = useQuery({
@@ -555,7 +1012,6 @@ export function DeviceDetail({
     refetchInterval: 60_000,
   });
 
-  // Track last successful refresh (onSuccess removed in TanStack Query v5)
   useEffect(() => {
     if (currentQ.isSuccess) setLastRefreshed(new Date());
   }, [currentQ.dataUpdatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -568,8 +1024,6 @@ export function DeviceDetail({
       ),
     refetchInterval: 60_000,
   });
-
-  // ── Actions ───────────────────────────────────────────────────────────────
 
   function toggleMetric(id: string) {
     setExpanded(prev => {
@@ -592,13 +1046,11 @@ export function DeviceDetail({
 
   async function handleRefresh() {
     await Promise.all([
-      qc.invalidateQueries({ queryKey: ["resource-current", sourceId, resourceId] }),
+      qc.invalidateQueries({ queryKey: ["resource-current",  sourceId, resourceId] }),
       qc.invalidateQueries({ queryKey: ["resource-problems", sourceId, resourceId] }),
     ]);
     setLastRefreshed(new Date());
   }
-
-  // ── Loading / error states ────────────────────────────────────────────────
 
   if (resourceQ.isLoading) {
     return <div className="flex justify-center py-16"><Spinner /></div>;
@@ -614,32 +1066,28 @@ export function DeviceDetail({
     );
   }
 
-  // ── Data derivation ───────────────────────────────────────────────────────
-
   const r   = resourceQ.data;
   const ev  = r.normalized_evidence;
   const inv = ev?.inventory;
-  const primaryIface = ev?.interfaces?.find(i => i.main) ?? ev?.interfaces?.[0];
-  const allMetrics   = currentQ.data?.items ?? [];
-  const metrics      = hideZeros ? allMetrics.filter(m => !isZeroValue(m)) : allMetrics;
-  const problems     = problemsQ.data?.items ?? [];
-  const activeProblems = problems.filter(p => !p.resolved_at);
+  const primaryIface    = ev?.interfaces?.find(i => i.main) ?? ev?.interfaces?.[0];
+  const allMetrics      = currentQ.data?.items ?? [];
+  const metrics         = hideZeros ? allMetrics.filter(m => !isZeroValue(m)) : allMetrics;
+  const problems        = problemsQ.data?.items ?? [];
+  const activeProblems  = problems.filter(p => !p.resolved_at);
 
-  const agentAvail  = ev?.agent_availability;
+  const agentAvail    = ev?.agent_availability;
   const inMaintenance = ev?.maintenance_status === "active";
-  const isDisabled  = ev?.host_status === "disabled";
+  const isDisabled    = ev?.host_status === "disabled";
 
-  // Headline metric detection
   const numericMetrics = allMetrics.filter(isNumeric);
-  const cpuMetric   = numericMetrics.find(m => RX_CPU.test(m.name));
-  const memMetric   = numericMetrics.find(m => RX_MEM.test(m.name));
-  const diskMetric  = numericMetrics.find(m => RX_DISK.test(m.name));
-  const netInMetric  = numericMetrics.find(m => RX_NET_IN.test(m.name));
-  const netOutMetric = numericMetrics.find(m => RX_NET_OUT.test(m.name));
+  const cpuMetric      = numericMetrics.find(m => RX_CPU.test(m.name));
+  const memMetric      = numericMetrics.find(m => RX_MEM.test(m.name));
+  const diskMetric     = numericMetrics.find(m => RX_DISK.test(m.name));
+  const netInMetric    = numericMetrics.find(m => RX_NET_IN.test(m.name));
+  const netOutMetric   = numericMetrics.find(m => RX_NET_OUT.test(m.name));
 
   const hasOverview = cpuMetric || memMetric || diskMetric || (netInMetric && netOutMetric);
 
-  // Metrics excluded from the "all metrics" grid if already shown in Overview
   const overviewIds = new Set([
     cpuMetric?.metric_definition_id,
     memMetric?.metric_definition_id,
@@ -650,56 +1098,89 @@ export function DeviceDetail({
 
   const gridMetrics = metrics.filter(m => !overviewIds.has(m.metric_definition_id));
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+
       {/* ── Header ── */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+        {/* Breadcrumb */}
         <button
           onClick={onBack}
-          className="text-xs text-[var(--brand)] cursor-pointer hover:underline bg-none border-none p-0"
+          className="text-xs text-[var(--text-muted)] hover:text-[var(--brand)] transition-colors mb-3 flex items-center gap-1"
         >
           ← Inventário
         </button>
-        <h2 className="text-sm font-semibold truncate max-w-xs">
-          {r.display_name ?? r.monitoring_resource_id}
-        </h2>
-        <Badge variant={availVariant(agentAvail)}>
-          {availLabel(agentAvail)}
-        </Badge>
-        {inMaintenance && (
-          <Badge variant="warning">
-            Em manutenção{ev?.maintenance_type === "no_data" ? " (sem coleta)" : ""}
+
+        {/* Device name + status */}
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <StatusDot avail={agentAvail} />
+          <h2 className="text-lg font-bold text-[var(--text)] truncate">
+            {r.display_name ?? r.monitoring_resource_id}
+          </h2>
+          <Badge variant={availVariant(agentAvail)}>
+            {agentAvail === "available" ? "Online" : agentAvail === "unavailable" ? "Offline" : "Desconhecido"}
           </Badge>
-        )}
-        {isDisabled  && <Badge variant="muted">Desabilitado</Badge>}
-        {r.presence_state === "removed" && <Badge variant="muted">Removido</Badge>}
-        <div className="ml-auto flex items-center gap-3">
-          {lastRefreshed && (
-            <span className="text-[10px] text-[var(--text-muted)]">
-              Atualizado às {fmtTsShort(lastRefreshed.toISOString())}
-            </span>
+          {inMaintenance && (
+            <Badge variant="warning">
+              Manutenção{ev?.maintenance_type === "no_data" ? " (sem coleta)" : ""}
+            </Badge>
           )}
-          <button
-            onClick={handleRefresh}
-            disabled={currentQ.isFetching}
-            className="flex items-center gap-1 px-2 py-1 text-xs rounded border border-[var(--border)]
-                       text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--brand)]
-                       transition-colors disabled:opacity-50"
-            title="Atualizar métricas e problemas"
-          >
-            {currentQ.isFetching ? <Spinner className="w-3 h-3" /> : "↻"} Atualizar
-          </button>
+          {isDisabled         && <Badge variant="muted">Desabilitado</Badge>}
+          {r.presence_state === "removed" && <Badge variant="muted">Removido</Badge>}
+        </div>
+
+        {/* Quick KPIs row */}
+        <div className="flex flex-wrap gap-4 text-xs">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[var(--text-muted)] uppercase tracking-wide text-[10px]">Problemas ativos</span>
+            <span className={`font-bold text-base tabular-nums ${activeProblems.length > 0 ? "text-[var(--red)]" : "text-[var(--text-muted)]"}`}>
+              {problemsQ.isLoading ? "…" : activeProblems.length}
+            </span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[var(--text-muted)] uppercase tracking-wide text-[10px]">Métricas</span>
+            <span className="font-bold text-base tabular-nums text-[var(--text)]">
+              {allMetrics.length > 0 ? allMetrics.length : "…"}
+            </span>
+          </div>
+          {primaryIface?.ip && (
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[var(--text-muted)] uppercase tracking-wide text-[10px]">Endereço IP</span>
+              <span className="font-mono font-medium text-[var(--text)]">{primaryIface.ip}</span>
+            </div>
+          )}
+          {inv?.os && (
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[var(--text-muted)] uppercase tracking-wide text-[10px]">Sistema</span>
+              <span className="font-medium text-[var(--text)] truncate max-w-[160px]">{inv.os}</span>
+            </div>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            {lastRefreshed && (
+              <span className="text-[10px] text-[var(--text-muted)] font-mono">
+                ↻ {fmtTsShort(lastRefreshed.toISOString())}
+              </span>
+            )}
+            <button
+              onClick={handleRefresh}
+              disabled={currentQ.isFetching}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-[var(--border)]
+                         text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--brand)]
+                         transition-colors disabled:opacity-50 font-medium"
+            >
+              {currentQ.isFetching ? <Spinner className="w-3 h-3" /> : "↻"} Atualizar
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* ── Overview section ── */}
+      {/* ── Overview ── */}
       {hasOverview && (
         <Card>
           <CardHeader>
-            <span className="text-sm font-medium">Visão Geral</span>
-            <PeriodPicker value={period} onChange={changePeriod} />
+            <span className="text-sm font-semibold">Visão Geral</span>
+            <PeriodPicker value={period} onChange={changePeriod}
+              customRange={customRange} onCustomRange={setCustomRange} />
           </CardHeader>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -708,9 +1189,12 @@ export function DeviceDetail({
                 title="CPU"
                 value={fmtMetricValue(cpuMetric.value, cpuMetric.unit)}
                 unit={cpuMetric.unit}
+                accent="cpu"
               >
                 <MetricChart sourceId={sourceId} metricId={cpuMetric.metric_definition_id}
-                             unit={cpuMetric.unit} period={period} />
+                  unit={cpuMetric.unit} period={period} accent="cpu" height={180}
+                  thresholds={autoThreshold(cpuMetric.unit)}
+                  windowFrom={chartWindowFrom} windowTill={chartWindowTill} />
               </OverviewChartCard>
             )}
 
@@ -719,9 +1203,12 @@ export function DeviceDetail({
                 title="Memória"
                 value={fmtMetricValue(memMetric.value, memMetric.unit)}
                 unit={memMetric.unit}
+                accent="mem"
               >
                 <MetricChart sourceId={sourceId} metricId={memMetric.metric_definition_id}
-                             unit={memMetric.unit} period={period} />
+                  unit={memMetric.unit} period={period} accent="mem" height={180}
+                  thresholds={autoThreshold(memMetric.unit)}
+                  windowFrom={chartWindowFrom} windowTill={chartWindowTill} />
               </OverviewChartCard>
             )}
 
@@ -730,20 +1217,28 @@ export function DeviceDetail({
                 title="Disco"
                 value={fmtMetricValue(diskMetric.value, diskMetric.unit)}
                 unit={diskMetric.unit}
+                accent="disk"
               >
                 <MetricChart sourceId={sourceId} metricId={diskMetric.metric_definition_id}
-                             unit={diskMetric.unit} period={period} />
+                  unit={diskMetric.unit} period={period} accent="disk" height={180}
+                  thresholds={autoThreshold(diskMetric.unit)}
+                  windowFrom={chartWindowFrom} windowTill={chartWindowTill} />
               </OverviewChartCard>
             )}
 
             {netInMetric && netOutMetric && (
-              <OverviewChartCard title="Rede (entrada / saída)">
-                <DualLineChart
+              <OverviewChartCard
+                title="Rede"
+                accent="net_in"
+              >
+                <DualNetChart
                   sourceId={sourceId}
                   metricIdIn={netInMetric.metric_definition_id}
                   metricIdOut={netOutMetric.metric_definition_id}
                   unitIn={netInMetric.unit}
                   period={period}
+                  windowFrom={chartWindowFrom}
+                  windowTill={chartWindowTill}
                 />
               </OverviewChartCard>
             )}
@@ -751,66 +1246,82 @@ export function DeviceDetail({
         </Card>
       )}
 
-      {/* ── Identity ── */}
+      {/* ── Identification + Location ── */}
       {(inv || primaryIface) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Card>
-            <CardHeader><span className="text-sm font-medium">Identificação</span></CardHeader>
+            <CardHeader><span className="text-sm font-semibold">Identificação</span></CardHeader>
             <dl>
-              <KV label="Endereço IP"  value={primaryIface?.ip} />
-              <KV label="DNS"          value={primaryIface?.dns} />
-              <KV label="Porta"        value={primaryIface?.port} />
-              <KV label="Protocolo"    value={primaryIface?.interface_type} />
-              <KV label="Sistema op."  value={inv?.os_full ?? inv?.os} />
-              <KV label="Fabricante"   value={inv?.vendor} />
-              <KV label="Modelo"       value={inv?.model} />
-              <KV label="Tipo"         value={inv?.device_type} />
-              <KV label="Hardware"     value={inv?.hardware_full ?? inv?.hardware} />
-              <KV label="Serial"       value={inv?.serial_primary} />
-              <KV label="Asset tag"    value={inv?.asset_tag} />
-              <KV label="MAC primário" value={inv?.mac_primary} />
+              <KV label="Endereço IP"    value={primaryIface?.ip} />
+              <KV label="DNS"            value={primaryIface?.dns} />
+              <KV label="Porta"          value={primaryIface?.port} />
+              <KV label="Protocolo"      value={primaryIface?.interface_type} />
+              <KV label="Sistema op."    value={inv?.os_full ?? inv?.os} />
+              <KV label="Fabricante"     value={inv?.vendor} />
+              <KV label="Modelo"         value={inv?.model} />
+              <KV label="Tipo"           value={inv?.device_type} />
+              <KV label="Hardware"       value={inv?.hardware_full ?? inv?.hardware} />
+              <KV label="Serial"         value={inv?.serial_primary} />
+              <KV label="Asset tag"      value={inv?.asset_tag} />
+              <KV label="MAC primário"   value={inv?.mac_primary} />
               <KV label="MAC secundário" value={inv?.mac_secondary} />
-              <KV label="Último visto" value={fmtTs(r.last_observed_at)} />
+              <KV label="Último visto"   value={fmtTs(r.last_observed_at)} />
             </dl>
           </Card>
 
           <Card>
-            <CardHeader><span className="text-sm font-medium">Localização e contato</span></CardHeader>
-            <dl>
-              <KV label="Local"          value={inv?.location} />
-              <KV label="Rack"           value={inv?.site_rack} />
-              <KV label="Cidade"         value={inv?.site_city} />
-              <KV label="Observações"    value={inv?.site_notes} />
-              <KV label="Contato"        value={inv?.contact} />
-              <KV label="Responsável 1"  value={inv?.poc_1_name} />
-              <KV label="E-mail 1"       value={inv?.poc_1_email} />
-              <KV label="Telefone 1"     value={inv?.poc_1_phone} />
-              <KV label="Responsável 2"  value={inv?.poc_2_name} />
-              <KV label="E-mail 2"       value={inv?.poc_2_email} />
-              {(inv?.url_a || inv?.url_b || inv?.url_c) && (
-                <KV
-                  label="Acesso remoto"
-                  value={
-                    <span className="flex flex-wrap gap-2">
-                      {inv?.url_a && <a href={inv.url_a} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_a}</a>}
-                      {inv?.url_b && <a href={inv.url_b} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_b}</a>}
-                      {inv?.url_c && <a href={inv.url_c} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_c}</a>}
-                    </span>
-                  }
-                />
-              )}
-            </dl>
+            <CardHeader><span className="text-sm font-semibold">Localização e contato</span></CardHeader>
+            {(() => {
+              const hasLocationData = inv && (
+                inv.location || inv.site_rack || inv.site_city || inv.site_notes ||
+                inv.contact || inv.poc_1_name || inv.poc_1_email || inv.poc_1_phone ||
+                inv.poc_2_name || inv.poc_2_email || inv.url_a || inv.url_b || inv.url_c
+              );
+              if (!hasLocationData) {
+                return (
+                  <p className="text-xs text-[var(--text-muted)] italic">
+                    Nenhum dado de localização cadastrado no inventário do Zabbix.
+                  </p>
+                );
+              }
+              return (
+                <dl>
+                  <KV label="Local"         value={inv?.location} />
+                  <KV label="Rack"          value={inv?.site_rack} />
+                  <KV label="Cidade"        value={inv?.site_city} />
+                  <KV label="Observações"   value={inv?.site_notes} />
+                  <KV label="Contato"       value={inv?.contact} />
+                  <KV label="Responsável 1" value={inv?.poc_1_name} />
+                  <KV label="E-mail 1"      value={inv?.poc_1_email} />
+                  <KV label="Telefone 1"    value={inv?.poc_1_phone} />
+                  <KV label="Responsável 2" value={inv?.poc_2_name} />
+                  <KV label="E-mail 2"      value={inv?.poc_2_email} />
+                  {(inv?.url_a || inv?.url_b || inv?.url_c) && (
+                    <KV
+                      label="Acesso remoto"
+                      value={
+                        <span className="flex flex-wrap gap-2">
+                          {inv?.url_a && <a href={inv.url_a} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_a}</a>}
+                          {inv?.url_b && <a href={inv.url_b} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_b}</a>}
+                          {inv?.url_c && <a href={inv.url_c} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_c}</a>}
+                        </span>
+                      }
+                    />
+                  )}
+                </dl>
+              );
+            })()}
 
             {(ev?.interfaces?.length ?? 0) > 1 && (
               <>
-                <div className="mt-4 mb-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
+                <div className="mt-4 mb-2 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
                   Interfaces
                 </div>
                 {ev!.interfaces!.map(iface => (
                   <div key={iface.interfaceid}
-                    className="text-xs flex gap-2 py-1 border-b border-[var(--border)] last:border-0">
-                    <span className="text-[var(--text-muted)] w-12">{iface.interface_type}</span>
-                    <span className="text-[var(--text)]">{iface.ip || iface.dns || "—"}</span>
+                    className="text-xs flex gap-2 py-1.5 border-b border-[var(--border)] last:border-0">
+                    <span className="text-[var(--text-muted)] w-14 flex-shrink-0">{iface.interface_type}</span>
+                    <span className="text-[var(--text)] font-mono">{iface.ip || iface.dns || "—"}</span>
                     {iface.main && <span className="text-[var(--text-muted)]">(primário)</span>}
                   </div>
                 ))}
@@ -818,12 +1329,12 @@ export function DeviceDetail({
             )}
 
             {ev?.agent_error && (
-              <div className="mt-3 p-2 rounded-lg bg-[#3a1a1a] border border-[#4a2020]">
+              <div className="mt-3 p-2.5 rounded-lg bg-[#3a1a1a] border border-[#4a2020]">
                 <p className="text-xs text-[var(--red)]">Erro agente: {ev.agent_error}</p>
               </div>
             )}
             {ev?.snmp_error && (
-              <div className="mt-2 p-2 rounded-lg bg-[#3a1a1a] border border-[#4a2020]">
+              <div className="mt-2 p-2.5 rounded-lg bg-[#3a1a1a] border border-[#4a2020]">
                 <p className="text-xs text-[var(--red)]">Erro SNMP: {ev.snmp_error}</p>
               </div>
             )}
@@ -834,16 +1345,17 @@ export function DeviceDetail({
       {/* ── Groups / tags ── */}
       {((ev?.groups?.length ?? 0) > 0 || (ev?.tags?.length ?? 0) > 0) && (
         <Card>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5">
             {ev?.groups?.map(g => (
               <span key={g.ref}
-                className="text-xs px-2 py-0.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)]">
+                className="text-xs px-2.5 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)]">
                 {g.name ?? g.ref}
               </span>
             ))}
             {ev?.tags?.map(t => (
               <span key={`${t.tag}:${t.value}`}
-                className="text-xs px-2 py-0.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--brand)]">
+                className="text-xs px-2.5 py-1 rounded-full border text-[var(--brand)]"
+                style={{ borderColor: `${ACCENT.cpu}40`, background: `${ACCENT.cpu}10` }}>
                 {t.tag}{t.value ? `: ${t.value}` : ""}
               </span>
             ))}
@@ -855,29 +1367,29 @@ export function DeviceDetail({
       {allMetrics.length > 0 && (
         <Card>
           <CardHeader>
-            <span className="text-sm font-medium">
+            <span className="text-sm font-semibold">
               Todas as métricas
               <span className="ml-2 text-xs font-normal text-[var(--text-muted)]">
-                {gridMetrics.length}
+                ({gridMetrics.length}
                 {hideZeros && gridMetrics.length < allMetrics.length - overviewIds.size
                   ? ` / ${allMetrics.length - overviewIds.size}`
-                  : ""}
+                  : ""})
               </span>
             </span>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => changeHideZeros(!hideZeros)}
                 className={[
-                  "px-2 py-1 rounded text-xs transition-colors border",
+                  "px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border",
                   hideZeros
-                    ? "border-[var(--brand)] text-[var(--brand)]"
+                    ? "border-[var(--brand)] text-[var(--brand)] bg-[var(--brand-bg,#1e3a5f)]"
                     : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]",
                 ].join(" ")}
-                title="Mostrar ou ocultar métricas com valor zero"
               >
                 {hideZeros ? "≠ 0" : "= 0"}
               </button>
-              {!hasOverview && <PeriodPicker value={period} onChange={changePeriod} />}
+              {!hasOverview && <PeriodPicker value={period} onChange={changePeriod}
+                customRange={customRange} onCustomRange={setCustomRange} />}
             </div>
           </CardHeader>
 
@@ -887,7 +1399,11 @@ export function DeviceDetail({
             <p className="text-xs text-[var(--red)]">Falha ao carregar métricas.</p>
           ) : gridMetrics.length === 0 ? (
             <div className="text-xs text-[var(--text-muted)] space-y-2">
-              <p>{allMetrics.length - overviewIds.size > 0 ? "Todas as métricas estão com valor zero." : "Nenhuma métrica adicional disponível."}</p>
+              <p>
+                {allMetrics.length - overviewIds.size > 0
+                  ? "Todas as métricas estão com valor zero."
+                  : "Nenhuma métrica adicional disponível."}
+              </p>
               {allMetrics.length - overviewIds.size > 0 && (
                 <button onClick={() => changeHideZeros(false)} className="text-[var(--brand)] hover:underline">
                   Mostrar todas
@@ -897,7 +1413,7 @@ export function DeviceDetail({
           ) : (
             <>
               <p className="text-xs text-[var(--text-muted)] mb-3">
-                Clique em uma métrica numérica para ver o gráfico histórico.
+                Clique em uma métrica numérica para ver o histórico.
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                 {gridMetrics.map(m => (
@@ -908,6 +1424,8 @@ export function DeviceDetail({
                     period={period}
                     expanded={expanded.has(m.metric_definition_id)}
                     onToggle={() => toggleMetric(m.metric_definition_id)}
+                    windowFrom={chartWindowFrom}
+                    windowTill={chartWindowTill}
                   />
                 ))}
               </div>
@@ -919,7 +1437,7 @@ export function DeviceDetail({
       {/* ── Active problems ── */}
       <Card>
         <CardHeader>
-          <span className="text-sm font-medium">Problemas ativos</span>
+          <span className="text-sm font-semibold">Problemas ativos</span>
           {activeProblems.length > 0 && (
             <Badge variant="danger">{activeProblems.length}</Badge>
           )}
@@ -928,20 +1446,27 @@ export function DeviceDetail({
         {problemsQ.isLoading ? (
           <div className="flex justify-center py-4"><Spinner /></div>
         ) : activeProblems.length === 0 ? (
-          <p className="text-xs text-[var(--text-muted)]">Nenhum problema ativo.</p>
+          <div className="flex items-center gap-2 py-2">
+            <span style={{ color: "#22c55e" }}>✓</span>
+            <p className="text-xs text-[var(--text-muted)]">Nenhum problema ativo.</p>
+          </div>
         ) : (
           <ul className="space-y-2">
             {activeProblems.map(p => (
               <li key={p.monitoring_problem_id}
-                className="flex items-start gap-2 border-b border-[var(--border)] last:border-0 pb-2 last:pb-0">
-                <Badge variant={sevVariant(p.severity_class)} className="mt-0.5 flex-shrink-0">
-                  {(p.severity_class ?? "?").toUpperCase()}
-                </Badge>
-                <div className="min-w-0">
-                  <p className="text-xs text-[var(--text)]">{p.summary ?? "—"}</p>
-                  <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-                    Aberto {fmtTs(p.opened_at)}
-                  </p>
+                className="flex items-stretch gap-3 rounded-lg overflow-hidden
+                           border border-[var(--border)] bg-[var(--surface-2)]">
+                <SevBar sev={p.severity_class} />
+                <div className="py-2.5 pr-3 flex items-start gap-2.5 min-w-0">
+                  <Badge variant={sevVariant(p.severity_class)} className="mt-0.5 flex-shrink-0">
+                    {(p.severity_class ?? "?").toUpperCase()}
+                  </Badge>
+                  <div className="min-w-0">
+                    <p className="text-xs text-[var(--text)] leading-snug">{p.summary ?? "—"}</p>
+                    <p className="text-[10px] text-[var(--text-muted)] mt-1 font-mono">
+                      Aberto {fmtTs(p.opened_at)}
+                    </p>
+                  </div>
                 </div>
               </li>
             ))}

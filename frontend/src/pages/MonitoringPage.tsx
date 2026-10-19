@@ -5,7 +5,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
-import { Plus, X, RefreshCw, KeyRound, Trash2 } from "lucide-react";
+import { Plus, X, RefreshCw, KeyRound, Trash2, Search, CheckSquare, Square, AlertCircle } from "lucide-react";
 
 interface Source {
   monitoring_source_id: string;
@@ -22,7 +22,11 @@ interface AddSourceForm {
   provider_base_url: string;
   api_token: string;
   credential_binding_ref: string;
-  host_group_refs: string;
+}
+
+interface DiscoveredGroup {
+  groupid: string;
+  name: string | null;
 }
 
 function slugify(s: string) {
@@ -44,15 +48,56 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
     provider_base_url: "",
     api_token: "",
     credential_binding_ref: "",
-    host_group_refs: "",
   });
+
+  const [discoveredGroups, setDiscoveredGroups] = useState<DiscoveredGroup[] | null>(null);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
+  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+
+  const canDiscover = form.provider_base_url.trim().length > 0 && form.api_token.trim().length > 0;
+
+  const discoverGroups = async () => {
+    setDiscoverLoading(true);
+    setDiscoverError(null);
+    setDiscoveredGroups(null);
+    setSelectedGroups(new Set());
+    try {
+      const groups = await api.post<DiscoveredGroup[]>("/api/v1/monitoring/sources/discover-groups", {
+        provider_base_url: form.provider_base_url,
+        api_token: form.api_token,
+      });
+      setDiscoveredGroups(groups);
+    } catch (err: unknown) {
+      const e = err as { detail?: string; message?: string };
+      setDiscoverError(e?.detail ?? e?.message ?? "Não foi possível conectar ao Zabbix.");
+    } finally {
+      setDiscoverLoading(false);
+    }
+  };
+
+  const toggleGroup = (groupid: string) => {
+    setSelectedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupid)) next.delete(groupid); else next.add(groupid);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (!discoveredGroups) return;
+    if (selectedGroups.size === discoveredGroups.length) {
+      setSelectedGroups(new Set());
+    } else {
+      setSelectedGroups(new Set(discoveredGroups.map((g) => g.groupid)));
+    }
+  };
 
   const mutation = useMutation({
     mutationFn: (data: AddSourceForm) => {
-      const groups = data.host_group_refs
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const groups = discoveredGroups
+        ? [...selectedGroups].map((id) => discoveredGroups.find((g) => g.groupid === id)?.name ?? id).filter(Boolean)
+        : [];
       return api.post("/api/v1/monitoring/sources", {
         display_name: data.display_name,
         provider_base_url: data.provider_base_url,
@@ -71,8 +116,14 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
     },
   });
 
-  const set = (field: keyof AddSourceForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const set = (field: keyof AddSourceForm) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((f) => ({ ...f, [field]: e.target.value }));
+    if (field === "provider_base_url" || field === "api_token") {
+      setDiscoveredGroups(null);
+      setDiscoverError(null);
+      setSelectedGroups(new Set());
+    }
+  };
 
   const credRef = form.credential_binding_ref || slugify(form.display_name) || "cred-binding";
 
@@ -148,14 +199,106 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
             />
           </Field>
 
-          <Field label="Grupos de hosts" hint="IDs ou nomes separados por vírgula (deixe vazio para todos)">
-            <input
-              type="text"
-              placeholder="Ex: Linux servers, 2, Windows"
-              value={form.host_group_refs}
-              onChange={set("host_group_refs")}
-            />
-          </Field>
+          {/* Host groups — discover from Zabbix */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text, #e6e8ec)" }}>
+                Grupos de hosts
+                <span style={{ fontWeight: 400, color: "var(--text-muted, #8b93a5)", marginLeft: 6 }}>
+                  {discoveredGroups ? `${selectedGroups.size} de ${discoveredGroups.length} selecionados` : "deixe vazio para todos"}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={discoverGroups}
+                disabled={!canDiscover || discoverLoading}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                  background: canDiscover ? "var(--brand, #6366f1)" : "var(--surface, #1a1d27)",
+                  color: canDiscover ? "#fff" : "var(--text-muted, #8b93a5)",
+                  border: canDiscover ? "none" : "1px solid var(--border, #262c3a)",
+                  cursor: canDiscover && !discoverLoading ? "pointer" : "default",
+                  opacity: discoverLoading ? 0.7 : 1,
+                  transition: "all 0.15s",
+                }}
+              >
+                {discoverLoading ? <Spinner className="w-3 h-3" /> : <Search size={11} />}
+                {discoverLoading ? "Buscando..." : "Buscar grupos"}
+              </button>
+            </div>
+
+            {discoverError && (
+              <div style={{
+                display: "flex", alignItems: "flex-start", gap: 7, padding: "8px 12px",
+                borderRadius: 8, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)",
+                fontSize: 12, color: "#f87171",
+              }}>
+                <AlertCircle size={13} style={{ marginTop: 1, flexShrink: 0 }} />
+                {discoverError}
+              </div>
+            )}
+
+            {discoveredGroups && discoveredGroups.length > 0 && (
+              <div style={{
+                border: "1px solid var(--border, #262c3a)",
+                borderRadius: 8,
+                maxHeight: 200,
+                overflowY: "auto",
+                background: "var(--bg, #0f1115)",
+              }}>
+                {/* Select all row */}
+                <button
+                  type="button"
+                  onClick={toggleAll}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", gap: 8,
+                    padding: "7px 12px", background: "none", border: "none",
+                    borderBottom: "1px solid var(--border, #262c3a)",
+                    cursor: "pointer", fontSize: 11, fontWeight: 600,
+                    color: "var(--text-muted, #8b93a5)", textAlign: "left",
+                  }}
+                >
+                  {selectedGroups.size === discoveredGroups.length
+                    ? <CheckSquare size={13} style={{ color: "var(--brand, #6366f1)" }} />
+                    : <Square size={13} />}
+                  Todos ({discoveredGroups.length})
+                </button>
+                {discoveredGroups.map((g) => {
+                  const checked = selectedGroups.has(g.groupid);
+                  return (
+                    <button
+                      key={g.groupid}
+                      type="button"
+                      onClick={() => toggleGroup(g.groupid)}
+                      style={{
+                        width: "100%", display: "flex", alignItems: "center", gap: 8,
+                        padding: "6px 12px", background: checked ? "rgba(99,102,241,0.08)" : "none",
+                        border: "none", borderBottom: "1px solid var(--border, #262c3a)",
+                        cursor: "pointer", fontSize: 12, color: "var(--text, #e6e8ec)", textAlign: "left",
+                      }}
+                    >
+                      {checked
+                        ? <CheckSquare size={13} style={{ color: "var(--brand, #6366f1)", flexShrink: 0 }} />
+                        : <Square size={13} style={{ flexShrink: 0, color: "var(--text-muted, #8b93a5)" }} />}
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {g.name ?? g.groupid}
+                      </span>
+                      <span style={{ fontSize: 10, color: "var(--text-muted, #8b93a5)", flexShrink: 0 }}>
+                        #{g.groupid}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {discoveredGroups && discoveredGroups.length === 0 && (
+              <p style={{ fontSize: 12, color: "var(--text-muted, #8b93a5)" }}>
+                Nenhum grupo encontrado nesta fonte.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Actions */}
@@ -172,11 +315,12 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
           </button>
           <button
             onClick={() => mutation.mutate(form)}
-            disabled={!form.display_name || !form.provider_base_url || mutation.isPending}
+            disabled={!form.display_name || !form.provider_base_url || !form.api_token || mutation.isPending}
             style={{
               padding: "8px 20px", borderRadius: 8, fontSize: 13, fontWeight: 600,
               background: "var(--brand, #6366f1)", color: "#fff",
-              border: "none", cursor: "pointer", opacity: (!form.display_name || !form.provider_base_url) ? 0.5 : 1,
+              border: "none", cursor: "pointer",
+              opacity: (!form.display_name || !form.provider_base_url || !form.api_token) ? 0.5 : 1,
               display: "flex", alignItems: "center", gap: 6,
             }}
           >

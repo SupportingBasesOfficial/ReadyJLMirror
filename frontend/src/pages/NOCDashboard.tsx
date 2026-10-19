@@ -5,8 +5,9 @@ import { api } from "@/api/client";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
-import { Activity, Bell, Zap, ArrowRight, GripVertical, ChevronUp, ChevronDown } from "lucide-react";
+import { GripVertical, ChevronUp, ChevronDown } from "lucide-react";
 import { useSession } from "@/hooks/useSession";
+import { SetupWizard } from "@/components/SetupWizard";
 
 interface RawAlert {
   alert_id: string;
@@ -638,53 +639,8 @@ export function NOCDashboard({ tenantId }: Props) {
         </div>
       )}
 
-      {/* Getting started */}
-      {!loading && sources.length === 0 && (
-        <div style={{
-          border: "1px solid var(--border)", borderRadius: 14, padding: "28px 24px",
-          background: "color-mix(in srgb, var(--brand) 4%, var(--surface))",
-        }}>
-          <div className="text-sm font-semibold mb-1" style={{ color: "var(--text)" }}>
-            Bem-vindo ao JLMirror 👋
-          </div>
-          <p className="text-xs mb-5" style={{ color: "var(--text-muted)" }}>
-            Nenhuma fonte de monitoramento conectada. Configure sua primeira fonte para começar.
-          </p>
-          <div className="grid gap-3 sm:grid-cols-3 mb-5">
-            {[
-              { Icon: Activity, label: "1. Adicionar fonte", desc: "Conecte Zabbix ao JLMirror", page: "/monitoring" },
-              { Icon: Bell, label: "2. Definir políticas", desc: "Configure regras de alerta e escalonamento", page: "/policies" },
-              { Icon: Zap, label: "3. Configurar automação", desc: "Crie respostas automáticas a incidentes", page: "/automation" },
-            ].map(({ Icon, label, desc, page }) => (
-              <Link key={label} to={page} style={{
-                display: "flex", alignItems: "flex-start", gap: 12, padding: "14px",
-                background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10,
-                textDecoration: "none", color: "inherit", transition: "border-color 0.15s",
-              }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--brand)")}
-                onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border)")}>
-                <div style={{
-                  width: 30, height: 30, borderRadius: 7, flexShrink: 0,
-                  background: "color-mix(in srgb, var(--brand) 12%, transparent)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  <Icon size={14} style={{ color: "var(--brand)" }} />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold mb-0.5" style={{ color: "var(--text)" }}>{label}</div>
-                  <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>{desc}</div>
-                </div>
-              </Link>
-            ))}
-          </div>
-          <Link to="/monitoring" style={{
-            display: "inline-flex", alignItems: "center", gap: 6,
-            fontSize: 12, fontWeight: 500, color: "var(--brand)", textDecoration: "none",
-          }}>
-            Ir para Monitoramento <ArrowRight size={13} />
-          </Link>
-        </div>
-      )}
+      {/* Setup wizard — shows until completed */}
+      {!loading && <SetupWizard tenantId={tenantId} hasSources={sources.length > 0} />}
 
       {/* Ordered panels */}
       {cfg.order.map((key) => renderPanel(key))}
