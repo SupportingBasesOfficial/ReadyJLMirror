@@ -9,11 +9,15 @@ export interface Session {
   state: SessionState;
   principal_id?: string;
   tenant_id?: string;
+  tenant?: Tenant;
   display_name?: string;
   email?: string;
   permissions?: string[];
   memberships?: Tenant[];
   environment?: string;
+  // Enriched fields (populated after migration + re-login)
+  is_platform_admin?: boolean;
+  principal_kind?: "human_browser_session" | "platform_admin_principal" | "display_principal";
 }
 
 export interface Tenant {
