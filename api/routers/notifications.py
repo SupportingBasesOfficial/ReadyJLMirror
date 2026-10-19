@@ -420,6 +420,10 @@ async def add_destination(request: Request,
     if not body.destination_ref.strip():
         raise HTTPException(status_code=422,
                             detail="destination_ref must not be empty")
+    if body.channel_class == "slack@1" and not body.destination_ref.startswith(
+            "https://hooks.slack.com/"):
+        raise HTTPException(status_code=422,
+                            detail="Slack destination_ref must be a hooks.slack.com webhook URL")
     if not body.label.strip():
         raise HTTPException(status_code=422,
                             detail="label must not be empty")
@@ -445,6 +449,52 @@ async def add_destination(request: Request,
                                     detail="label required")
             raise
     return row[0] if row else {}
+
+
+@router.post("/notification-channels/{dest_id}/test",
+             status_code=status.HTTP_200_OK)
+async def test_destination(dest_id: str, request: Request,
+                           tenant_id: str | None = None) -> dict:
+    """Send a test message to a configured notification channel."""
+    import httpx
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        cur = await conn.execute(
+            """
+            SELECT channel_class, destination_ref, label
+              FROM notification.notification_destination_config
+             WHERE tenant_id = %s AND destination_config_id = %s
+               AND deleted_at IS NULL
+            """, (tenant, dest_id))
+        row = await cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404,
+                            detail="destination not found")
+    channel_class, destination_ref, label = row
+    if channel_class == "slack@1":
+        # Defense-in-depth: re-validate even though creation already enforces
+        # the hooks.slack.com prefix (protects rows that pre-date the fix).
+        if not destination_ref.startswith("https://hooks.slack.com/"):
+            raise HTTPException(status_code=422,
+                                detail="webhook url inválido")
+        payload = {
+            "text": (
+                f":white_check_mark: *JLMirror — teste de canal Slack*\n"
+                f"Canal: _{label}_\n"
+                f"Se você viu esta mensagem, a integração está funcionando."
+            )
+        }
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(destination_ref, json=payload)
+        if resp.status_code != 200:
+            # Do not reflect response body — it may contain internal data
+            raise HTTPException(
+                status_code=502,
+                detail=f"Slack webhook retornou status {resp.status_code}")
+        return {"ok": True, "channel": channel_class, "message": "Mensagem de teste enviada com sucesso."}
+    raise HTTPException(
+        status_code=422,
+        detail=f"Teste não suportado para canal '{channel_class}' ainda.")
 
 
 @router.delete("/notification-channels/{dest_id}",

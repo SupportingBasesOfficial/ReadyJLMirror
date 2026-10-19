@@ -44,6 +44,7 @@ from workers.sla_checker import _process_pending as sla_checker
 from workers.automation_runner import _process_pending as automation_runner
 from workers.report_sender import _process_pending as report_sender
 from workers.cert_checker import _process_pending as cert_checker
+from workers.synthetic_checker import _process_pending as synthetic_checker
 
 logger = logging.getLogger("workers.run_all")
 
@@ -69,6 +70,7 @@ _PROCESSORS = (
     ("automation_runner", automation_runner),
     ("report_sender", report_sender),
     ("cert_checker", cert_checker),
+    ("synthetic_checker", synthetic_checker),
 )
 
 # One persistent connection per processor, keyed by name.

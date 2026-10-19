@@ -76,11 +76,15 @@ async def create_user(
 async def get_users_by_ids(user_ids: list[str]) -> dict[str, dict]:
     """Fetch Keycloak user representations by their IDs. Returns {id: user}.
 
-    Fetches all users in parallel via asyncio.gather.
+    Returns {} gracefully when Keycloak is unreachable (e.g. dev environment),
+    so callers can still render user lists from DB data alone.
     """
     if not user_ids:
         return {}
-    token = await _admin_token()
+    try:
+        token = await _admin_token()
+    except Exception:
+        return {}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         async def _fetch(uid: str) -> tuple[str, dict | None]:
             r = await client.get(

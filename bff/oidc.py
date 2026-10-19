@@ -171,10 +171,12 @@ def _jwks() -> PyJWKClient:
 class ValidatedIdentity:
     """Validated OIDC identity — external references only."""
 
-    subject_ref: str          # external IdP `sub`
+    subject_ref: str
     issuer: str
-    idp_session_ref: Optional[str]  # external `sid`
-    authenticated_at_epoch: int     # `auth_time`
+    idp_session_ref: Optional[str]
+    authenticated_at_epoch: int
+    display_name: Optional[str]  # `name` claim (may be absent)
+    email: Optional[str]         # `email` claim (may be absent)
 
 
 def validate_id_token(
@@ -195,9 +197,13 @@ def validate_id_token(
     auth_time = claims.get("auth_time")
     if not isinstance(auth_time, int):
         auth_time = int(time.time())
+    # Prefer full name; fall back to preferred_username
+    raw_name = claims.get("name") or claims.get("preferred_username")
     return ValidatedIdentity(
         subject_ref=claims["sub"],
         issuer=claims["iss"],
         idp_session_ref=claims.get("sid"),
         authenticated_at_epoch=auth_time,
+        display_name=str(raw_name) if raw_name else None,
+        email=str(claims["email"]) if claims.get("email") else None,
     )

@@ -102,6 +102,13 @@ async def create_incident(alert_id: str, request: Request,
     return res
 
 
+@router.get("/incidents")
+async def list_incidents(request: Request, tenant_id: str | None = None,
+                         state: str | None = None, limit: int = 100) -> list:
+    tenant = _authoritative_tenant(request, tenant_id)
+    return await _g10("g10_list_incidents", (tenant, state, min(limit, 200))) or []
+
+
 @router.get("/alerts/{alert_id}/incidents")
 async def list_alert_incidents(alert_id: str, request: Request,
                                tenant_id: str | None = None) -> list:
@@ -173,3 +180,30 @@ async def add_comment(incident_id: str, request: Request,
         (tenant, incident_id, body.body, actor,
          _logical(body.logical_action_id),
          _snapshot(tenant, actor, "alerting:operate")))
+
+
+class TimeEntryCreate(BaseModel):
+    minutes: int
+    description: str | None = None
+    logical_action_id: str | None = None
+
+
+@router.post("/incidents/{incident_id}/time-entries",
+             status_code=status.HTTP_201_CREATED)
+async def log_time(incident_id: str, request: Request,
+                   body: TimeEntryCreate,
+                   tenant_id: str | None = None) -> dict:
+    tenant = _authoritative_tenant(request, tenant_id)
+    actor = _actor(request)
+    return await _g10(
+        "g10_log_time",
+        (tenant, incident_id, body.minutes, body.description, actor,
+         _logical(body.logical_action_id),
+         _snapshot(tenant, actor, "alerting:operate")))
+
+
+@router.get("/incidents/{incident_id}/time-entries")
+async def list_time_entries(incident_id: str, request: Request,
+                            tenant_id: str | None = None) -> list:
+    tenant = _authoritative_tenant(request, tenant_id)
+    return await _g10("g10_list_time_entries", (tenant, incident_id)) or []

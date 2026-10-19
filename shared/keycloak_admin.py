@@ -119,6 +119,36 @@ async def reset_password(user_id: str, new_password: str, temporary: bool = True
         resp.raise_for_status()
 
 
+async def delete_user(user_id: str) -> None:
+    """Delete a Keycloak user entirely."""
+    token = await _admin_token()
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.delete(
+            f"{_REALM_BASE}/users/{user_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+
+
+async def logout_user_sessions(user_id: str) -> None:
+    """Terminate all active Keycloak sessions for a user (server-side logout).
+
+    This is called in addition to RP-initiated logout so the SSO session
+    is guaranteed to be gone even when Keycloak's end_session redirect
+    doesn't invalidate it (e.g. when the client is not configured for
+    backchannel logout or the post_logout_redirect_uri is not registered).
+    """
+    token = await _admin_token()
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            f"{_REALM_BASE}/users/{user_id}/logout",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        # 204 = success, 404 = user has no sessions (also fine)
+        if resp.status_code not in (200, 204, 404):
+            resp.raise_for_status()
+
+
 async def search_users(search: str, max_results: int = 20) -> list[dict]:
     """Search Keycloak users by email or name fragment."""
     token = await _admin_token()

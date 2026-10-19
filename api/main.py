@@ -60,6 +60,8 @@ from api.routers import (
     release,
     sla,
     status_page,
+    oncall,
+    synthetic,
     tenant,
 )
 
@@ -516,6 +518,8 @@ app.include_router(status_page._public_router)
 app.include_router(noc_stream.router)
 app.include_router(msp.router)
 app.include_router(layout.router)
+app.include_router(synthetic.router)
+app.include_router(oncall.router)
 
 
 @app.get("/metrics", tags=["health"])

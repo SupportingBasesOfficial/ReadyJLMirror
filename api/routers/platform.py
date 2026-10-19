@@ -76,6 +76,19 @@ async def create_organization(request: Request,
     return {"organization_id": body.organization_id}
 
 
+_RELATIONSHIP_FAMILY_MAP = {
+    "msp": "provides_monitoring_service_for",
+    "reseller": "billing_responsible_for",
+    "partner": "delegated_administration_for",
+    "contracts_platform": "contracts_platform",
+    "provides_monitoring_service_for": "provides_monitoring_service_for",
+    "delegated_administration_for": "delegated_administration_for",
+    "billing_responsible_for": "billing_responsible_for",
+}
+
+_VALID_FAMILIES = set(_RELATIONSHIP_FAMILY_MAP.values())
+
+
 class RelationshipCreate(BaseModel):
     family: str
     source_organization_id: str
@@ -103,6 +116,12 @@ async def list_relationships(request: Request) -> list[dict]:
 async def create_relationship(request: Request,
                               body: RelationshipCreate) -> dict:
     actor = await _require_platform_admin(request)
+    db_family = _RELATIONSHIP_FAMILY_MAP.get(body.family)
+    if db_family is None:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=422,
+            detail=f"invalid family '{body.family}'; valid values: msp, reseller, partner")
     rel_id = f"rel_{secrets.token_urlsafe(12)}"
     async with db_tenant_connection("platform") as conn:
         await conn.execute(
@@ -112,7 +131,7 @@ async def create_relationship(request: Request,
                  target_organization_id)
             VALUES (%s, %s, %s, %s)
             """,
-            (rel_id, body.family, body.source_organization_id,
+            (rel_id, db_family, body.source_organization_id,
              body.target_organization_id))
         await record_audit_event(
             conn, "platform",

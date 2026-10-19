@@ -18,13 +18,21 @@ from shared.config import settings
 
 
 async def resolve_or_provision_principal(
-    conn: AsyncConnection, *, idp_subject_ref: str, idp_issuer: str
+    conn: AsyncConnection,
+    *,
+    idp_subject_ref: str,
+    idp_issuer: str,
+    display_name: Optional[str] = None,
+    email: Optional[str] = None,
 ) -> Optional[dict]:
     """Resolve the platform principal bound to an external IdP subject.
 
     Development: unknown subjects are JIT-provisioned and granted
     membership to `tenant:dev`. Production: unknown subjects return None
     (fail closed, no existence leakage).
+
+    display_name and email are upserted from IdP claims on every login
+    so the profile stays current without a separate sync job.
     """
     async with conn.cursor() as cur:
         await cur.execute(
@@ -39,6 +47,18 @@ async def resolve_or_provision_principal(
 
     if row is not None:
         principal_id, kind, credential_generation, active = row
+        # Keep profile fields current on each login
+        if display_name or email:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    UPDATE g1.principals
+                       SET display_name = COALESCE(%s, display_name),
+                           email        = COALESCE(%s, email)
+                     WHERE principal_id = %s
+                    """,
+                    (display_name, email, principal_id),
+                )
         return {
             "principal_id": principal_id,
             "kind": kind,
@@ -57,10 +77,11 @@ async def resolve_or_provision_principal(
             """
             INSERT INTO g1.principals
                 (principal_id, kind, credential_generation,
-                 idp_subject_ref, idp_issuer, active)
-            VALUES (%s, 'human_browser_session', %s, %s, %s, TRUE)
+                 idp_subject_ref, idp_issuer, display_name, email, active)
+            VALUES (%s, 'human_browser_session', %s, %s, %s, %s, %s, TRUE)
             """,
-            (principal_id, credential_generation, idp_subject_ref, idp_issuer),
+            (principal_id, credential_generation, idp_subject_ref, idp_issuer,
+             display_name, email),
         )
         # Grant membership to the dev tenant
         await cur.execute(
@@ -112,8 +133,18 @@ async def check_membership(
 
     Returns None for both non-membership and inactive tenant — no
     existence leakage between the two cases.
+    Platform admins bypass the per-tenant membership gate.
     """
     async with conn.cursor() as cur:
+        # Platform admins have cross-tenant authority — skip the membership gate.
+        await cur.execute(
+            "SELECT 1 FROM g1.principals WHERE principal_id = %s AND active = TRUE"
+            " AND kind = 'platform_admin_principal'",
+            (principal_id,),
+        )
+        if await cur.fetchone() is not None:
+            return {"role": "platform", "display_name": "Platform Admin"}
+
         await cur.execute(
             """
             SELECT m.role, t.display_name

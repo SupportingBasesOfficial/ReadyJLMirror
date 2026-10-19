@@ -47,10 +47,6 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=settings.log_level)
 
 # Shell index.html cached in memory — nonce is injected per-request at serve time.
-# The process restarts on file change in development (reload=True in uvicorn),
-# so simple module-level caching requires no invalidation logic.
-_INDEX_CACHE: str | None = None
-
 SESSION_COOKIE = "jl_session"
 CSRF_COOKIE = "jl_csrf"
 ID_TOKEN_COOKIE = "jl_id_hint"
@@ -325,6 +321,8 @@ async def auth_callback(code: str, state: str) -> Response:
         idp_session_ref=identity.idp_session_ref,
         authenticated_at_epoch=identity.authenticated_at_epoch,
         post_login_redirect=post_login_redirect,
+        display_name=identity.display_name,
+        email=identity.email,
     )
     _set_id_token_cookie(response, tokens["id_token"])
     return response
@@ -357,11 +355,17 @@ async def _establish_session(
     idp_session_ref: Optional[str],
     authenticated_at_epoch: int,
     post_login_redirect: str,
+    display_name: Optional[str] = None,
+    email: Optional[str] = None,
 ) -> Response:
     """Resolve principal + create durable session + set cookies."""
     async with db_connection() as conn:
         principal = await resolve_or_provision_principal(
-            conn, idp_subject_ref=idp_subject_ref, idp_issuer=idp_issuer
+            conn,
+            idp_subject_ref=idp_subject_ref,
+            idp_issuer=idp_issuer,
+            display_name=display_name,
+            email=email,
         )
         if principal is None or not principal["active"]:
             # Unknown/inactive principal — fail closed, no existence leakage
@@ -406,32 +410,58 @@ async def _establish_session(
 async def auth_logout(request: Request) -> Response:
     """Retire the session server-side, clear cookies, IdP logout hint."""
     session = await _resolve_session(request)
-    if session is not None and not _csrf_ok(request, session):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "csrf")
+    # CSRF must be checked unconditionally: even without a live BFF session the
+    # browser still holds jl_id_hint (HttpOnly), which a CSRF POST would send
+    # and use to terminate the user's Keycloak SSO session.
     if session is not None:
+        if not _csrf_ok(request, session):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "csrf")
+    else:
+        # No live session — still verify the CSRF cookie exists and matches the
+        # header, binding the request to the browser that owns the cookie.
+        csrf_cookie = request.cookies.get("jl_csrf", "")
+        csrf_header = request.headers.get("x-csrf-token", "")
+        if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "csrf")
+    if session is not None:
+        sub = ""
         async with db_connection() as conn:
             store = PgSessionStore(conn)
             await store.retire(
                 handle_digest=session["handle_digest"],
                 expected_generation=session["session_generation"],
             )
+            # idp_subject_ref lives in g1.principals, not browser_sessions
+            async with conn.cursor() as _cur:
+                await _cur.execute(
+                    "SELECT idp_subject_ref FROM g1.principals WHERE principal_id = %s",
+                    (session["principal_id"],),
+                )
+                _prow = await _cur.fetchone()
+                if _prow:
+                    sub = _prow[0] or ""
             await conn.commit()
+        # Server-side Keycloak session termination — guarantees the SSO
+        # session is gone regardless of RP-initiated logout redirect outcome.
+        if sub and not sub.startswith("dev-"):
+            try:
+                await keycloak_admin.logout_user_sessions(sub)
+            except Exception:
+                pass  # best-effort; the BFF session is already retired
     response: Response
     sid = str(session.get("idp_session_ref") or "") if session else ""
-    if sid and not sid.startswith("dev-sid-"):
-        # RP-initiated logout: end the IdP SSO session too, then the
-        # IdP lands back on the shell. Without this the Keycloak
-        # session outlives our logout and the next sign-in silently
-        # re-authenticates via SSO instead of prompting.
-        # id_token_hint skips Keycloak's logout confirmation page.
+    id_token_hint = request.cookies.get(ID_TOKEN_COOKIE, "")
+    # RP-initiated logout whenever we have a real Keycloak session.
+    # Use id_token_hint as the gate (always set on OIDC login); sid may be
+    # absent when Keycloak is not configured to include it in the ID token.
+    # Skip for dev-bypass sessions (sid starts with "dev-sid-").
+    if id_token_hint and not sid.startswith("dev-sid-"):
         from urllib.parse import urlencode
         logout_params: dict = {
             "client_id": settings.keycloak_client_id,
             "post_logout_redirect_uri": f"{settings.bff_public_url}/",
+            "id_token_hint": id_token_hint,
         }
-        id_token_hint = request.cookies.get(ID_TOKEN_COOKIE, "")
-        if id_token_hint:
-            logout_params["id_token_hint"] = id_token_hint
         params = urlencode(logout_params)
         response = RedirectResponse(
             f"{oidc.end_session_endpoint()}?{params}",
@@ -474,22 +504,36 @@ async def api_session(request: Request) -> JSONResponse:
         async with db_connection() as conn:
             permissions = sorted(await access.effective_permissions(
                 conn, session["principal_id"], bound))
+            is_platform_admin = await access.principal_is_platform_admin(
+                conn, session["principal_id"])
+            # Fetch profile fields (populated from IdP claims at login)
+            cur = await conn.execute(
+                "SELECT display_name, email, kind FROM g1.principals"
+                " WHERE principal_id = %s",
+                (session["principal_id"],))
+            profile_row = await cur.fetchone()
+        display_name = profile_row[0] if profile_row else None
+        email = profile_row[1] if profile_row else None
+        principal_kind = profile_row[2] if profile_row else None
+        # platform_admin permission for the shell's nav gate
+        if is_platform_admin and "platform_admin" not in permissions:
+            permissions = sorted([*permissions, "platform_admin"])
         return JSONResponse(
             {
                 "state": "ready",
-                # g1 shell-view contract fields
                 "tenant_id": tenant["tenant_id"],
                 "principal_id": session["principal_id"],
                 "admission_revision": session.get("session_generation")
                     or session.get("credential_generation"),
-                # Effective permissions — the shell projects these to
-                # decide which mutation controls to render. The API
-                # remains the authoritative gate; this is UX-only.
                 "permissions": permissions,
-                # operational extensions (membership picker etc.)
                 "tenant": tenant,
                 "memberships": memberships,
                 "authenticated_at": session["authenticated_at"].isoformat(),
+                # Profile
+                "display_name": display_name,
+                "email": email,
+                "principal_kind": principal_kind,
+                "is_platform_admin": is_platform_admin,
             }
         )
 
@@ -739,7 +783,7 @@ _VALID_ROLES = {"admin", "operator", "viewer", "auditor"}
 
 
 async def _require_admin(request: Request) -> dict:
-    """Resolve session and assert tenant:admin role. Returns the session dict."""
+    """Resolve session and assert tenant:admin (or platform admin) role."""
     session = await _resolve_session(request)
     if session is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "unauthenticated")
@@ -748,8 +792,11 @@ async def _require_admin(request: Request) -> dict:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "no tenant bound")
     async with db_connection() as conn:
         membership = await check_membership(conn, session["principal_id"], bound)
-    if membership is None or membership["role"] not in ("admin", "tenant_admin"):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "admin required")
+        if membership is None or membership["role"] not in ("admin", "tenant_admin"):
+            is_platform = await access.principal_is_platform_admin(
+                conn, session["principal_id"])
+            if not is_platform:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "admin required")
     return session
 
 
@@ -762,7 +809,8 @@ async def admin_list_users(request: Request) -> JSONResponse:
             await cur.execute(
                 """
                 SELECT p.principal_id, p.idp_subject_ref, p.active, p.created_at,
-                       m.role, m.state
+                       m.role, m.state,
+                       p.display_name, p.email
                   FROM g1.principals p
                   JOIN g1.tenant_memberships m USING (principal_id)
                  WHERE m.tenant_id = %s
@@ -774,8 +822,15 @@ async def admin_list_users(request: Request) -> JSONResponse:
     kc_data = await keycloak_admin.get_users_by_ids([r[1] for r in rows])
     users = []
     for row in rows:
-        principal_id, sub, active, created_at, role, mem_state = row
+        principal_id, sub, active, created_at, role, mem_state, db_name, db_email = row
         kc = kc_data.get(sub, {})
+        # Priority: Keycloak (live) → DB profile (set at last login) → dev subject fallback
+        if not kc and sub.startswith("dev-"):
+            label = sub[4:].replace("-", " ").title()
+            fallback_email = f"{sub}@dev.local"
+        else:
+            label = db_name or ""
+            fallback_email = db_email or ""
         users.append({
             "principal_id": principal_id,
             "idp_subject_ref": sub,
@@ -783,8 +838,8 @@ async def admin_list_users(request: Request) -> JSONResponse:
             "created_at": created_at.isoformat() if created_at else None,
             "role": role,
             "membership_state": mem_state,
-            "email": kc.get("email", ""),
-            "first_name": kc.get("firstName", ""),
+            "email": kc.get("email", fallback_email),
+            "first_name": kc.get("firstName", label),
             "last_name": kc.get("lastName", ""),
             "kc_enabled": kc.get("enabled", True),
         })
@@ -824,14 +879,16 @@ async def admin_invite_user(request: Request) -> JSONResponse:
     cred_gen = f"cred-gen-{secrets.token_urlsafe(8)}"
     async with db_connection() as conn:
         async with conn.cursor() as cur:
+            display = f"{first_name} {last_name}".strip()
             await cur.execute(
                 """
                 INSERT INTO g1.principals
                     (principal_id, kind, credential_generation,
-                     idp_subject_ref, idp_issuer, active)
-                VALUES (%s, 'human_browser_session', %s, %s, %s, TRUE)
+                     idp_subject_ref, idp_issuer, active,
+                     display_name, email)
+                VALUES (%s, 'human_browser_session', %s, %s, %s, TRUE, %s, %s)
                 """,
-                (principal_id, cred_gen, kc_user_id, issuer),
+                (principal_id, cred_gen, kc_user_id, issuer, display, email),
             )
             await cur.execute(
                 """
@@ -845,6 +902,7 @@ async def admin_invite_user(request: Request) -> JSONResponse:
     return JSONResponse(
         {"principal_id": principal_id, "temp_password": temp_password},
         status_code=201,
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -944,6 +1002,34 @@ async def admin_reactivate_user(principal_id: str, request: Request) -> JSONResp
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/admin/users/{principal_id}/reset-password")
+async def admin_reset_password(principal_id: str, request: Request) -> JSONResponse:
+    session = await _require_admin(request)
+    if not _csrf_ok(request, session):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "csrf")
+    tenant_id = session["bound_tenant_id"]
+    async with db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT idp_subject_ref FROM g1.principals WHERE principal_id = %s",
+                (principal_id,),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                raise HTTPException(404, "principal not found")
+            sub = row[0]
+            await cur.execute(
+                "SELECT 1 FROM g1.tenant_memberships WHERE principal_id=%s AND tenant_id=%s",
+                (principal_id, tenant_id),
+            )
+            if await cur.fetchone() is None:
+                raise HTTPException(403, "user not in this tenant")
+    new_pw = keycloak_admin.generate_temp_password()
+    await keycloak_admin.reset_password(sub, new_pw, temporary=True)
+    return JSONResponse({"ok": True, "temp_password": new_pw},
+                        headers={"Cache-Control": "no-store"})
+
+
 @app.delete("/api/admin/users/{principal_id}")
 async def admin_delete_user(principal_id: str, request: Request) -> JSONResponse:
     session = await _require_admin(request)
@@ -990,6 +1076,89 @@ async def admin_delete_user(principal_id: str, request: Request) -> JSONResponse
                 )
         await conn.commit()
     return JSONResponse({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# TV Mode — kiosk/NOC display-only sessions
+# ---------------------------------------------------------------------------
+# Token CRUD (create/list/revoke) is handled by the API's platform router
+# at /api/v1/platform/display-tokens.  The BFF only handles the
+# session-exchange step: convert a raw display token into a browser session.
+
+
+@app.get("/auth/tv")
+async def auth_tv(request: Request) -> Response:
+    """Exchange a display token (jld_…) for a read-only browser session.
+
+    Usage: /auth/tv?token=jld_<raw>
+    On success: redirects to /tv with session + CSRF cookies set.
+    """
+    import hashlib as _hashlib
+    token = request.query_params.get("token", "")
+    if not token:
+        return RedirectResponse("/?error=tv_token_missing",
+                                status_code=status.HTTP_302_FOUND)
+
+    # display_tokens uses SHA-256 (not HMAC) — same as the API issues
+    token_digest = _hashlib.sha256(token.encode()).hexdigest()
+    now = _utcnow()
+
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            """
+            SELECT t.principal_id, t.tenant_id
+              FROM g1.display_tokens t
+              JOIN g1.principals p ON p.principal_id = t.principal_id
+             WHERE t.token_digest = %s
+               AND t.retired = FALSE
+               AND (t.expires_at IS NULL OR t.expires_at > %s)
+               AND p.active = TRUE
+               AND p.kind = 'display_principal'
+            """,
+            (token_digest, now))
+        row = await cur.fetchone()
+
+    if row is None:
+        return RedirectResponse("/?error=tv_token_invalid",
+                                status_code=status.HTTP_302_FOUND)
+
+    tv_principal_id, tenant_id = row
+    handle = secrets.token_urlsafe(48)
+    csrf = secrets.token_urlsafe(32)
+
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            "SELECT credential_generation FROM g1.principals"
+            " WHERE principal_id = %s",
+            (tv_principal_id,))
+        cred_row = await cur.fetchone()
+        cred_gen = cred_row[0] if cred_row else "tv-cred"
+        await conn.execute(
+            """
+            INSERT INTO g1.browser_sessions
+                (handle_digest, principal_id, session_generation,
+                 credential_generation, csrf_digest,
+                 authenticated_at, created_at, expires_at, retired,
+                 bound_tenant_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s,
+                    %s + interval '365 days', FALSE, %s)
+            """,
+            (
+                digest_handle(handle),
+                tv_principal_id,
+                f"session-gen-{secrets.token_urlsafe(12)}",
+                cred_gen,
+                digest_token(csrf),
+                now, now, now,
+                tenant_id,
+            ),
+        )
+        await conn.commit()
+
+    response = RedirectResponse("/tv", status_code=status.HTTP_302_FOUND)
+    _set_session_cookie(response, handle)
+    _set_csrf_cookie(response, csrf)
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -1066,87 +1235,76 @@ _STATUS_PAGE_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>{{TENANT_NAME}} — Status</title>
+<title>{TENANT_NAME} — Status</title>
 <style>
-*{{box-sizing:border-box;margin:0;padding:0;}}
-body{{
+*{box-sizing:border-box;margin:0;padding:0;}
+body{
   background:#0f1115;color:#e6e8ec;
   font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
   font-size:14px;min-height:100vh;display:flex;flex-direction:column;
-}}
-/* Header */
-header{{
+}
+header{
   background:#161a22;border-bottom:1px solid #262c3a;
   padding:0 24px;height:56px;display:flex;align-items:center;
   justify-content:space-between;gap:12px;position:sticky;top:0;z-index:10;
-}}
-header .site-name{{font-weight:600;font-size:15px;}}
-header button{{
+}
+header .site-name{font-weight:600;font-size:15px;}
+header button{
   display:flex;align-items:center;gap:6px;font-size:12px;color:#8b93a5;
   background:none;border:none;cursor:pointer;padding:4px 8px;border-radius:6px;
   font-family:inherit;transition:color .15s;
-}}
-header button:hover{{color:#e6e8ec;}}
-header button svg{{transition:transform .15s;}}
-header button.spinning svg{{animation:spin 1s linear infinite;}}
-/* Main */
-main{{flex:1;max-width:640px;margin:0 auto;width:100%;padding:40px 24px;}}
-/* Status banner */
-.banner{{
+}
+header button:hover{color:#e6e8ec;}
+header button svg{transition:transform .15s;}
+header button.spinning svg{animation:spin 1s linear infinite;}
+main{flex:1;max-width:640px;margin:0 auto;width:100%;padding:40px 24px;}
+.banner{
   display:flex;align-items:center;gap:16px;padding:20px 24px;
   border-radius:14px;border:1px solid;margin-bottom:32px;
-}}
-.banner-icon{{flex-shrink:0;}}
-.banner-title{{font-weight:600;font-size:17px;}}
-.banner-sub{{font-size:12px;color:#8b93a5;margin-top:2px;}}
-/* Metrics grid */
-.metrics{{
+}
+.banner-icon{flex-shrink:0;}
+.banner-title{font-weight:600;font-size:17px;}
+.banner-sub{font-size:12px;color:#8b93a5;margin-top:2px;}
+.metrics{
   display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
   gap:12px;margin-bottom:32px;
-}}
-.metric{{
+}
+.metric{
   padding:16px 18px;border-radius:10px;background:#161a22;
   border:1px solid #262c3a;text-align:center;
-}}
-.metric-val{{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;}}
-.metric-lbl{{font-size:11px;color:#8b93a5;margin-top:4px;}}
-/* Component list */
-.components{{
+}
+.metric-val{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;}
+.metric-lbl{font-size:11px;color:#8b93a5;margin-top:4px;}
+.components{
   border-radius:10px;border:1px solid #262c3a;background:#161a22;overflow:hidden;
-}}
-.components-header{{
+}
+.components-header{
   padding:12px 18px;border-bottom:1px solid #262c3a;font-size:12px;
   font-weight:600;color:#8b93a5;text-transform:uppercase;letter-spacing:.06em;
-}}
-.component-row{{
+}
+.component-row{
   display:flex;align-items:center;justify-content:space-between;
   padding:13px 18px;border-bottom:1px solid #1c2130;
-}}
-.component-row:last-child{{border-bottom:none;}}
-.component-name{{font-size:13px;color:#e6e8ec;}}
-.component-status{{
-  display:flex;align-items:center;gap:6px;font-size:12px;
-}}
-.dot{{
-  width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;
-}}
-/* Footer */
-.auto-refresh{{margin-top:40px;text-align:center;font-size:12px;color:#5a6274;}}
-footer{{
+}
+.component-row:last-child{border-bottom:none;}
+.component-name{font-size:13px;color:#e6e8ec;}
+.component-status{display:flex;align-items:center;gap:6px;font-size:12px;}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;}
+.auto-refresh{margin-top:40px;text-align:center;font-size:12px;color:#5a6274;}
+footer{
   text-align:center;padding:16px 24px;border-top:1px solid #1c2130;
   font-size:11px;color:#5a6274;
-}}
-footer span{{color:#6ea8fe;font-weight:500;}}
-/* Loading / error */
-.centered{{text-align:center;padding-top:80px;color:#8b93a5;}}
-.centered p{{font-size:16px;margin-bottom:8px;color:#e6e8ec;}}
-.centered small{{font-size:13px;}}
-@keyframes spin{{to{{transform:rotate(360deg);}}}}
+}
+footer span{color:#6ea8fe;font-weight:500;}
+.centered{text-align:center;padding-top:80px;color:#8b93a5;}
+.centered p{font-size:16px;margin-bottom:8px;color:#e6e8ec;}
+.centered small{font-size:13px;}
+@keyframes spin{to{transform:rotate(360deg);}}
 </style>
 </head>
 <body>
 <header>
-  <span class="site-name" id="site-name">{{TENANT_NAME}}</span>
+  <span class="site-name" id="site-name">{TENANT_NAME}</span>
   <button id="refresh-btn" onclick="doRefresh()">
     <svg id="refresh-icon" width="13" height="13" viewBox="0 0 24 24" fill="none"
          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1170,37 +1328,38 @@ footer span{{color:#6ea8fe;font-weight:500;}}
     <p>Página de status não encontrada</p>
     <small>Verifique o endereço ou contate o responsável pelo serviço.</small>
   </div>
-  <div class="centered" id="error-generic" style="display:none" style="color:#ff6b6b">
+  <div class="centered" id="error-generic" style="display:none;color:#ff6b6b">
     Não foi possível carregar o status. Tente novamente em instantes.
   </div>
 </main>
 <footer>Monitorado por <span>JLMirror</span></footer>
 <script>
-var SLUG=window.location.pathname.replace(/^\\/status\\//,'');
-var LABELS={{
+var SLUG=window.location.pathname.replace(/^\/status\//,'');
+function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+var LABELS={
   operational:'Todos os sistemas operacionais',
   degraded:'Degradação de performance',
   outage:'Interrupção de serviço',
   unknown:'Status desconhecido'
-}};
-var COLORS={{
-  operational:{{color:'#6fdc8c',bg:'rgba(111,220,140,.08)',border:'rgba(111,220,140,.2)'}},
-  degraded:{{color:'#e6b450',bg:'rgba(230,180,80,.08)',border:'rgba(230,180,80,.2)'}},
-  outage:{{color:'#ff6b6b',bg:'rgba(255,107,107,.08)',border:'rgba(255,107,107,.2)'}},
-  unknown:{{color:'#8b93a5',bg:'rgba(139,147,165,.08)',border:'rgba(139,147,165,.2)'}}
-}};
+};
+var COLORS={
+  operational:{color:'#6fdc8c',bg:'rgba(111,220,140,.08)',border:'rgba(111,220,140,.2)'},
+  degraded:{color:'#e6b450',bg:'rgba(230,180,80,.08)',border:'rgba(230,180,80,.2)'},
+  outage:{color:'#ff6b6b',bg:'rgba(255,107,107,.08)',border:'rgba(255,107,107,.2)'},
+  unknown:{color:'#8b93a5',bg:'rgba(139,147,165,.08)',border:'rgba(139,147,165,.2)'}
+};
 
-function fmtDatetime(){{
-  return new Date().toLocaleString('pt-BR',{{
+function fmtDatetime(){
+  return new Date().toLocaleString('pt-BR',{
     day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'
-  }});
-}}
+  });
+}
 
-function dot(color){{
+function dot(color){
   return '<span class="dot" style="background:'+color+'"></span>';
-}}
+}
 
-function render(d){{
+function render(d){
   var s=d.status||'unknown';
   var c=COLORS[s]||COLORS.unknown;
   var now=fmtDatetime();
@@ -1208,11 +1367,27 @@ function render(d){{
   var criticalAlerts=d.critical_alerts||0;
   var sourceCount=d.source_count||0;
 
-  // Component rows
   var monStatus=criticalAlerts>0?'Incidente ativo':activeAlerts>0?'Degradado':'Operacional';
   var monColor=criticalAlerts>0?'#ff6b6b':activeAlerts>0?'#e6b450':'#6fdc8c';
   var srcStatus=sourceCount>0?(sourceCount+' fonte'+(sourceCount!==1?'s':'')+' ativa'+(sourceCount!==1?'s':'')):'Nenhuma fonte configurada';
   var srcColor=sourceCount>0?'#6fdc8c':'#e6b450';
+
+  var STATUS_COMP_COLORS={operational:'#6fdc8c',degraded:'#e6b450',outage:'#ff6b6b',maintenance:'#8b93a5'};
+  var STATUS_COMP_LABELS={operational:'Operacional',degraded:'Degradado',outage:'Interrupção de serviço',maintenance:'Manutenção'};
+  var comps=d.components&&d.components.length>0?d.components:null;
+  var compRows='';
+  if(comps){
+    for(var i=0;i<comps.length;i++){
+      var comp=comps[i];
+      var compColor=STATUS_COMP_COLORS[comp.status]||'#8b93a5';
+      var compLabel=STATUS_COMP_LABELS[comp.status]||comp.status;
+      compRows+=componentRow(comp.name,compLabel,compColor);
+    }
+  }else{
+    compRows=componentRow('Monitoramento',monStatus,monColor)+
+      componentRow('Coleta de dados',srcStatus,srcColor)+
+      componentRow('Sistema geral',LABELS[s],c.color);
+  }
 
   document.getElementById('content').innerHTML=
     '<div class="banner" style="border-color:'+c.border+';background:'+c.bg+'">'+
@@ -1229,63 +1404,61 @@ function render(d){{
     '</div>'+
     '<div class="components">'+
       '<div class="components-header">Componentes</div>'+
-      componentRow('Monitoramento',monStatus,monColor)+
-      componentRow('Coleta de dados',srcStatus,srcColor)+
-      componentRow('Sistema geral',LABELS[s],c.color)+
+      compRows+
     '</div>'+
     '<div class="auto-refresh">Atualização automática a cada 30 segundos</div>';
 
   document.getElementById('loading').style.display='none';
   document.getElementById('content').style.display='';
-}}
+}
 
-function metricCard(label,value,color){{
+function metricCard(label,value,color){
   return '<div class="metric">'+
     '<div class="metric-val" style="color:'+color+'">'+value+'</div>'+
     '<div class="metric-lbl">'+label+'</div>'+
   '</div>';
-}}
+}
 
-function componentRow(name,status,color){{
+function componentRow(name,status,color){
   return '<div class="component-row">'+
-    '<span class="component-name">'+name+'</span>'+
+    '<span class="component-name">'+escHtml(name)+'</span>'+
     '<span class="component-status" style="color:'+color+'">'+
-      dot(color)+status+
+      dot(color)+escHtml(status)+
     '</span>'+
   '</div>';
-}}
+}
 
-function statusSVG(status,color){{
-  var paths={{
+function statusSVG(status,color){
+  var paths={
     operational:'<polyline points="20 6 9 17 4 12"/>',
     degraded:'<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
     outage:'<polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
     unknown:'<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>'
-  }};
+  };
   return '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="'+color+
     '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+
     (paths[status]||paths.unknown)+'</svg>';
-}}
+}
 
-function showError(is404){{
+function showError(is404){
   document.getElementById('loading').style.display='none';
   document.getElementById('content').style.display='none';
   document.getElementById('error-404').style.display=is404?'':'none';
   document.getElementById('error-generic').style.display=is404?'none':'';
-}}
+}
 
-async function doRefresh(){{
+async function doRefresh(){
   var btn=document.getElementById('refresh-btn');
   btn.classList.add('spinning');
-  try{{
+  try{
     var r=await fetch('/api/public/status/'+SLUG);
-    if(r.status===404){{showError(true);return;}}
-    if(!r.ok){{showError(false);return;}}
+    if(r.status===404){showError(true);return;}
+    if(!r.ok){showError(false);return;}
     var d=await r.json();
     render(d);
-  }}catch(e){{showError(false);}}
-  finally{{btn.classList.remove('spinning');}}
-}}
+  }catch(e){showError(false);}
+  finally{btn.classList.remove('spinning');}
+}
 
 doRefresh();
 setInterval(doRefresh,30000);
@@ -1339,7 +1512,8 @@ async def public_status_json(slug: str) -> JSONResponse:
             cur = await conn.execute(
                 """
                 SELECT COUNT(*) FROM monitoring.monitoring_source
-                 WHERE tenant_id = %s AND enabled = true
+                 WHERE tenant_id = %s
+                   AND operational_evidence_state != 'unavailable'
                 """, (tenant_id,))
             src_row = await cur.fetchone()
     except Exception:
@@ -1386,7 +1560,7 @@ async def public_status_page(slug: str, request: Request) -> Response:
                         media_type="text/plain")
     import html as _html
     safe_name = _html.escape(str(row[0]))
-    rendered = _STATUS_PAGE_HTML.replace("{{TENANT_NAME}}", safe_name)
+    rendered = _STATUS_PAGE_HTML.replace("{TENANT_NAME}", safe_name)
     # Status page has inline JS — inject the per-request nonce so the CSP
     # set by SecurityHeadersMiddleware allows it to execute.
     nonce = request.state.nonce
@@ -1411,17 +1585,14 @@ async def shell_cache_control(request: Request, call_next):
 @app.get("/{full_path:path}", include_in_schema=False)
 async def spa_catch_all(request: Request, full_path: str) -> Response:
     """Serve static asset if it exists, otherwise return index.html for SPA routing."""
-    global _INDEX_CACHE
     candidate = (SHELL_DIR / full_path).resolve()
     if candidate.is_file() and candidate.is_relative_to(SHELL_DIR.resolve()):
         return FileResponse(candidate)
     # Serve the SPA shell with nonce injected into every <script> tag so the
     # Content-Security-Policy (set by SecurityHeadersMiddleware) allows them.
     nonce = request.state.nonce
-    if _INDEX_CACHE is None:
-        index = SHELL_DIR / "index.html"
-        _INDEX_CACHE = index.read_text(encoding="utf-8")
-    html = re.sub(r"<script(\s|>)", f'<script nonce="{nonce}"\\1', _INDEX_CACHE)
+    html = re.sub(r"<script(\s|>)", f'<script nonce="{nonce}"\\1',
+                  (SHELL_DIR / "index.html").read_text(encoding="utf-8"))
     return Response(content=html, media_type="text/html",
                     headers={"Cache-Control": "no-cache"})
 
