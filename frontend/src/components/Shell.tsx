@@ -51,7 +51,7 @@ import { ClientCompaniesPage } from "@/pages/ClientCompaniesPage";
 import { PermissionCatalogPage } from "@/pages/PermissionCatalogPage";
 import { useBranding } from "@/hooks/useBranding";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { BugReportButton } from "@/components/BugReportButton";
 import { PageInfoButton } from "@/components/PageInfoButton";
 import { LanguageToggle } from "@/components/LanguageToggle";
@@ -125,6 +125,18 @@ export function Shell() {
   });
 
   const [sessionExpired, setSessionExpired] = useState<boolean>(false);
+  const [tenantDropdownOpen, setTenantDropdownOpen] = useState(false);
+  const tenantDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!tenantDropdownOpen) return;
+    const closeOnOutside = (e: MouseEvent) => {
+      if (tenantDropdownRef.current && !tenantDropdownRef.current.contains(e.target as Node))
+        setTenantDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutside);
+    return () => document.removeEventListener("mousedown", closeOnOutside);
+  }, [tenantDropdownOpen]);
 
   useEffect(() => {
     const handler = () => setSessionExpired(true);
@@ -702,11 +714,48 @@ export function Shell() {
                 </span>
               )}
             </button>
-            <span className="text-xs px-2 py-0.5 rounded-full border"
-              title={s.tenant_id}
-              style={{ color: "var(--text-muted)", borderColor: "var(--border)", background: "var(--surface-2)", cursor: "default" }}>
-              {s.tenant?.display_name ?? s.tenant_id}
-            </span>
+            {(s.memberships ?? []).length > 1 ? (
+              <div ref={tenantDropdownRef} className="relative">
+                <button
+                  onClick={() => setTenantDropdownOpen((v) => !v)}
+                  title={s.tenant_id}
+                  className="text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 cursor-pointer transition-colors hover:border-[var(--brand)]"
+                  style={{ color: "var(--text-muted)", borderColor: "var(--border)", background: "var(--surface-2)" }}
+                >
+                  <Building2 size={10} />
+                  <span className="max-w-[120px] truncate">{s.tenant?.display_name ?? s.tenant_id}</span>
+                  <ChevronDown size={10} style={{ opacity: 0.6 }} />
+                </button>
+                {tenantDropdownOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-60 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 py-1 overflow-hidden">
+                    <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--text-dim)" }}>
+                      {t("topbar.switchContext", "Mudar contexto")}
+                    </div>
+                    {(s.memberships ?? []).map((m) => (
+                      <button
+                        key={m.tenant_id}
+                        onClick={() => { handleSelectTenant(m.tenant_id); setTenantDropdownOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--surface-2)] transition-colors text-left"
+                        style={{ color: m.tenant_id === s.tenant_id ? "var(--brand)" : "var(--text)" }}
+                      >
+                        <Building2 size={12} style={{ flexShrink: 0 }} />
+                        <span className="flex-1 truncate text-[13px]">{m.display_name ?? m.tenant_id}</span>
+                        {m.role && <span className="text-[10px] text-[var(--text-dim)] truncate">{m.role}</span>}
+                        {m.tenant_id === s.tenant_id && (
+                          <span className="text-[10px] font-bold flex-shrink-0" style={{ color: "var(--brand)" }}>✓</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span className="text-xs px-2 py-0.5 rounded-full border"
+                title={s.tenant_id}
+                style={{ color: "var(--text-muted)", borderColor: "var(--border)", background: "var(--surface-2)", cursor: "default" }}>
+                {s.tenant?.display_name ?? s.tenant_id}
+              </span>
+            )}
           </div>
         </header>
 

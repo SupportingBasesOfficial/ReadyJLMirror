@@ -111,7 +111,8 @@
     "criticalAlerts": "Alertas críticos",
     "platformAdmin": "Platform Admin",
     "infoButton": "Informações desta tela",
-    "bugButton": "Informar bug"
+    "bugButton": "Informar bug",
+    "switchContext": "Mudar contexto"
   },
   "sidebar": {
     "collapseMenu": "Recolher menu",

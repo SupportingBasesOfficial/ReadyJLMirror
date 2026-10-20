@@ -111,7 +111,8 @@
     "criticalAlerts": "Critical alerts",
     "platformAdmin": "Platform Admin",
     "infoButton": "Screen information",
-    "bugButton": "Report a bug"
+    "bugButton": "Report a bug",
+    "switchContext": "Switch context"
   },
   "sidebar": {
     "collapseMenu": "Collapse menu",
