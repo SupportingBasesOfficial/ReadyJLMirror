@@ -87,7 +87,7 @@ function CreateScriptForm({ tenantId, onDone }: { tenantId: string; onDone: () =
     <Card className="p-4 space-y-3">
       <h3 className="text-sm font-medium">{t("automation.newScriptTitle")}</h3>
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">{t("automation.colName")}</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("automation.colName")} *</label>
         <input value={name} onChange={e => setName(e.target.value)}
           placeholder="e.g. Alert webhook"
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />

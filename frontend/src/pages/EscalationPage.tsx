@@ -139,15 +139,20 @@ function AddStepForm({
         </div>
         <div className="space-y-0.5">
           <label className="text-[10px] text-[var(--text-muted)]">
-            {channel === "email_smtp@1" ? t("escalation.emailAddress") : t("escalation.destRef")}
+            {channel === "email_smtp@1" ? t("escalation.emailAddress") : t("escalation.destRef")} *
           </label>
           <input
             type="text"
             value={destRef}
             onChange={(e) => setDestRef(e.target.value)}
-            placeholder={channel === "email_smtp@1" ? "ops@example.com" : "+5511..."}
+            placeholder={channel === "email_smtp@1" ? "ops@example.com" : channel === "sms_twilio@1" ? "+5511999990000" : channel === "slack_bot@1" ? "#channel ou @user" : "destino"}
             className="w-full text-xs bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]"
           />
+          <p className="text-[9px] text-[var(--text-muted)] mt-0.5">
+            {channel === "email_smtp@1" && "Endereço de e-mail do destinatário."}
+            {channel === "sms_twilio@1" && "Número E.164 com DDI: +55119…"}
+            {channel === "slack_bot@1" && "ID do canal Slack (C…) ou @username."}
+          </p>
         </div>
       </div>
       <div className="space-y-0.5">

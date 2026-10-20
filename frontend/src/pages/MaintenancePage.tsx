@@ -151,7 +151,7 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
             <h2 className="font-semibold">{t("maintenance.formTitle")}</h2>
 
             <div className="space-y-1">
-              <label className="text-sm font-medium">{t("maintenance.labelField")}</label>
+              <label className="text-sm font-medium">{t("maintenance.labelField")} *</label>
               <input
                 className="w-full border border-[var(--border)] rounded px-2 py-1.5 text-sm bg-[var(--surface)] focus:outline-none focus:ring-1 focus:ring-[var(--brand)]"
                 placeholder="e.g. Planned DB upgrade"

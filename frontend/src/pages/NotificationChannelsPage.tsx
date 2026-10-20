@@ -95,7 +95,7 @@ function AddDestinationForm({
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">{t("channels.destField")}</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("channels.destField")} *</label>
         <input
           type="text"
           value={destRef}

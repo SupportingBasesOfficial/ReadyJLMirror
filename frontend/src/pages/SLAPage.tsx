@@ -80,25 +80,30 @@ function CreatePolicyForm({ tenantId, onDone }: { tenantId: string; onDone: () =
     <Card className="p-4 space-y-3">
       <h3 className="text-sm font-medium">{t("sla.newPolicyTitle")}</h3>
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">{t("sla.policyName")}</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("sla.policyName")} *</label>
         <input value={name} onChange={e => setName(e.target.value)}
           placeholder="e.g. Critical SLA"
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
       </div>
       <div className="space-y-1">
         <label className="text-xs text-[var(--text-muted)]">{t("sla.severityMatch")}</label>
-        <input value={severity} onChange={e => setSeverity(e.target.value)}
-          placeholder="critical, high, medium, low…"
-          className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
+        <select value={severity} onChange={e => setSeverity(e.target.value)}
+          className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]">
+          <option value="">Qualquer severidade</option>
+          <option value="informational">informational</option>
+          <option value="warning">warning</option>
+          <option value="degraded">degraded</option>
+          <option value="critical">critical</option>
+        </select>
       </div>
       <div className="flex gap-2">
         <div className="flex-1 space-y-1">
-          <label className="text-xs text-[var(--text-muted)]">{t("sla.responseTime")}</label>
+          <label className="text-xs text-[var(--text-muted)]">{t("sla.responseTime")} (min)</label>
           <input type="number" min="1" value={respMins} onChange={e => setRespMins(e.target.value)}
             className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
         </div>
         <div className="flex-1 space-y-1">
-          <label className="text-xs text-[var(--text-muted)]">{t("sla.resolveTime")}</label>
+          <label className="text-xs text-[var(--text-muted)]">{t("sla.resolveTime")} (min)</label>
           <input type="number" min="1" value={resMins} onChange={e => setResMins(e.target.value)}
             className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
         </div>

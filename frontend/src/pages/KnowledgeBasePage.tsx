@@ -79,7 +79,7 @@ function ArticleModal({
         <h3 style={{ fontWeight: 600, marginBottom: 16 }}>{isEditing ? t("kb.editArticle") : t("kb.newArticleTitle")}</h3>
 
         <label style={{ fontSize: "0.82rem", display: "block", marginBottom: 10 }}>
-          {t("kb.titleField")}
+          {t("kb.titleField")} *
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("kb.titlePlaceholder")} style={{ display: "block", width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: 6, padding: "7px 10px", background: "var(--surface-2)", color: "var(--text)", marginTop: 4, fontSize: "0.85rem" }} />
         </label>
 

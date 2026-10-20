@@ -114,7 +114,7 @@ function CreateTemplateForm({ tenantId, onDone }: { tenantId: string; onDone: ()
     <Card className="p-4 space-y-3">
       <h3 className="text-sm font-medium">{t("reports.newTemplateTitle")}</h3>
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">{t("reports.policyName")}</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("reports.policyName")} *</label>
         <input value={name} onChange={e => setName(e.target.value)}
           placeholder="e.g. Weekly alert digest"
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
@@ -130,7 +130,7 @@ function CreateTemplateForm({ tenantId, onDone }: { tenantId: string; onDone: ()
           </select>
         </div>
         <div className="flex-1 space-y-1">
-          <label className="text-xs text-[var(--text-muted)]">{t("reports.deliveryEmail")}</label>
+          <label className="text-xs text-[var(--text-muted)]">{t("reports.deliveryEmail")} *</label>
           <input type="email" value={email} onChange={e => setEmail(e.target.value)}
             placeholder="ops@example.com"
             className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />

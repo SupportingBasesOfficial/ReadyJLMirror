@@ -172,7 +172,7 @@ function CreateRFCForm({ tenantId, onDone }: { tenantId: string; onDone: () => v
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Descrição — impacto, plano de rollback, passos de teste</label>
+        <label className="text-xs text-[var(--text-muted)]">Descrição — impacto, plano de rollback, passos de teste *</label>
         <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4}
           placeholder="Descreva o impacto esperado, como reverter se necessário e os passos para validar..."
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)] resize-none" />

@@ -56,12 +56,18 @@ function conditionLabel(v: PolicyVersion): string {
   return `health in [${(v.health_classes ?? []).join(", ")}]`;
 }
 
+interface EscalationPolicy {
+  policy_id: string;
+  name?: string;
+}
+
 interface PolicyFormData {
   policy_id: string;
   source_kind: "monitoring_problem" | "monitoring_health_projection";
   problem_min_severity: string;
   health_classes: string[];
   monitoring_source_id: string;
+  escalation_policy_id: string;
 }
 
 const EMPTY_FORM: PolicyFormData = {
@@ -70,16 +76,19 @@ const EMPTY_FORM: PolicyFormData = {
   problem_min_severity: "warning",
   health_classes: ["degraded", "unhealthy"],
   monitoring_source_id: "",
+  escalation_policy_id: "",
 };
 
 function PolicyForm({
   initial,
   onDone,
   sources,
+  escalationPolicies,
 }: {
   initial?: Partial<PolicyFormData>;
   onDone: () => void;
   sources: MonitoringSource[];
+  escalationPolicies: EscalationPolicy[];
 }) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -101,6 +110,9 @@ function PolicyForm({
       }
       if (form.monitoring_source_id) {
         body.monitoring_source_id = form.monitoring_source_id;
+      }
+      if (form.escalation_policy_id) {
+        body.escalation_policy_id = form.escalation_policy_id;
       }
       return api.post("/api/v1/alerting/policies", body);
     },
@@ -227,6 +239,23 @@ function PolicyForm({
         )}
       </div>
 
+      <div>
+        <label className="block text-[var(--text-muted)] mb-1">Política de escalação (opcional)</label>
+        <select
+          value={form.escalation_policy_id}
+          onChange={(e) => setForm((f) => ({ ...f, escalation_policy_id: e.target.value }))}
+          className="w-full px-2 py-1.5 rounded border border-[var(--border)]
+            bg-[var(--surface-2)] text-[var(--text)] text-xs cursor-pointer"
+        >
+          <option value="">Nenhuma</option>
+          {escalationPolicies.map((ep) => (
+            <option key={ep.policy_id} value={ep.policy_id}>
+              {ep.name ?? ep.policy_id}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {error && <p className="text-[var(--red)] text-xs">{error}</p>}
 
       <div className="flex gap-2">
@@ -264,6 +293,12 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
   const sourcesQ = useQuery({
     queryKey: ["monitoring-sources-for-policy"],
     queryFn: () => api.get<MonitoringSource[]>("/api/v1/monitoring/sources"),
+    staleTime: 5 * 60_000,
+  });
+
+  const escalationQ = useQuery({
+    queryKey: ["escalation-policies-for-alert"],
+    queryFn: () => api.get<EscalationPolicy[]>("/api/v1/alerting/escalation-policies"),
     staleTime: 5 * 60_000,
   });
 
@@ -338,7 +373,7 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
           <CardHeader>
             <span className="text-sm font-medium">{t("alertPolicies.createTitle")}</span>
           </CardHeader>
-          <PolicyForm sources={sources} onDone={() => setShowForm(false)} />
+          <PolicyForm sources={sources} escalationPolicies={escalationQ.data ?? []} onDone={() => setShowForm(false)} />
         </Card>
       )}
 
@@ -437,6 +472,7 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
                     <p className="text-xs text-[var(--text-muted)] mb-2">New version for {policyId}</p>
                     <PolicyForm
                       sources={sources}
+                      escalationPolicies={escalationQ.data ?? []}
                       initial={{ policy_id: policyId, source_kind: effective?.source_kind }}
                       onDone={() => { setShowForm(false); setNewVersionFor(null); }}
                     />
