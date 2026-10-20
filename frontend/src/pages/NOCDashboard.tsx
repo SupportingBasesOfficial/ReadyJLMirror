@@ -517,12 +517,20 @@ export function NOCDashboard({ tenantId }: Props) {
     return null;
   }
 
+  const tenantName = session?.tenant?.display_name ?? session?.tenant_id;
+  const hasMultipleTenants = (session?.memberships?.length ?? 0) > 1;
+
   return (
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
-          <h2 className="text-base font-semibold">NOC Overview</h2>
+          <div>
+            <h2 className="text-base font-semibold">NOC Overview</h2>
+            {hasMultipleTenants && tenantName && (
+              <p className="text-xs text-[var(--text-muted)] mt-0.5">{tenantName}</p>
+            )}
+          </div>
           <LiveDot connected={connected} />
         </div>
         <div className="relative" ref={dropdownRef}>

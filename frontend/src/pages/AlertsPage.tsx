@@ -185,6 +185,16 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
     refetchInterval: 30_000,
   });
 
+  const sourcesQ = useQuery({
+    queryKey: ["monitoring-sources", tenantId],
+    queryFn: () => api.get<{ monitoring_source_id: string; display_name: string }[]>("/api/v1/monitoring/sources"),
+    staleTime: 60_000,
+  });
+
+  const sourceNameMap = Object.fromEntries(
+    (sourcesQ.data ?? []).map((s) => [s.monitoring_source_id, s.display_name])
+  );
+
   const snoozeMut = useMutation({
     mutationFn: ({ alertId, minutes }: { alertId: string; minutes: number }) =>
       api.post(`/api/v1/alerting/alerts/${alertId}/snooze`, {
@@ -331,8 +341,8 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
                     <td className="px-4 py-2.5">
                       <Badge variant={lcVariant(a.lifecycle_state)}>{a.lifecycle_state}</Badge>
                     </td>
-                    <td className="px-4 py-2.5 text-[var(--text-muted)] max-w-[120px] truncate font-mono text-[10px]">
-                      {a.monitoring_source_id}
+                    <td className="px-4 py-2.5 text-[var(--text-muted)] max-w-[120px] truncate text-[11px]">
+                      {sourceNameMap[a.monitoring_source_id] ?? a.monitoring_source_id}
                     </td>
                     <td className="px-4 py-2.5 text-[var(--text-muted)] whitespace-nowrap">
                       {fmtTs(a.opened_at)}

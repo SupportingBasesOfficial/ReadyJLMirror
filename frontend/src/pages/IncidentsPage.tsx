@@ -394,11 +394,20 @@ export function IncidentsPage({ tenantId }: { tenantId: string }) {
 
       {q.isSuccess && q.data.length === 0 && (
         <Card>
-          <p className="text-xs text-[var(--text-muted)] px-4 py-6 text-center">
-            {stateFilter
-              ? t("incidents.emptyState", { state: t(`incidents.states.${stateFilter}`, { defaultValue: stateFilter }) })
-              : t("incidents.emptyAll")}
-          </p>
+          <div className="px-4 py-6 text-center space-y-1">
+            <p className="text-xs text-[var(--text-muted)]">
+              {stateFilter === "open"
+                ? t("incidents.emptyOpen", { defaultValue: "Nenhum incidente aberto." })
+                : stateFilter
+                ? t("incidents.emptyState", { state: t(`incidents.states.${stateFilter}`, { defaultValue: stateFilter }) })
+                : t("incidents.emptyAll")}
+            </p>
+            {stateFilter === "open" && (
+              <p className="text-xs text-[var(--text-muted)]">
+                {t("incidents.emptyOpenHint", { defaultValue: "Para criar um incidente, acesse um alerta e clique em \"Escalar para Incidente\"." })}
+              </p>
+            )}
+          </div>
         </Card>
       )}
 

@@ -1036,21 +1036,36 @@ function HealthTab() {
         ) : null}
       </Card>
 
-      {!usageQ.isError && (usageQ.data ?? []).length > 0 && (
-        <Card className="flex flex-col gap-3">
-          <CardHeader>
-            <span className="text-sm font-semibold">Usage consolidado</span>
-            <span className="text-xs text-[var(--text-muted)]">
+      <Card className="flex flex-col gap-3">
+        <CardHeader>
+          <span className="text-sm font-semibold">Usage consolidado</span>
+          {usageQ.isFetching && <Spinner className="w-3 h-3" />}
+          {!usageQ.isLoading && (usageQ.data ?? []).length > 0 && (
+            <span className="text-xs text-[var(--text-muted)] ml-auto">
               {(usageQ.data ?? []).length} registro{(usageQ.data ?? []).length !== 1 ? "s" : ""}
             </span>
-          </CardHeader>
+          )}
+          <button
+            onClick={() => usageQ.refetch()}
+            className="text-xs text-[var(--brand)] hover:underline ml-auto"
+          >
+            Atualizar
+          </button>
+        </CardHeader>
+        {usageQ.isLoading ? (
+          <div className="flex justify-center py-4"><Spinner /></div>
+        ) : usageQ.isError ? (
+          <p className="text-xs text-[var(--text-muted)] py-2">Endpoint de usage não disponível.</p>
+        ) : (usageQ.data ?? []).length === 0 ? (
+          <p className="text-xs text-[var(--text-muted)] py-2">Nenhum registro de uso encontrado para este período.</p>
+        ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs min-w-[520px]">
               <thead>
                 <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
                   <th className="text-left px-2 py-1.5 font-medium">Tenant</th>
-                  <th className="text-left px-2 py-1.5 font-medium">Meter</th>
-                  <th className="text-right px-2 py-1.5 font-medium">Qtd</th>
+                  <th className="text-left px-2 py-1.5 font-medium">Métrica</th>
+                  <th className="text-right px-2 py-1.5 font-medium">Quantidade</th>
                   <th className="text-left px-2 py-1.5 font-medium">Início</th>
                   <th className="text-left px-2 py-1.5 font-medium">Fim</th>
                 </tr>
@@ -1076,8 +1091,8 @@ function HealthTab() {
               </tbody>
             </table>
           </div>
-        </Card>
-      )}
+        )}
+      </Card>
     </div>
   );
 }
