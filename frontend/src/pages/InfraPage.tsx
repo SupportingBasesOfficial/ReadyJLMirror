@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -49,16 +50,17 @@ function StateBadge({ state }: { state: string }) {
   );
 }
 
-function daysUntil(iso: string | null): string {
+function daysUntil(iso: string | null, tFn?: (k: string) => string): string {
   if (!iso) return "—";
   const diff = (new Date(iso).getTime() - Date.now()) / 86400000;
-  if (diff < 0) return "EXPIRED";
+  if (diff < 0) return tFn ? tFn("infra.expired") : "EXPIRED";
   return `${Math.floor(diff)}d`;
 }
 
 // ── Certificates tab ───────────────────────────────────────────────────────
 
 function CertsTab({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [domain, setDomain] = useState("");
@@ -141,13 +143,13 @@ function CertsTab({ tenantId }: { tenantId: string }) {
         <input
           value={domain}
           onChange={(e) => setDomain(e.target.value)}
-          placeholder="domain (e.g. api.example.com)"
+          placeholder={t("infra.domainPlaceholder")}
           style={{ flex: 2, minWidth: 180, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", background: "var(--surface-2)", color: "var(--text)", fontSize: "0.82rem" }}
         />
         <input
           value={port}
           onChange={(e) => setPort(e.target.value)}
-          placeholder="port"
+          placeholder={t("infra.portPlaceholder")}
           type="number"
           min={1}
           max={65535}
@@ -156,27 +158,27 @@ function CertsTab({ tenantId }: { tenantId: string }) {
         <input
           value={alertDays}
           onChange={(e) => setAlertDays(e.target.value)}
-          placeholder="alert days"
+          placeholder={t("infra.alertDaysPlaceholder")}
           type="number"
           min={1}
           max={365}
           style={{ width: 90, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px", background: "var(--surface-2)", color: "var(--text)", fontSize: "0.82rem" }}
         />
         <Button type="submit" size="sm" disabled={!domain.trim() || add.isPending}>
-          {add.isPending ? "Adding…" : "Track certificate"}
+          {add.isPending ? t("infra.adding") : t("infra.trackCert")}
         </Button>
       </form>
 
       {isLoading ? (
-        <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Loading…</div>
+        <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>{t("common.loading")}</div>
       ) : certs.length === 0 ? (
-        <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>No certificates tracked.</div>
+        <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>{t("infra.noCerts")}</div>
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["Domain", "Port", "State", "Expires", "Days left", "Issuer", "Last check", ""].map((h) => (
+                {[t("infra.colDomain"), t("infra.colPort"), t("infra.colState"), t("infra.colExpires"), t("infra.colDaysLeft"), t("infra.colIssuer"), t("infra.colLastCheck"), ""].map((h) => (
                   <th key={h} style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600, color: "var(--text-muted)" }}>{h}</th>
                 ))}
               </tr>
@@ -191,11 +193,11 @@ function CertsTab({ tenantId }: { tenantId: string }) {
                     {c.expires_at ? new Date(c.expires_at).toLocaleDateString() : "—"}
                   </td>
                   <td style={{ padding: "5px 8px", fontVariantNumeric: "tabular-nums", color: c.state === "critical" ? "var(--red)" : c.state === "warning" ? "#f59e0b" : "var(--text)" }}>
-                    {daysUntil(c.expires_at)}
+                    {daysUntil(c.expires_at, t)}
                   </td>
                   <td style={{ padding: "5px 8px", color: "var(--text-muted)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.issuer ?? "—"}</td>
                   <td style={{ padding: "5px 8px", color: "var(--text-muted)" }}>
-                    {c.last_checked_at ? new Date(c.last_checked_at).toLocaleString() : "pending"}
+                    {c.last_checked_at ? new Date(c.last_checked_at).toLocaleString() : t("infra.pending")}
                   </td>
                   <td style={{ padding: "5px 8px" }}>
                     <div style={{ display: "flex", gap: 8 }}>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
@@ -99,6 +100,7 @@ export function AlertDetail({
   alertId: string;
   onBack: () => void;
 }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const canOperate = useCanOperate();
   const navigate = useNavigate();
@@ -191,8 +193,8 @@ export function AlertDetail({
   if (q.isError || !q.data) {
     return (
       <div>
-        <Button variant="ghost" size="sm" onClick={onBack} className="mb-3">← Back</Button>
-        <p className="text-xs text-[var(--red)]">Failed to load alert.</p>
+        <Button variant="ghost" size="sm" onClick={onBack} className="mb-3">{t("alertDetail.back")}</Button>
+        <p className="text-xs text-[var(--red)]">{t("alertDetail.loadError")}</p>
       </div>
     );
   }
@@ -212,7 +214,7 @@ export function AlertDetail({
           onClick={onBack}
           className="text-xs text-[var(--brand)] cursor-pointer hover:underline bg-none border-none p-0"
         >
-          ← Alerts
+          {t("alertDetail.back")}
         </button>
         <h2 className="text-sm font-semibold font-mono truncate">{a.alert_id}</h2>
         <Badge variant={sevVariant(sevClass)}>
@@ -252,26 +254,26 @@ export function AlertDetail({
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card>
-          <CardHeader><span className="text-sm font-medium">Details</span></CardHeader>
+          <CardHeader><span className="text-sm font-medium">{t("alertDetail.details")}</span></CardHeader>
           <dl>
-            <KV label="State" value={a.lifecycle_state} />
-            <KV label="Source kind" value={a.source_kind} />
-            <KV label="Policy" value={`${a.policy_id} v${a.policy_version}`} />
-            <KV label="Monitoring source" value={a.monitoring_source_id} />
-            <KV label="Resource" value={a.monitoring_resource_id} />
-            <KV label="Opened" value={fmtTs(a.opened_at)} />
-            <KV label="Resolved" value={a.resolved_at ? fmtTs(a.resolved_at) : "—"} />
+            <KV label={t("alertDetail.fieldState")} value={a.lifecycle_state} />
+            <KV label={t("alertDetail.fieldSourceKind")} value={a.source_kind} />
+            <KV label={t("alertDetail.fieldPolicy")} value={`${a.policy_id} v${a.policy_version}`} />
+            <KV label={t("alertDetail.fieldSource")} value={a.monitoring_source_id} />
+            <KV label={t("alertDetail.fieldResource")} value={a.monitoring_resource_id} />
+            <KV label={t("alertDetail.fieldOpened")} value={fmtTs(a.opened_at)} />
+            <KV label={t("alertDetail.fieldResolved")} value={a.resolved_at ? fmtTs(a.resolved_at) : "—"} />
             {a.acknowledged_at && (
-              <KV label="Reconhecido em" value={fmtTs(a.acknowledged_at)} />
+              <KV label={t("alertDetail.fieldAckedAt")} value={fmtTs(a.acknowledged_at)} />
             )}
             {a.acknowledged_by && (
-              <KV label="Reconhecido por" value={String(a.acknowledged_by)} />
+              <KV label={t("alertDetail.fieldAckedBy")} value={String(a.acknowledged_by)} />
             )}
           </dl>
         </Card>
 
         <Card>
-          <CardHeader><span className="text-sm font-medium">Evidence summary</span></CardHeader>
+          <CardHeader><span className="text-sm font-medium">{t("alertDetail.evidenceSummary")}</span></CardHeader>
           <pre className="text-[10px] text-[var(--text-muted)] overflow-x-auto whitespace-pre-wrap break-all">
             {JSON.stringify(ev, null, 2)}
           </pre>
@@ -280,7 +282,7 @@ export function AlertDetail({
 
       {transitions.length > 0 && (
         <Card>
-          <CardHeader><span className="text-sm font-medium">Lifecycle transitions</span></CardHeader>
+          <CardHeader><span className="text-sm font-medium">{t("alertDetail.lifecycle")}</span></CardHeader>
           <ul className="space-y-1">
             {transitions.map((t) => (
               <li key={t.alert_transition_id}

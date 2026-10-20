@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
@@ -648,27 +649,28 @@ function PolicyTab({ tenantId }: { tenantId: string }) {
 }
 
 export function IncidentResponsePage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("events");
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">Incident Response</h2>
+        <h2 className="text-base font-semibold">{t("ir.title")}</h2>
       </div>
 
       <div className="flex gap-1.5">
-        {(["events", "policy"] as const).map((t) => (
+        {(["events", "policy"] as const).map((tabKey) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={tabKey}
+            onClick={() => setTab(tabKey)}
             className={[
               "px-3 py-1 rounded-full text-xs cursor-pointer border transition-colors",
-              tab === t
+              tab === tabKey
                 ? "border-[var(--brand)] text-[var(--brand)] bg-[var(--surface-2)]"
                 : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--text-muted)]",
             ].join(" ")}
           >
-            {t === "events" ? "Eventos" : "Política"}
+            {tabKey === "events" ? t("ir.tabEvents") : t("ir.tabPolicy")}
           </button>
         ))}
       </div>

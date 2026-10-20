@@ -1,4 +1,5 @@
 import { useState, Fragment } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useCanOperate } from "@/hooks/usePermission";
@@ -60,6 +61,7 @@ function fmtSecs(s: number) {
 }
 
 function CreateScriptForm({ tenantId, onDone }: { tenantId: string; onDone: () => void }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
@@ -83,15 +85,15 @@ function CreateScriptForm({ tenantId, onDone }: { tenantId: string; onDone: () =
 
   return (
     <Card className="p-4 space-y-3">
-      <h3 className="text-sm font-medium">New automation script</h3>
+      <h3 className="text-sm font-medium">{t("automation.newScriptTitle")}</h3>
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Name</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("automation.colName")}</label>
         <input value={name} onChange={e => setName(e.target.value)}
           placeholder="e.g. Alert webhook"
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
       </div>
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Type</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("automation.typeField")}</label>
         <select value={type} onChange={e => setType(e.target.value)}
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]">
           <option value="noop">No-op (test)</option>
@@ -100,14 +102,14 @@ function CreateScriptForm({ tenantId, onDone }: { tenantId: string; onDone: () =
       </div>
       {type === "webhook" && (
         <div className="space-y-1">
-          <label className="text-xs text-[var(--text-muted)]">Webhook URL (https://)</label>
+          <label className="text-xs text-[var(--text-muted)]">{t("automation.webhookUrl")}</label>
           <input value={url} onChange={e => setUrl(e.target.value)}
             placeholder="https://hooks.example.com/..."
             className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
         </div>
       )}
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Description</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("automation.descField")}</label>
         <input value={desc} onChange={e => setDesc(e.target.value)}
           placeholder="Optional description"
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
@@ -116,9 +118,9 @@ function CreateScriptForm({ tenantId, onDone }: { tenantId: string; onDone: () =
       <div className="flex gap-2">
         <Button size="sm" onClick={() => { setErr(null); mut.mutate(); }}
           disabled={mut.isPending || !name.trim() || (type === "webhook" && !url.trim())}>
-          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}Create
+          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}{t("escalation.create")}
         </Button>
-        <Button variant="secondary" size="sm" onClick={onDone}>Cancel</Button>
+        <Button variant="secondary" size="sm" onClick={onDone}>{t("common.cancel")}</Button>
       </div>
     </Card>
   );
@@ -127,6 +129,7 @@ function CreateScriptForm({ tenantId, onDone }: { tenantId: string; onDone: () =
 function AddScheduleForm({ tenantId, scripts, onDone }: {
   tenantId: string; scripts: Script[]; onDone: () => void;
 }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [scriptId, setScriptId] = useState(scripts[0]?.script_id ?? "");
   const [intervalMins, setIntervalMins] = useState("60");
@@ -147,9 +150,9 @@ function AddScheduleForm({ tenantId, scripts, onDone }: {
 
   return (
     <Card className="p-4 space-y-3">
-      <h3 className="text-sm font-medium">New schedule</h3>
+      <h3 className="text-sm font-medium">{t("automation.newScheduleTitle")}</h3>
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Script</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("automation.scriptField")}</label>
         <select value={scriptId} onChange={e => setScriptId(e.target.value)}
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]">
           {scripts.filter(s => s.enabled).map(s => (
@@ -158,7 +161,7 @@ function AddScheduleForm({ tenantId, scripts, onDone }: {
         </select>
       </div>
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Interval (minutes, min 1)</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("automation.intervalMins")}</label>
         <input type="number" min="1" value={intervalMins}
           onChange={e => setIntervalMins(e.target.value)}
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
@@ -167,15 +170,16 @@ function AddScheduleForm({ tenantId, scripts, onDone }: {
       <div className="flex gap-2">
         <Button size="sm" onClick={() => { setErr(null); mut.mutate(); }}
           disabled={mut.isPending || !scriptId}>
-          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}Schedule
+          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}{t("automation.schedule")}
         </Button>
-        <Button variant="secondary" size="sm" onClick={onDone}>Cancel</Button>
+        <Button variant="secondary" size="sm" onClick={onDone}>{t("common.cancel")}</Button>
       </div>
     </Card>
   );
 }
 
 export function AutomationPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const canOperate = useCanOperate();
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -235,9 +239,9 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
   });
 
   const tabs = [
-    { id: "scripts" as const, label: "Scripts" },
-    { id: "schedules" as const, label: "Schedules" },
-    { id: "runs" as const, label: "Run history" },
+    { id: "scripts" as const, label: t("automation.tabScripts") },
+    { id: "schedules" as const, label: t("automation.tabSchedules") },
+    { id: "runs" as const, label: t("automation.tabRuns") },
   ];
 
   const scriptToDelete = (scripts.data ?? []).find((s) => s.script_id === confirmDeleteScriptId);
@@ -247,16 +251,16 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold">Automation</h2>
+          <h2 className="text-base font-semibold">{t("automation.title")}</h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            Webhook and scheduled automation scripts.
+            {t("automation.subtitle")}
           </p>
         </div>
         {canOperate && tab === "scripts" && !creatingScript && (
-          <Button size="sm" onClick={() => setCreatingScript(true)}>New script</Button>
+          <Button size="sm" onClick={() => setCreatingScript(true)}>{t("automation.newScript")}</Button>
         )}
         {canOperate && tab === "schedules" && !creatingSchedule && (
-          <Button size="sm" onClick={() => setCreatingSchedule(true)}>Add schedule</Button>
+          <Button size="sm" onClick={() => setCreatingSchedule(true)}>{t("automation.addSchedule")}</Button>
         )}
       </div>
 
@@ -272,15 +276,15 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
       )}
 
       <div className="flex gap-1 border-b border-[var(--border)]">
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
+        {tabs.map(tabItem => (
+          <button key={tabItem.id} onClick={() => setTab(tabItem.id)}
             className={[
               "px-3 py-1.5 text-xs font-medium rounded-t transition-colors",
-              tab === t.id
+              tab === tabItem.id
                 ? "bg-[var(--surface-2)] text-[var(--brand)] border-b-2 border-[var(--brand)]"
                 : "text-[var(--text-muted)] hover:text-[var(--text)]",
             ].join(" ")}>
-            {t.label}
+            {tabItem.label}
           </button>
         ))}
       </div>
@@ -290,14 +294,14 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
           {scripts.isLoading ? (
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : (scripts.data ?? []).length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] p-4">No automation scripts.</p>
+            <p className="text-xs text-[var(--text-muted)] p-4">{t("automation.noScripts")}</p>
           ) : (
             <table className="w-full text-xs">
               <thead className="bg-[var(--surface-2)]">
                 <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                  <th className="px-4 py-2.5 font-medium">Name</th>
-                  <th className="px-4 py-2.5 font-medium">Type</th>
-                  <th className="px-4 py-2.5 font-medium">Status</th>
+                  <th className="px-4 py-2.5 font-medium">{t("automation.colName")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("automation.colType")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("automation.colStatus")}</th>
                   <th className="px-4 py-2.5 font-medium"></th>
                 </tr>
               </thead>
@@ -317,7 +321,7 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
                     </td>
                     <td className="px-4 py-2.5">
                       <Badge variant={s.enabled ? "success" : "muted"}>
-                        {s.enabled ? "enabled" : "disabled"}
+                        {s.enabled ? t("common.enabled") : t("common.disabled")}
                       </Badge>
                     </td>
                     <td className="px-4 py-2.5">
@@ -326,7 +330,7 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
                           <Button size="sm" variant="secondary"
                             onClick={() => triggerMut.mutate(s.script_id)}
                             disabled={triggerMut.isPending}>
-                            Run now
+                            {t("automation.runNow")}
                           </Button>
                         )}
                         {canOperate && (
@@ -351,15 +355,15 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
           {schedules.isLoading ? (
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : (schedules.data ?? []).length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] p-4">No schedules configured.</p>
+            <p className="text-xs text-[var(--text-muted)] p-4">{t("automation.noSchedules")}</p>
           ) : (
             <table className="w-full text-xs">
               <thead className="bg-[var(--surface-2)]">
                 <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                  <th className="px-4 py-2.5 font-medium">Script</th>
-                  <th className="px-4 py-2.5 font-medium">Interval</th>
-                  <th className="px-4 py-2.5 font-medium">Next run</th>
-                  <th className="px-4 py-2.5 font-medium">Last run</th>
+                  <th className="px-4 py-2.5 font-medium">{t("automation.colScript")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("automation.colInterval")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("automation.colNextRun")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("automation.colLastRun")}</th>
                   <th className="px-4 py-2.5 font-medium"></th>
                 </tr>
               </thead>
@@ -396,16 +400,16 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
           {runs.isLoading ? (
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : (runs.data ?? []).length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] p-4">No runs recorded.</p>
+            <p className="text-xs text-[var(--text-muted)] p-4">{t("automation.noRuns")}</p>
           ) : (
             <table className="w-full text-xs">
               <thead className="bg-[var(--surface-2)]">
                 <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                  <th className="px-4 py-2.5 font-medium">Outcome</th>
-                  <th className="px-4 py-2.5 font-medium">Trigger</th>
-                  <th className="px-4 py-2.5 font-medium">HTTP</th>
-                  <th className="px-4 py-2.5 font-medium">Started</th>
-                  <th className="px-4 py-2.5 font-medium">Error / Log</th>
+                  <th className="px-4 py-2.5 font-medium">{t("automation.colOutcome")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("automation.colTrigger")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("automation.colHTTP")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("automation.colStarted")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("automation.colErrorLog")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
@@ -433,7 +437,7 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
                         <button
                           onClick={() => setExpandedRunId(expandedRunId === r.run_id ? null : r.run_id)}
                           className="text-[10px] text-[var(--brand)] underline whitespace-nowrap">
-                          {expandedRunId === r.run_id ? "Ocultar log" : "Ver log"}
+                          {expandedRunId === r.run_id ? t("automation.hideLog") : t("automation.showLog")}
                         </button>
                       </td>
                     </tr>

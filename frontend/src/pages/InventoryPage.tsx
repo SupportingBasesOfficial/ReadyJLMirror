@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card } from "@/components/ui/card";
@@ -45,6 +46,7 @@ function fmtTs(iso?: string) {
 const PAGE_LIMIT = 50;
 
 export function InventoryPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [selectedResource, setSelectedResource] = useState<{ sourceId: string; resourceId: string } | null>(null);
@@ -110,16 +112,16 @@ export function InventoryPage({ tenantId }: { tenantId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h2 className="text-base font-semibold">Resource Inventory</h2>
+          <h2 className="text-base font-semibold">{t("inventory.title")}</h2>
           <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
             {resources.length} dispositivos · página {pageNumber}
           </p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex gap-2 text-xs">
-            <span className="text-[var(--green)]">{counts.healthy} healthy</span>
-            <span className="text-[var(--yellow)]">{counts.degraded} degraded</span>
-            <span className="text-[var(--red)]">{counts.unhealthy} unhealthy</span>
+            <span className="text-[var(--green)]">{counts.healthy} {t("inventory.healthy")}</span>
+            <span className="text-[var(--yellow)]">{counts.degraded} {t("inventory.degraded")}</span>
+            <span className="text-[var(--red)]">{counts.unhealthy} {t("inventory.unhealthy")}</span>
           </div>
           {resourcesQ.isFetching && <Spinner className="w-3 h-3" />}
         </div>
@@ -147,7 +149,7 @@ export function InventoryPage({ tenantId }: { tenantId: string }) {
 
         <input
           type="search"
-          placeholder="Filter by name or kind…"
+          placeholder={t("inventory.filterPlaceholder")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="ml-auto px-3 py-1.5 text-xs rounded-md w-48
@@ -159,16 +161,16 @@ export function InventoryPage({ tenantId }: { tenantId: string }) {
 
       {!activeSource ? (
         <Card>
-          <p className="text-xs text-[var(--text-muted)] py-2">No monitoring sources configured.</p>
+          <p className="text-xs text-[var(--text-muted)] py-2">{t("inventory.noSources")}</p>
         </Card>
       ) : resourcesQ.isLoading ? (
         <div className="flex justify-center py-10"><Spinner /></div>
       ) : resourcesQ.isError ? (
-        <p className="text-xs text-[var(--red)]">Failed to load inventory.</p>
+        <p className="text-xs text-[var(--red)]">{t("inventory.loadError")}</p>
       ) : resources.length === 0 ? (
         <Card>
           <p className="text-xs text-[var(--text-muted)] py-2">
-            {search ? "No resources match your filter." : "No resources found."}
+            {search ? t("inventory.noFilterMatch") : t("inventory.noResources")}
           </p>
         </Card>
       ) : (
@@ -177,10 +179,10 @@ export function InventoryPage({ tenantId }: { tenantId: string }) {
             <table className="w-full text-xs">
               <thead className="bg-[var(--surface-2)]">
                 <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                  <th className="px-4 py-2.5 font-medium">Name</th>
-                  <th className="px-4 py-2.5 font-medium">Kind</th>
-                  <th className="px-4 py-2.5 font-medium">Health</th>
-                  <th className="px-4 py-2.5 font-medium">Last seen</th>
+                  <th className="px-4 py-2.5 font-medium">{t("inventory.colName")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("inventory.colKind")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("inventory.colHealth")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("inventory.colLastSeen")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useCanOperate } from "@/hooks/usePermission";
@@ -47,6 +48,7 @@ function AddDestinationForm({
   tenantId: string;
   onDone: () => void;
 }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const { toast } = useToast();
   const [channel, setChannel] = useState("email_smtp@1");
@@ -77,10 +79,10 @@ function AddDestinationForm({
 
   return (
     <Card className="p-4 space-y-3">
-      <h3 className="text-sm font-medium">Add notification destination</h3>
+      <h3 className="text-sm font-medium">{t("channels.addTitle")}</h3>
 
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Channel</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("channels.channelField")}</label>
         <select
           value={channel}
           onChange={(e) => setChannel(e.target.value)}
@@ -93,13 +95,7 @@ function AddDestinationForm({
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">
-          {channel === "email_smtp@1"
-            ? "Email address"
-            : channel === "slack@1"
-            ? "Webhook URL"
-            : "Phone / destination ref"}
-        </label>
+        <label className="text-xs text-[var(--text-muted)]">{t("channels.destField")}</label>
         <input
           type="text"
           value={destRef}
@@ -116,7 +112,7 @@ function AddDestinationForm({
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Label</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("channels.labelField")}</label>
         <input
           type="text"
           value={label}
@@ -135,10 +131,10 @@ function AddDestinationForm({
           disabled={mut.isPending || !destRef.trim() || !label.trim()}
         >
           {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}
-          Add
+          {t("channels.addBtn")}
         </Button>
         <Button variant="secondary" size="sm" onClick={onDone}>
-          Cancel
+          {t("common.cancel")}
         </Button>
       </div>
     </Card>
@@ -338,6 +334,7 @@ function DeliveryLog({ tenantId }: { tenantId: string }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function NotificationChannelsPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const canOperate = useCanOperate();
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -404,17 +401,17 @@ export function NotificationChannelsPage({ tenantId }: { tenantId: string }) {
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-[var(--border)]">
-        {(["channels", "log"] as const).map(t => (
+        {(["channels", "log"] as const).map(tabKey => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={tabKey}
+            onClick={() => setTab(tabKey)}
             className={`px-3 py-1.5 text-[12px] font-medium border-b-2 transition-colors ${
-              tab === t
+              tab === tabKey
                 ? "border-[var(--brand)] text-[var(--text)]"
                 : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
             }`}
           >
-            {t === "channels" ? "Canais" : "Histórico de Entregas"}
+            {tabKey === "channels" ? t("nav.channels") : t("channels.logTitle")}
           </button>
         ))}
       </div>
@@ -434,7 +431,7 @@ export function NotificationChannelsPage({ tenantId }: { tenantId: string }) {
         {q.isLoading ? (
           <div className="flex justify-center py-8"><Spinner /></div>
         ) : q.isError ? (
-          <p className="text-xs text-[var(--red)] p-4">Failed to load channels.</p>
+          <p className="text-xs text-[var(--red)] p-4">{t("channels.loadError")}</p>
         ) : destinations.length === 0 ? (
           <p className="text-xs text-[var(--text-muted)] p-4">
             Nenhum destino configurado. Adicione um para habilitar notificações via Email, WhatsApp ou Slack.
@@ -443,10 +440,10 @@ export function NotificationChannelsPage({ tenantId }: { tenantId: string }) {
           <table className="w-full text-xs">
             <thead className="bg-[var(--surface-2)]">
               <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                <th className="px-4 py-2.5 font-medium">Channel</th>
-                <th className="px-4 py-2.5 font-medium">Label</th>
-                <th className="px-4 py-2.5 font-medium">Destination</th>
-                <th className="px-4 py-2.5 font-medium">Added</th>
+                <th className="px-4 py-2.5 font-medium">{t("channels.colChannel")}</th>
+                <th className="px-4 py-2.5 font-medium">{t("channels.colLabel")}</th>
+                <th className="px-4 py-2.5 font-medium">{t("channels.colDest")}</th>
+                <th className="px-4 py-2.5 font-medium">{t("channels.colAdded")}</th>
                 <th className="px-4 py-2.5 font-medium"></th>
               </tr>
             </thead>
@@ -489,7 +486,7 @@ export function NotificationChannelsPage({ tenantId }: { tenantId: string }) {
                             disabled={removing}
                             className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)] underline disabled:opacity-40"
                           >
-                            {removing ? "removing…" : "remover"}
+                            {removing ? t("channels.removing") : "remover"}
                           </button>
                         )}
                       </div>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -36,6 +37,7 @@ function NewKeyModal({
   rawKey: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   function copy() {
@@ -48,9 +50,9 @@ function NewKeyModal({
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/60 p-4">
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 max-w-lg w-full shadow-2xl">
-        <h3 className="text-sm font-semibold mb-1">API key created</h3>
+        <h3 className="text-sm font-semibold mb-1">{t("apikeys.newKeyTitle")}</h3>
         <p className="text-xs text-[var(--text-muted)] mb-4">
-          Copy this key now — it will not be shown again.
+          {t("apikeys.newKeySubtitle")}
         </p>
         <div className="flex gap-2 items-center bg-[var(--surface-2)] border border-[var(--border)] rounded-lg px-3 py-2 mb-4">
           <code className="text-xs text-[var(--brand)] flex-1 break-all select-all">
@@ -60,13 +62,13 @@ function NewKeyModal({
             onClick={copy}
             className="text-xs text-[var(--text-muted)] hover:text-[var(--text)] shrink-0 px-2 py-1 rounded border border-[var(--border)] hover:border-[var(--brand)]"
           >
-            {copied ? "Copied!" : "Copy"}
+            {copied ? t("apikeys.copied") : t("apikeys.copy")}
           </button>
         </div>
         <p className="text-[10px] text-[var(--red)] mb-4">
-          Store it in a secrets manager. This is the only time it will be displayed.
+          {t("apikeys.warning")}
         </p>
-        <Button className="w-full" onClick={onClose}>Done</Button>
+        <Button className="w-full" onClick={onClose}>{t("apikeys.done")}</Button>
       </div>
     </div>
   );
@@ -77,6 +79,7 @@ function CreateKeyForm({
 }: {
   onCreated: (rawKey: string) => void;
 }) {
+  const { t } = useTranslation();
   const [label, setLabel] = useState("");
   const [scopes, setScopes] = useState<string[]>(["read"]);
   const [expiresAt, setExpiresAt] = useState("");
@@ -115,7 +118,7 @@ function CreateKeyForm({
     <div className="space-y-3">
       <div className="flex gap-2 items-end flex-wrap">
         <div className="flex-1 min-w-[160px] space-y-0.5">
-          <label className="text-[10px] text-[var(--text-muted)]">Label</label>
+          <label className="text-[10px] text-[var(--text-muted)]">{t("apikeys.labelField")}</label>
           <input
             type="text"
             value={label}
@@ -141,12 +144,12 @@ function CreateKeyForm({
           disabled={!label.trim() || scopes.length === 0 || mut.isPending}
         >
           {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}
-          Create
+          {t("apikeys.createBtn")}
         </Button>
       </div>
 
       <div className="flex gap-4 items-center">
-        <span className="text-[10px] text-[var(--text-muted)]">Scopes:</span>
+        <span className="text-[10px] text-[var(--text-muted)]">{t("apikeys.scopesLabel")}</span>
         {AVAILABLE_SCOPES.map((s) => (
           <label key={s} className="flex items-center gap-1 cursor-pointer text-xs">
             <input
@@ -166,6 +169,7 @@ function CreateKeyForm({
 }
 
 export function ApiKeysPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const [pendingRawKey, setPendingRawKey] = useState<string | null>(null);
   const [locallyRemoved, setLocallyRemoved] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
@@ -202,9 +206,9 @@ export function ApiKeysPage({ tenantId }: { tenantId: string }) {
 
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold">API Keys</h2>
+          <h2 className="text-base font-semibold">{t("apikeys.title")}</h2>
           <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-            Bearer tokens for programmatic read access · 60 req/min per key
+            {t("apikeys.subtitle")}
           </p>
         </div>
         {keysQ.isFetching && <Spinner className="w-3 h-3" />}
@@ -212,35 +216,32 @@ export function ApiKeysPage({ tenantId }: { tenantId: string }) {
 
       <Card className="flex flex-col gap-3">
         <CardHeader>
-          <span className="text-sm font-medium">Create API key</span>
+          <span className="text-sm font-medium">{t("apikeys.createTitle")}</span>
         </CardHeader>
         <CreateKeyForm onCreated={setPendingRawKey} />
         <p className="text-[10px] text-[var(--text-muted)]">
-          Use with:{" "}
-          <code className="text-[var(--brand)]">
-            Authorization: Bearer jlm_…
-          </code>
+          {t("apikeys.usage")}
         </p>
       </Card>
 
       {keysQ.isLoading ? (
         <div className="flex justify-center py-6"><Spinner /></div>
       ) : keysQ.isError ? (
-        <p className="text-xs text-[var(--red)]">Failed to load keys.</p>
+        <p className="text-xs text-[var(--red)]">{t("apikeys.loadError")}</p>
       ) : (
         <>
           {active.length === 0 && revoked.length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)]">No API keys yet.</p>
+            <p className="text-xs text-[var(--text-muted)]">{t("apikeys.noKeys")}</p>
           ) : (
             <Card className="p-0 overflow-hidden">
               <table className="w-full text-xs">
                 <thead className="bg-[var(--surface-2)]">
                   <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                    <th className="px-4 py-2.5 font-medium">Label</th>
-                    <th className="px-4 py-2.5 font-medium">Scopes</th>
-                    <th className="px-4 py-2.5 font-medium">Last used</th>
-                    <th className="px-4 py-2.5 font-medium">Created</th>
-                    <th className="px-4 py-2.5 font-medium">State</th>
+                    <th className="px-4 py-2.5 font-medium">{t("apikeys.colLabel")}</th>
+                    <th className="px-4 py-2.5 font-medium">{t("apikeys.colScopes")}</th>
+                    <th className="px-4 py-2.5 font-medium">{t("apikeys.colLastUsed")}</th>
+                    <th className="px-4 py-2.5 font-medium">{t("apikeys.colCreated")}</th>
+                    <th className="px-4 py-2.5 font-medium">{t("apikeys.colState")}</th>
                     <th className="px-4 py-2.5 font-medium"></th>
                   </tr>
                 </thead>
@@ -280,7 +281,7 @@ export function ApiKeysPage({ tenantId }: { tenantId: string }) {
                             onClick={() => revoke.mutate(k.key_id)}
                             disabled={revoke.isPending}
                           >
-                            Revoke
+                            {t("apikeys.revoke")}
                           </Button>
                         ) : (
                           <Button
@@ -290,7 +291,7 @@ export function ApiKeysPage({ tenantId }: { tenantId: string }) {
                               setLocallyRemoved((prev) => new Set([...prev, k.key_id]))
                             }
                           >
-                            Remover da lista
+                            {t("apikeys.removeFromList")}
                           </Button>
                         )}
                       </td>

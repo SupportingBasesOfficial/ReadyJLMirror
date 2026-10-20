@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -86,6 +87,7 @@ interface BillingStatus {
 }
 
 export function FinOpsPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const summaryQ = useQuery({
     queryKey: ["finops-summary", tenantId],
     queryFn: () => api.get<Summary>("/api/v1/finops/summary"),
@@ -127,9 +129,9 @@ export function FinOpsPage({ tenantId }: { tenantId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold">FinOps</h2>
+          <h2 className="text-base font-semibold">{t("finops.title")}</h2>
           <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-            Plan, entitlements and usage metering — observation only
+            {t("finops.subtitle")}
           </p>
         </div>
         {summaryQ.isFetching && <Spinner className="w-3 h-3" />}
@@ -138,22 +140,22 @@ export function FinOpsPage({ tenantId }: { tenantId: string }) {
       {summaryQ.isLoading ? (
         <div className="flex justify-center py-10"><Spinner /></div>
       ) : summaryQ.isError ? (
-        <p className="text-xs text-[var(--red)]">Failed to load FinOps data.</p>
+        <p className="text-xs text-[var(--red)]">{t("finops.loadError")}</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-3">
           {/* Contract */}
           <Card className="flex flex-col gap-3">
-            <CardHeader><span className="text-sm font-medium">Contract</span></CardHeader>
+            <CardHeader><span className="text-sm font-medium">{t("finops.contract")}</span></CardHeader>
             {!s?.contract ? (
-              <p className="text-xs text-[var(--text-muted)]">No active contract.</p>
+              <p className="text-xs text-[var(--text-muted)]">{t("finops.noContract")}</p>
             ) : (
               <dl className="space-y-1.5">
                 <div className="flex justify-between text-xs">
-                  <dt className="text-[var(--text-muted)]">Plan</dt>
+                  <dt className="text-[var(--text-muted)]">{t("finops.plan")}</dt>
                   <dd className="font-mono text-[var(--text)]">{s.contract.plan_ref ?? "—"}</dd>
                 </div>
                 <div className="flex justify-between text-xs">
-                  <dt className="text-[var(--text-muted)]">State</dt>
+                  <dt className="text-[var(--text-muted)]">{t("finops.state")}</dt>
                   <dd>
                     <Badge variant={s.contract.state === "active" ? "success" : "muted"}>
                       {s.contract.state}
@@ -161,17 +163,17 @@ export function FinOpsPage({ tenantId }: { tenantId: string }) {
                   </dd>
                 </div>
                 <div className="flex justify-between text-xs">
-                  <dt className="text-[var(--text-muted)]">From</dt>
+                  <dt className="text-[var(--text-muted)]">{t("finops.from")}</dt>
                   <dd className="text-[var(--text)]">{fmtDate(s.contract.effective_from)}</dd>
                 </div>
                 {s.contract.effective_until && (
                   <div className="flex justify-between text-xs">
-                    <dt className="text-[var(--text-muted)]">Until</dt>
+                    <dt className="text-[var(--text-muted)]">{t("finops.until")}</dt>
                     <dd className="text-[var(--text)]">{fmtDate(s.contract.effective_until)}</dd>
                   </div>
                 )}
                 <div className="flex justify-between text-xs">
-                  <dt className="text-[var(--text-muted)]">ID</dt>
+                  <dt className="text-[var(--text-muted)]">{t("finops.id")}</dt>
                   <dd className="font-mono text-[10px] text-[var(--text-muted)] truncate max-w-[130px]">
                     {s.contract.contract_id}
                   </dd>
@@ -182,9 +184,9 @@ export function FinOpsPage({ tenantId }: { tenantId: string }) {
 
           {/* Entitlements */}
           <Card className="flex flex-col gap-3">
-            <CardHeader><span className="text-sm font-medium">Entitlements</span></CardHeader>
+            <CardHeader><span className="text-sm font-medium">{t("finops.entitlements")}</span></CardHeader>
             {(!s?.entitlements || s.entitlements.length === 0) ? (
-              <p className="text-xs text-[var(--text-muted)]">No entitlements.</p>
+              <p className="text-xs text-[var(--text-muted)]">{t("finops.noEntitlements")}</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {s.entitlements.map((e) => (
@@ -199,7 +201,7 @@ export function FinOpsPage({ tenantId }: { tenantId: string }) {
           {/* Billing adapter */}
           <Card className="flex flex-col gap-3">
             <CardHeader>
-              <span className="text-sm font-medium">Billing adapter</span>
+              <span className="text-sm font-medium">{t("finops.billingAdapter")}</span>
               {billingQ.data && (
                 <Badge variant={billingQ.data.adapter === "stub" ? "muted" : "success"}>
                   {billingQ.data.adapter}
@@ -222,7 +224,7 @@ export function FinOpsPage({ tenantId }: { tenantId: string }) {
                   </p>
                 )}
                 <p className="text-[10px] text-[var(--text-muted)]">
-                  Set <span className="font-mono">BILLING_ADAPTER</span> env to connect a provider.
+                  {t("finops.billingNote")}
                 </p>
               </div>
             ) : null}
@@ -230,10 +232,10 @@ export function FinOpsPage({ tenantId }: { tenantId: string }) {
 
           {/* Latest meter snapshot */}
           <Card className="flex flex-col gap-3">
-            <CardHeader><span className="text-sm font-medium">Current usage</span></CardHeader>
+            <CardHeader><span className="text-sm font-medium">{t("finops.currentUsage")}</span></CardHeader>
             {(!s?.meter_snapshot || s.meter_snapshot.length === 0) ? (
               <p className="text-xs text-[var(--text-muted)]">
-                No readings yet — the worker meters usage hourly.
+                {t("finops.noReadings")}
               </p>
             ) : (
               <dl className="space-y-1.5">
@@ -256,7 +258,7 @@ export function FinOpsPage({ tenantId }: { tenantId: string }) {
       {/* Usage history */}
       <Card className="p-0 overflow-hidden">
         <CardHeader className="px-4 py-2.5">
-          <span className="text-sm font-medium">Usage history (last 3 days)</span>
+          <span className="text-sm font-medium">{t("finops.usageHistory")}</span>
           {usageQ.isFetching && <Spinner className="w-3 h-3" />}
         </CardHeader>
 
@@ -295,18 +297,18 @@ export function FinOpsPage({ tenantId }: { tenantId: string }) {
         {usageQ.isLoading ? (
           <div className="flex justify-center py-6"><Spinner /></div>
         ) : usageQ.isError ? (
-          <p className="text-xs text-[var(--red)] px-4 py-3">Failed to load usage history.</p>
+          <p className="text-xs text-[var(--red)] px-4 py-3">{t("finops.loadUsageError")}</p>
         ) : !usageQ.data || usageQ.data.length === 0 ? (
           <p className="text-xs text-[var(--text-muted)] px-4 py-3">
-            No usage records yet. The worker writes readings every hour.
+            {t("finops.noUsage")}
           </p>
         ) : (
           <table className="w-full text-xs">
             <thead className="bg-[var(--surface-2)]">
               <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                <th className="px-4 py-2.5 font-medium">Meter</th>
-                <th className="px-4 py-2.5 font-medium tabular-nums">Quantity</th>
-                <th className="px-4 py-2.5 font-medium">Window end</th>
+                <th className="px-4 py-2.5 font-medium">{t("finops.colMeter")}</th>
+                <th className="px-4 py-2.5 font-medium tabular-nums">{t("finops.colQuantity")}</th>
+                <th className="px-4 py-2.5 font-medium">{t("finops.colWindowEnd")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border)]">

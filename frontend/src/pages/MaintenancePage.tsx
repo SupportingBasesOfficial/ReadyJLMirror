@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useCanOperate } from "@/hooks/usePermission";
@@ -42,6 +43,7 @@ function statusVariant(w: MaintenanceWindow): "success" | "muted" {
 }
 
 export function MaintenancePage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const canOperate = useCanOperate();
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -111,7 +113,7 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
     const starts = new Date(startsAt).toISOString();
     const ends = new Date(endsAt).toISOString();
     if (new Date(ends) <= new Date(starts)) {
-      setFormErr("End time must be after start time");
+      setFormErr(t("maintenance.endTimeError"));
       return;
     }
     createMut.mutate({
@@ -130,15 +132,14 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
     <div className="space-y-6 max-w-3xl">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Maintenance Windows</h1>
+          <h1 className="text-xl font-semibold">{t("maintenance.title")}</h1>
           <p className="text-sm text-[var(--text-muted)] mt-0.5">
-            Alert notifications are suppressed for sources during active windows.
-            Alerts still fire — only delivery is muted.
+            {t("maintenance.subtitle")}
           </p>
         </div>
         {canOperate && !showForm && (
           <Button onClick={() => { setShowForm(true); resetForm(); }}>
-            + New Window
+            {t("maintenance.newWindow")}
           </Button>
         )}
       </div>
@@ -147,10 +148,10 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
       {canOperate && showForm && (
         <Card>
           <form onSubmit={handleCreate} className="p-4 space-y-4">
-            <h2 className="font-semibold">New Maintenance Window</h2>
+            <h2 className="font-semibold">{t("maintenance.formTitle")}</h2>
 
             <div className="space-y-1">
-              <label className="text-sm font-medium">Label *</label>
+              <label className="text-sm font-medium">{t("maintenance.labelField")}</label>
               <input
                 className="w-full border border-[var(--border)] rounded px-2 py-1.5 text-sm bg-[var(--surface)] focus:outline-none focus:ring-1 focus:ring-[var(--brand)]"
                 placeholder="e.g. Planned DB upgrade"
@@ -162,8 +163,8 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
 
             <div className="space-y-1">
               <label className="text-sm font-medium">
-                Source IDs{" "}
-                <span className="text-[var(--text-muted)]">(comma-separated, blank = all sources)</span>
+                {t("maintenance.sourceIdsField")}{" "}
+                <span className="text-[var(--text-muted)]">{t("maintenance.sourceIdsHint")}</span>
               </label>
               <textarea
                 className="w-full border border-[var(--border)] rounded px-2 py-1.5 text-sm bg-[var(--surface)] focus:outline-none focus:ring-1 focus:ring-[var(--brand)] font-mono"
@@ -176,7 +177,7 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
-                <label className="text-sm font-medium">Starts at *</label>
+                <label className="text-sm font-medium">{t("maintenance.startsAt")}</label>
                 <input
                   type="datetime-local"
                   className="w-full border border-[var(--border)] rounded px-2 py-1.5 text-sm bg-[var(--surface)] focus:outline-none focus:ring-1 focus:ring-[var(--brand)]"
@@ -186,7 +187,7 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-sm font-medium">Ends at *</label>
+                <label className="text-sm font-medium">{t("maintenance.endsAt")}</label>
                 <input
                   type="datetime-local"
                   className="w-full border border-[var(--border)] rounded px-2 py-1.5 text-sm bg-[var(--surface)] focus:outline-none focus:ring-1 focus:ring-[var(--brand)]"
@@ -203,14 +204,14 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
 
             <div className="flex gap-2">
               <Button type="submit" disabled={createMut.isPending || !label}>
-                {createMut.isPending ? "Creating…" : "Create"}
+                {createMut.isPending ? t("maintenance.creating") : t("maintenance.create")}
               </Button>
               <Button
                 type="button"
                 variant="secondary"
                 onClick={() => setShowForm(false)}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
             </div>
           </form>
@@ -219,14 +220,14 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
 
       {isLoading && <Spinner />}
       {isError && (
-        <p className="text-sm text-red-500">Failed to load maintenance windows.</p>
+        <p className="text-sm text-red-500">{t("maintenance.loadError")}</p>
       )}
 
       {/* Active windows */}
       {active.length > 0 && (
         <section className="space-y-2">
           <h2 className="text-sm font-semibold text-[var(--text-muted)] uppercase tracking-wide">
-            Active
+            {t("maintenance.sectionActive")}
           </h2>
           {active.map((w) => (
             <WindowCard
@@ -244,7 +245,7 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
       {upcoming.length > 0 && (
         <section className="space-y-2">
           <h2 className="text-sm font-semibold text-[var(--text-muted)] uppercase tracking-wide">
-            Upcoming
+            {t("maintenance.sectionUpcoming")}
           </h2>
           {upcoming.map((w) => (
             <WindowCard
@@ -260,7 +261,7 @@ export function MaintenancePage({ tenantId }: { tenantId: string }) {
 
       {!isLoading && windows.length === 0 && (
         <p className="text-sm text-[var(--text-muted)]">
-          No maintenance windows. Active and upcoming windows appear here.
+          {t("maintenance.noWindows")}
         </p>
       )}
     </div>
@@ -278,6 +279,7 @@ function WindowCard({
   cancelling: boolean;
   canOperate: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <div className="p-4 flex items-start justify-between gap-4">
@@ -285,7 +287,7 @@ function WindowCard({
           <div className="flex items-center gap-2">
             <span className="font-medium truncate">{w.label}</span>
             <Badge variant={statusVariant(w)}>
-              {w.active ? "active" : "upcoming"}
+              {w.active ? t("maintenance.badgeActive") : t("maintenance.badgeUpcoming")}
             </Badge>
           </div>
           <p className="text-xs text-[var(--text-muted)]">
@@ -293,13 +295,13 @@ function WindowCard({
           </p>
           {w.source_ids ? (
             <p className="text-xs text-[var(--text-muted)] font-mono truncate">
-              Sources: {w.source_ids.join(", ")}
+              {t("maintenance.sources")} {w.source_ids.join(", ")}
             </p>
           ) : (
-            <p className="text-xs text-[var(--text-muted)]">All sources</p>
+            <p className="text-xs text-[var(--text-muted)]">{t("maintenance.allSources")}</p>
           )}
           <p className="text-xs text-[var(--text-muted)]">
-            Created by {w.created_by} · {fmtDT(w.created_at)}
+            {t("maintenance.createdBy")} {w.created_by} · {fmtDT(w.created_at)}
           </p>
         </div>
         {canOperate && (

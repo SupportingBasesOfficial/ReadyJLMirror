@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -14,6 +15,7 @@ interface BrandingCfg {
 }
 
 function BrandingCard({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
@@ -37,7 +39,7 @@ function BrandingCard({ tenantId }: { tenantId: string }) {
       qc.invalidateQueries({ queryKey: ["branding", tenantId] });
       setEditing(false);
     },
-    onError: (e: unknown) => setErr((e as Error)?.message ?? "Save failed."),
+    onError: (e: unknown) => setErr((e as Error)?.message ?? t("platform.saveFailed")),
   });
 
   const cfg = q.data;
@@ -53,8 +55,8 @@ function BrandingCard({ tenantId }: { tenantId: string }) {
   return (
     <Card className="flex flex-col gap-3">
       <CardHeader>
-        <span className="text-sm font-medium">White-label Branding</span>
-        {cfg?.configured && <Badge variant="success">configured</Badge>}
+        <span className="text-sm font-medium">{t("platform.brandingTitle")}</span>
+        {cfg?.configured && <Badge variant="success">{t("platform.configured")}</Badge>}
       </CardHeader>
 
       {q.isLoading ? (
@@ -65,13 +67,13 @@ function BrandingCard({ tenantId }: { tenantId: string }) {
             <dl className="space-y-1.5">
               {cfg.brand_name && (
                 <div className="flex justify-between text-xs">
-                  <dt className="text-[var(--text-muted)]">Name</dt>
+                  <dt className="text-[var(--text-muted)]">{t("platform.colName")}</dt>
                   <dd className="text-[var(--text)]">{cfg.brand_name}</dd>
                 </div>
               )}
               {cfg.brand_color && (
                 <div className="flex justify-between text-xs items-center">
-                  <dt className="text-[var(--text-muted)]">Color</dt>
+                  <dt className="text-[var(--text-muted)]">{t("platform.colColor")}</dt>
                   <dd className="flex items-center gap-1.5">
                     <span
                       className="w-3 h-3 rounded-full inline-block border border-[var(--border)]"
@@ -83,7 +85,7 @@ function BrandingCard({ tenantId }: { tenantId: string }) {
               )}
               {cfg.logo_url && (
                 <div className="flex justify-between text-xs">
-                  <dt className="text-[var(--text-muted)]">Logo</dt>
+                  <dt className="text-[var(--text-muted)]">{t("platform.colLogo")}</dt>
                   <dd className="text-[var(--text-muted)] font-mono text-[10px] truncate max-w-[160px]">
                     {cfg.logo_url}
                   </dd>
@@ -92,17 +94,17 @@ function BrandingCard({ tenantId }: { tenantId: string }) {
             </dl>
           ) : (
             <p className="text-xs text-[var(--text-muted)]">
-              Not configured. Set a brand name, color, and logo for white-label deployments.
+              {t("platform.notConfigured")}
             </p>
           )}
           <Button size="sm" variant="secondary" onClick={startEdit}>
-            {cfg?.configured ? "Edit" : "Configure"}
+            {cfg?.configured ? t("common.edit") : t("platform.configure")}
           </Button>
         </div>
       ) : (
         <div className="space-y-2">
           <div className="space-y-0.5">
-            <label className="text-[10px] text-[var(--text-muted)]">Platform name</label>
+            <label className="text-[10px] text-[var(--text-muted)]">{t("platform.platformName")}</label>
             <input type="text" value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Acme Operations"
@@ -111,7 +113,7 @@ function BrandingCard({ tenantId }: { tenantId: string }) {
             />
           </div>
           <div className="space-y-0.5">
-            <label className="text-[10px] text-[var(--text-muted)]">Brand color (hex)</label>
+            <label className="text-[10px] text-[var(--text-muted)]">{t("platform.brandColor")}</label>
             <div className="flex gap-2 items-center">
               <input type="color" value={color}
                 onChange={(e) => setColor(e.target.value)}
@@ -126,7 +128,7 @@ function BrandingCard({ tenantId }: { tenantId: string }) {
             </div>
           </div>
           <div className="space-y-0.5">
-            <label className="text-[10px] text-[var(--text-muted)]">Logo URL (optional)</label>
+            <label className="text-[10px] text-[var(--text-muted)]">{t("platform.logoUrl")}</label>
             <input type="text" value={logoUrl}
               onChange={(e) => setLogoUrl(e.target.value)}
               placeholder="https://cdn.example.com/logo.svg"
@@ -138,10 +140,10 @@ function BrandingCard({ tenantId }: { tenantId: string }) {
           <div className="flex gap-2">
             <Button size="sm" onClick={() => { setErr(null); mut.mutate(); }}
               disabled={mut.isPending}>
-              {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}Save
+              {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}{t("platform.save")}
             </Button>
             <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
           </div>
         </div>
@@ -221,6 +223,7 @@ interface StatusPageCfg {
 }
 
 function StatusPageCard({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [slug, setSlug] = useState("");
@@ -262,10 +265,10 @@ function StatusPageCard({ tenantId }: { tenantId: string }) {
   return (
     <Card className="flex flex-col gap-3">
       <CardHeader>
-        <span className="text-sm font-medium">Public Status Page</span>
+        <span className="text-sm font-medium">{t("platform.statusPageTitle")}</span>
         {cfg?.configured && (
           <Badge variant={cfg.enabled ? "success" : "muted"}>
-            {cfg.enabled ? "enabled" : "disabled"}
+            {cfg.enabled ? t("platform.pageEnabled") : t("platform.pageDisabled")}
           </Badge>
         )}
       </CardHeader>
@@ -288,17 +291,17 @@ function StatusPageCard({ tenantId }: { tenantId: string }) {
                 </a>
               </div>
               <div className="flex justify-between text-xs">
-                <span className="text-[var(--text-muted)]">Name</span>
+                <span className="text-[var(--text-muted)]">{t("platform.colName")}</span>
                 <span className="text-[var(--text)]">{cfg.public_name}</span>
               </div>
             </>
           ) : (
             <p className="text-xs text-[var(--text-muted)]">
-              Not configured. Set up a public URL for customers to check service status.
+              {t("platform.statusPageNotConfigured")}
             </p>
           )}
           <Button size="sm" variant="secondary" onClick={startEdit}>
-            {cfg?.configured ? "Edit" : "Configure"}
+            {cfg?.configured ? t("common.edit") : t("platform.configure")}
           </Button>
         </div>
       ) : (
@@ -344,10 +347,10 @@ function StatusPageCard({ tenantId }: { tenantId: string }) {
               onClick={() => { setErr(null); mut.mutate(); }}
               disabled={mut.isPending || !slug.trim() || !name.trim()}
             >
-              {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}Save
+              {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}{t("platform.save")}
             </Button>
             <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
           </div>
         </div>

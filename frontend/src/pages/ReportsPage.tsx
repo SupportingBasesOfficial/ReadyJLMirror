@@ -1,4 +1,5 @@
 import { Fragment, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card } from "@/components/ui/card";
@@ -90,6 +91,7 @@ function fmtInterval(s: number) {
 }
 
 function CreateTemplateForm({ tenantId, onDone }: { tenantId: string; onDone: () => void }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [type, setType] = useState("alert_summary");
@@ -110,16 +112,16 @@ function CreateTemplateForm({ tenantId, onDone }: { tenantId: string; onDone: ()
 
   return (
     <Card className="p-4 space-y-3">
-      <h3 className="text-sm font-medium">New report template</h3>
+      <h3 className="text-sm font-medium">{t("reports.newTemplateTitle")}</h3>
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Name</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("reports.policyName")}</label>
         <input value={name} onChange={e => setName(e.target.value)}
           placeholder="e.g. Weekly alert digest"
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
       </div>
       <div className="flex gap-2">
         <div className="flex-1 space-y-1">
-          <label className="text-xs text-[var(--text-muted)]">Report type</label>
+          <label className="text-xs text-[var(--text-muted)]">{t("reports.reportType")}</label>
           <select value={type} onChange={e => setType(e.target.value)}
             className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]">
             {REPORT_TYPES.map(t => (
@@ -128,7 +130,7 @@ function CreateTemplateForm({ tenantId, onDone }: { tenantId: string; onDone: ()
           </select>
         </div>
         <div className="flex-1 space-y-1">
-          <label className="text-xs text-[var(--text-muted)]">Delivery email</label>
+          <label className="text-xs text-[var(--text-muted)]">{t("reports.deliveryEmail")}</label>
           <input type="email" value={email} onChange={e => setEmail(e.target.value)}
             placeholder="ops@example.com"
             className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
@@ -138,9 +140,9 @@ function CreateTemplateForm({ tenantId, onDone }: { tenantId: string; onDone: ()
       <div className="flex gap-2">
         <Button size="sm" onClick={() => { setErr(null); mut.mutate(); }}
           disabled={mut.isPending || !name.trim() || !email.trim()}>
-          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}Create
+          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}{t("escalation.create")}
         </Button>
-        <Button variant="secondary" size="sm" onClick={onDone}>Cancel</Button>
+        <Button variant="secondary" size="sm" onClick={onDone}>{t("common.cancel")}</Button>
       </div>
     </Card>
   );
@@ -149,6 +151,7 @@ function CreateTemplateForm({ tenantId, onDone }: { tenantId: string; onDone: ()
 function AddScheduleForm({ tenantId, templates, onDone }: {
   tenantId: string; templates: Template[]; onDone: () => void;
 }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [templateId, setTemplateId] = useState(templates[0]?.template_id ?? "");
   const [intervalHours, setIntervalHours] = useState("24");
@@ -169,9 +172,9 @@ function AddScheduleForm({ tenantId, templates, onDone }: {
 
   return (
     <Card className="p-4 space-y-3">
-      <h3 className="text-sm font-medium">Schedule report</h3>
+      <h3 className="text-sm font-medium">{t("reports.scheduleReportTitle")}</h3>
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Template</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("reports.colTemplate")}</label>
         <select value={templateId} onChange={e => setTemplateId(e.target.value)}
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]">
           {templates.filter(t => t.enabled).map(t => (
@@ -180,7 +183,7 @@ function AddScheduleForm({ tenantId, templates, onDone }: {
         </select>
       </div>
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Interval (hours, min 1)</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("reports.intervalHours")}</label>
         <input type="number" min="1" value={intervalHours}
           onChange={e => setIntervalHours(e.target.value)}
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
@@ -189,9 +192,9 @@ function AddScheduleForm({ tenantId, templates, onDone }: {
       <div className="flex gap-2">
         <Button size="sm" onClick={() => { setErr(null); mut.mutate(); }}
           disabled={mut.isPending || !templateId}>
-          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}Schedule
+          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}{t("automation.schedule")}
         </Button>
-        <Button variant="secondary" size="sm" onClick={onDone}>Cancel</Button>
+        <Button variant="secondary" size="sm" onClick={onDone}>{t("common.cancel")}</Button>
       </div>
     </Card>
   );
@@ -287,6 +290,7 @@ function ScheduleSubscribersPanel({ scheduleId }: { scheduleId: string }) {
 }
 
 export function ReportsPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const { toast } = useToast();
   const [tab, setTab] = useState<"templates" | "schedules" | "history">("templates");
@@ -339,9 +343,9 @@ export function ReportsPage({ tenantId }: { tenantId: string }) {
   });
 
   const tabs = [
-    { id: "templates" as const, label: "Templates" },
-    { id: "schedules" as const, label: "Schedules" },
-    { id: "history" as const, label: "Delivery history" },
+    { id: "templates" as const, label: t("reports.tabTemplates") },
+    { id: "schedules" as const, label: t("reports.tabSchedules") },
+    { id: "history" as const, label: t("reports.tabHistory") },
   ];
 
   const templateToDelete = (templates.data ?? []).find((t) => t.template_id === confirmDeleteTemplateId);
@@ -351,16 +355,16 @@ export function ReportsPage({ tenantId }: { tenantId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold">Scheduled Reports</h2>
+          <h2 className="text-base font-semibold">{t("reports.title")}</h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            Email reports on alerts, SLA breaches, and incidents.
+            {t("reports.subtitle")}
           </p>
         </div>
         {tab === "templates" && !creatingTemplate && (
-          <Button size="sm" onClick={() => setCreatingTemplate(true)}>New template</Button>
+          <Button size="sm" onClick={() => setCreatingTemplate(true)}>{t("reports.newTemplate")}</Button>
         )}
         {tab === "schedules" && !creatingSchedule && (
-          <Button size="sm" onClick={() => setCreatingSchedule(true)}>Schedule report</Button>
+          <Button size="sm" onClick={() => setCreatingSchedule(true)}>{t("reports.scheduleReport")}</Button>
         )}
       </div>
 
@@ -376,15 +380,15 @@ export function ReportsPage({ tenantId }: { tenantId: string }) {
       )}
 
       <div className="flex gap-1 border-b border-[var(--border)]">
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
+        {tabs.map(tabItem => (
+          <button key={tabItem.id} onClick={() => setTab(tabItem.id)}
             className={[
               "px-3 py-1.5 text-xs font-medium rounded-t transition-colors",
-              tab === t.id
+              tab === tabItem.id
                 ? "bg-[var(--surface-2)] text-[var(--brand)] border-b-2 border-[var(--brand)]"
                 : "text-[var(--text-muted)] hover:text-[var(--text)]",
             ].join(" ")}>
-            {t.label}
+            {tabItem.label}
           </button>
         ))}
       </div>
@@ -394,43 +398,43 @@ export function ReportsPage({ tenantId }: { tenantId: string }) {
           {templates.isLoading ? (
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : (templates.data ?? []).length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] p-4">No report templates.</p>
+            <p className="text-xs text-[var(--text-muted)] p-4">{t("reports.noTemplates")}</p>
           ) : (
             <table className="w-full text-xs">
               <thead className="bg-[var(--surface-2)]">
                 <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                  <th className="px-4 py-2.5 font-medium">Name</th>
-                  <th className="px-4 py-2.5 font-medium">Type</th>
-                  <th className="px-4 py-2.5 font-medium">Email de entrega</th>
-                  <th className="px-4 py-2.5 font-medium">Status</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colName")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colType")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colDeliveryEmail")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("common.status")}</th>
                   <th className="px-4 py-2.5 font-medium"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
-                {(templates.data ?? []).map(t => (
-                  <tr key={t.template_id} className="hover:bg-[var(--surface-2)] transition-colors">
-                    <td className="px-4 py-2.5 font-medium text-[var(--text)]">{t.name}</td>
+                {(templates.data ?? []).map(tpl => (
+                  <tr key={tpl.template_id} className="hover:bg-[var(--surface-2)] transition-colors">
+                    <td className="px-4 py-2.5 font-medium text-[var(--text)]">{tpl.name}</td>
                     <td className="px-4 py-2.5 text-[var(--text-muted)]">
-                      {REPORT_TYPES.find(r => r.value === t.report_type)?.label ?? t.report_type}
+                      {REPORT_TYPES.find(r => r.value === tpl.report_type)?.label ?? tpl.report_type}
                     </td>
-                    <td className="px-4 py-2.5"><EmailList value={t.delivery_email} /></td>
+                    <td className="px-4 py-2.5"><EmailList value={tpl.delivery_email} /></td>
                     <td className="px-4 py-2.5">
-                      <Badge variant={t.enabled ? "success" : "muted"}>
-                        {t.enabled ? "active" : "disabled"}
+                      <Badge variant={tpl.enabled ? "success" : "muted"}>
+                        {tpl.enabled ? t("common.active") : t("common.disabled")}
                       </Badge>
                     </td>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-3">
-                        {t.enabled && (
+                        {tpl.enabled && (
                           <button
-                            onClick={() => triggerTemplateMut.mutate(t.template_id)}
+                            onClick={() => triggerTemplateMut.mutate(tpl.template_id)}
                             disabled={triggerTemplateMut.isPending}
                             className="text-[10px] text-[var(--brand)] hover:underline disabled:opacity-40">
                             Enviar agora
                           </button>
                         )}
                         <button
-                          onClick={() => setConfirmDeleteTemplateId(t.template_id)}
+                          onClick={() => setConfirmDeleteTemplateId(tpl.template_id)}
                           className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)] underline">
                           Excluir
                         </button>
@@ -449,15 +453,15 @@ export function ReportsPage({ tenantId }: { tenantId: string }) {
           {schedules.isLoading ? (
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : (schedules.data ?? []).length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] p-4">No schedules.</p>
+            <p className="text-xs text-[var(--text-muted)] p-4">{t("reports.noSchedules")}</p>
           ) : (
             <table className="w-full text-xs">
               <thead className="bg-[var(--surface-2)]">
                 <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                  <th className="px-4 py-2.5 font-medium">Template</th>
-                  <th className="px-4 py-2.5 font-medium">Email de entrega</th>
-                  <th className="px-4 py-2.5 font-medium">Interval</th>
-                  <th className="px-4 py-2.5 font-medium">Next send</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colTemplate")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colDeliveryEmail")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colInterval")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colNextSend")}</th>
                   <th className="px-4 py-2.5 font-medium"></th>
                 </tr>
               </thead>
@@ -514,17 +518,17 @@ export function ReportsPage({ tenantId }: { tenantId: string }) {
           {deliveries.isLoading ? (
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : (deliveries.data ?? []).length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] p-4">No deliveries yet.</p>
+            <p className="text-xs text-[var(--text-muted)] p-4">{t("reports.noDeliveries")}</p>
           ) : (
             <table className="w-full text-xs">
               <thead className="bg-[var(--surface-2)]">
                 <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                  <th className="px-4 py-2.5 font-medium">Outcome</th>
-                  <th className="px-4 py-2.5 font-medium">Type</th>
-                  <th className="px-4 py-2.5 font-medium">Recipient</th>
-                  <th className="px-4 py-2.5 font-medium">Period</th>
-                  <th className="px-4 py-2.5 font-medium">Rows</th>
-                  <th className="px-4 py-2.5 font-medium">Sent at</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colOutcome")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colType")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colRecipient")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colPeriod")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colRows")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("reports.colSentAt")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">

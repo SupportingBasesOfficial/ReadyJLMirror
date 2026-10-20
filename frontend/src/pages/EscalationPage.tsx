@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useCanOperate } from "@/hooks/usePermission";
@@ -67,6 +68,7 @@ function AddStepForm({
   tenantId: string;
   onDone: () => void;
 }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [stepNumber, setStepNumber] = useState(nextStep);
@@ -99,10 +101,10 @@ function AddStepForm({
 
   return (
     <div className="border border-[var(--border)] rounded-lg p-3 space-y-2 bg-[var(--surface-2)] mt-2">
-      <p className="text-xs font-medium text-[var(--text)]">Add step</p>
+      <p className="text-xs font-medium text-[var(--text)]">{t("escalation.addStep")}</p>
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-0.5">
-          <label className="text-[10px] text-[var(--text-muted)]">Step #</label>
+          <label className="text-[10px] text-[var(--text-muted)]">{t("escalation.stepNumber")}</label>
           <input
             type="number"
             min={1}
@@ -112,7 +114,7 @@ function AddStepForm({
           />
         </div>
         <div className="space-y-0.5">
-          <label className="text-[10px] text-[var(--text-muted)]">Delay (minutes)</label>
+          <label className="text-[10px] text-[var(--text-muted)]">{t("escalation.delayMinutes")}</label>
           <input
             type="number"
             min={1}
@@ -124,7 +126,7 @@ function AddStepForm({
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-0.5">
-          <label className="text-[10px] text-[var(--text-muted)]">Channel</label>
+          <label className="text-[10px] text-[var(--text-muted)]">{t("escalation.channel")}</label>
           <select
             value={channel}
             onChange={(e) => setChannel(e.target.value)}
@@ -137,7 +139,7 @@ function AddStepForm({
         </div>
         <div className="space-y-0.5">
           <label className="text-[10px] text-[var(--text-muted)]">
-            {channel === "email_smtp@1" ? "Email address" : "Destination ref"}
+            {channel === "email_smtp@1" ? t("escalation.emailAddress") : t("escalation.destRef")}
           </label>
           <input
             type="text"
@@ -149,7 +151,7 @@ function AddStepForm({
         </div>
       </div>
       <div className="space-y-0.5">
-        <label className="text-[10px] text-[var(--text-muted)]">Payload ref (opcional)</label>
+        <label className="text-[10px] text-[var(--text-muted)]">{t("escalation.payloadRef")}</label>
         <input
           type="text"
           value={payloadRef}
@@ -165,9 +167,9 @@ function AddStepForm({
           onClick={() => { setErr(null); mut.mutate(); }}
           disabled={mut.isPending || !destRef.trim()}
         >
-          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}Save
+          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}{t("common.save")}
         </Button>
-        <Button variant="secondary" size="sm" onClick={onDone}>Cancel</Button>
+        <Button variant="secondary" size="sm" onClick={onDone}>{t("common.cancel")}</Button>
       </div>
     </div>
   );
@@ -261,6 +263,7 @@ function PolicyDetailView({
   tenantId: string;
   onBack: () => void;
 }) {
+  const { t } = useTranslation();
   const canOperate = useCanOperate();
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -290,7 +293,7 @@ function PolicyDetailView({
   });
 
   if (q.isLoading) return <div className="flex justify-center py-8"><Spinner /></div>;
-  if (q.isError) return <p className="text-xs text-[var(--red)] p-4">Failed to load policy.</p>;
+  if (q.isError) return <p className="text-xs text-[var(--red)] p-4">{t("escalation.loadPolicyError")}</p>;
 
   const { policy, steps } = q.data!;
   const nextStep = steps.length > 0
@@ -316,7 +319,7 @@ function PolicyDetailView({
           onClick={onBack}
           className="text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
         >
-          ← Policies
+          {t("escalation.back")}
         </button>
         <span className="text-[var(--border)]">/</span>
         <span className="text-sm font-semibold">{policy.name}</span>
@@ -329,18 +332,18 @@ function PolicyDetailView({
       <Card className="p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-            Escalation steps
+            {t("escalation.steps")}
           </h3>
           {canOperate && !addingStep && (
             <Button size="sm" onClick={() => setAddingStep(true)}>
-              Add step
+              {t("escalation.addStep")}
             </Button>
           )}
         </div>
 
         {steps.length === 0 && !addingStep && (
           <p className="text-xs text-[var(--text-muted)]">
-            No steps defined. Add a step to enable escalation.
+            {t("escalation.noSteps")}
           </p>
         )}
 
@@ -363,7 +366,7 @@ function PolicyDetailView({
                 )}
                 {i === 0 && (
                   <div className="text-[10px] text-[var(--text-muted)] flex-shrink-0">
-                    after {fmtDelay(s.delay_minutes)}
+                    {t("escalation.after")} {fmtDelay(s.delay_minutes)}
                   </div>
                 )}
                 <Badge variant="info" className="flex-shrink-0">
@@ -382,7 +385,7 @@ function PolicyDetailView({
                     onClick={() => setDeletingStepNo(s.step_number)}
                     className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)] underline flex-shrink-0"
                   >
-                    remove
+                    {t("escalation.remove")}
                   </button>
                 )}
               </div>
@@ -404,6 +407,7 @@ function PolicyDetailView({
 }
 
 export function EscalationPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const canOperate = useCanOperate();
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -493,40 +497,40 @@ export function EscalationPage({ tenantId }: { tenantId: string }) {
 
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold">Escalation Policies</h2>
+          <h2 className="text-base font-semibold">{t("escalation.title")}</h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            Define time-based escalation chains for unacknowledged alerts.
+            {t("escalation.subtitle")}
           </p>
         </div>
         {canOperate && !creating && (
           <Button size="sm" onClick={() => setCreating(true)}>
-            New policy
+            {t("escalation.newPolicy")}
           </Button>
         )}
       </div>
 
       {canOperate && creating && (
         <Card className="p-4 space-y-3">
-          <h3 className="text-sm font-medium">New escalation policy</h3>
+          <h3 className="text-sm font-medium">{t("escalation.newPolicyTitle")}</h3>
           <div className="space-y-1">
-            <label className="text-xs text-[var(--text-muted)]">Name</label>
+            <label className="text-xs text-[var(--text-muted)]">{t("common.name")}</label>
             <input
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="e.g. NOC on-call escalation"
+              placeholder={t("escalation.namePlaceholder")}
               className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]"
             />
           </div>
           <div className="space-y-1">
             <label className="text-xs text-[var(--text-muted)]">
-              Description (optional)
+              {`${t("common.description")} (${t("common.optional")})`}
             </label>
             <input
               type="text"
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
-              placeholder="Who this escalates to and why"
+              placeholder={t("escalation.descPlaceholder")}
               className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]"
             />
           </div>
@@ -540,14 +544,14 @@ export function EscalationPage({ tenantId }: { tenantId: string }) {
               disabled={createMut.isPending || !newName.trim()}
             >
               {createMut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}
-              Create
+              {t("escalation.create")}
             </Button>
             <Button
               variant="secondary"
               size="sm"
               onClick={() => { setCreating(false); setNewName(""); }}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
           </div>
         </Card>
@@ -558,20 +562,20 @@ export function EscalationPage({ tenantId }: { tenantId: string }) {
           <div className="flex justify-center py-8"><Spinner /></div>
         ) : q.isError ? (
           <p className="text-xs text-[var(--red)] p-4">
-            Failed to load policies.
+            {t("escalation.loadError")}
           </p>
         ) : policies.length === 0 ? (
           <p className="text-xs text-[var(--text-muted)] p-4">
-            No escalation policies. Create one to enable time-based alert escalation.
+            {t("escalation.noItems")}
           </p>
         ) : (
           <table className="w-full text-xs">
             <thead className="bg-[var(--surface-2)]">
               <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                <th className="px-4 py-2.5 font-medium">Policy</th>
-                <th className="px-4 py-2.5 font-medium">Description</th>
-                <th className="px-4 py-2.5 font-medium">Vinculado a</th>
-                <th className="px-4 py-2.5 font-medium">Created</th>
+                <th className="px-4 py-2.5 font-medium">{t("escalation.colPolicy")}</th>
+                <th className="px-4 py-2.5 font-medium">{t("escalation.colDescription")}</th>
+                <th className="px-4 py-2.5 font-medium">{t("escalation.colLinked")}</th>
+                <th className="px-4 py-2.5 font-medium">{t("escalation.colCreated")}</th>
                 <th className="px-4 py-2.5 font-medium"></th>
               </tr>
             </thead>
@@ -614,7 +618,7 @@ export function EscalationPage({ tenantId }: { tenantId: string }) {
                           onClick={() => setDeletingId(p.policy_id)}
                           className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)] underline"
                         >
-                          delete
+                          {t("escalation.delete")}
                         </button>
                       )}
                     </div>

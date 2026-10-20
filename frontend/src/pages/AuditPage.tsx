@@ -1,4 +1,5 @@
 import { useState, useEffect, Fragment } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card } from "@/components/ui/card";
@@ -92,6 +93,7 @@ const KNOWN_SUBJECT_TYPES = [
 ];
 
 export function AuditPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const [filterAction, setFilterAction] = useState("");
   const [filterSubjectType, setFilterSubjectType] = useState("");
   const [actorFilter, setActorFilter] = useState("");
@@ -179,9 +181,9 @@ export function AuditPage({ tenantId }: { tenantId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold">Audit trail</h2>
+          <h2 className="text-base font-semibold">{t("audit.title")}</h2>
           <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-            Append-only · tenant-scoped · newest first
+            {t("audit.subtitle")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -263,10 +265,10 @@ export function AuditPage({ tenantId }: { tenantId: string }) {
       {q.isLoading ? (
         <Spinner className="w-5 h-5" />
       ) : q.isError ? (
-        <p className="text-xs text-[var(--red)]">Could not load audit events.</p>
+        <p className="text-xs text-[var(--red)]">{t("audit.loadError")}</p>
       ) : events.length === 0 ? (
         <p className="text-xs text-[var(--text-muted)]">
-          {page > 0 ? "Nenhum evento nesta página." : "No audit events found."}
+          {page > 0 ? t("audit.noEventsPage") : t("audit.noEvents")}
         </p>
       ) : (
         <>
@@ -274,10 +276,10 @@ export function AuditPage({ tenantId }: { tenantId: string }) {
             <table className="w-full text-xs min-w-[640px]">
               <thead>
                 <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
-                  <th className="text-left px-3 py-2 font-medium">Time</th>
-                  <th className="text-left px-3 py-2 font-medium">Action</th>
-                  <th className="text-left px-3 py-2 font-medium">Actor</th>
-                  <th className="text-left px-3 py-2 font-medium">Subject</th>
+                  <th className="text-left px-3 py-2 font-medium">{t("audit.colTime")}</th>
+                  <th className="text-left px-3 py-2 font-medium">{t("audit.colAction")}</th>
+                  <th className="text-left px-3 py-2 font-medium">{t("audit.colActor")}</th>
+                  <th className="text-left px-3 py-2 font-medium">{t("audit.colSubject")}</th>
                 </tr>
               </thead>
               <tbody>

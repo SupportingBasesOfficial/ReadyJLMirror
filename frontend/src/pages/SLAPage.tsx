@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
@@ -52,6 +53,7 @@ function fmtTs(iso?: string) {
 }
 
 function CreatePolicyForm({ tenantId, onDone }: { tenantId: string; onDone: () => void }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [severity, setSeverity] = useState("");
@@ -76,27 +78,27 @@ function CreatePolicyForm({ tenantId, onDone }: { tenantId: string; onDone: () =
 
   return (
     <Card className="p-4 space-y-3">
-      <h3 className="text-sm font-medium">New SLA policy</h3>
+      <h3 className="text-sm font-medium">{t("sla.newPolicyTitle")}</h3>
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Policy name</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("sla.policyName")}</label>
         <input value={name} onChange={e => setName(e.target.value)}
           placeholder="e.g. Critical SLA"
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
       </div>
       <div className="space-y-1">
-        <label className="text-xs text-[var(--text-muted)]">Severity match (blank = all)</label>
+        <label className="text-xs text-[var(--text-muted)]">{t("sla.severityMatch")}</label>
         <input value={severity} onChange={e => setSeverity(e.target.value)}
           placeholder="critical, high, medium, low…"
           className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
       </div>
       <div className="flex gap-2">
         <div className="flex-1 space-y-1">
-          <label className="text-xs text-[var(--text-muted)]">Response time (minutes)</label>
+          <label className="text-xs text-[var(--text-muted)]">{t("sla.responseTime")}</label>
           <input type="number" min="1" value={respMins} onChange={e => setRespMins(e.target.value)}
             className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
         </div>
         <div className="flex-1 space-y-1">
-          <label className="text-xs text-[var(--text-muted)]">Resolve time (minutes)</label>
+          <label className="text-xs text-[var(--text-muted)]">{t("sla.resolveTime")}</label>
           <input type="number" min="1" value={resMins} onChange={e => setResMins(e.target.value)}
             className="w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]" />
         </div>
@@ -105,15 +107,16 @@ function CreatePolicyForm({ tenantId, onDone }: { tenantId: string; onDone: () =
       <div className="flex gap-2">
         <Button size="sm" onClick={() => { setErr(null); mut.mutate(); }}
           disabled={mut.isPending || !name.trim()}>
-          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}Create
+          {mut.isPending ? <Spinner className="w-3 h-3 mr-1" /> : null}{t("escalation.create")}
         </Button>
-        <Button variant="secondary" size="sm" onClick={onDone}>Cancel</Button>
+        <Button variant="secondary" size="sm" onClick={onDone}>{t("common.cancel")}</Button>
       </div>
     </Card>
   );
 }
 
 export function SLAPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const canOperate = useCanOperate();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -151,22 +154,22 @@ export function SLAPage({ tenantId }: { tenantId: string }) {
   });
 
   const tabs = [
-    { id: "policies" as const, label: "Policies" },
-    { id: "active" as const, label: "Active" },
-    { id: "breaches" as const, label: "Breaches" },
+    { id: "policies" as const, label: t("sla.tabPolicies") },
+    { id: "active" as const, label: t("sla.tabActive") },
+    { id: "breaches" as const, label: t("sla.tabBreaches") },
   ];
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold">SLA Management</h2>
+          <h2 className="text-base font-semibold">{t("sla.title")}</h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            Response and resolution time commitments.
+            {t("sla.subtitle")}
           </p>
         </div>
         {canOperate && tab === "policies" && !creating && (
-          <Button size="sm" onClick={() => setCreating(true)}>New policy</Button>
+          <Button size="sm" onClick={() => setCreating(true)}>{t("sla.newPolicy")}</Button>
         )}
       </div>
 
@@ -176,15 +179,15 @@ export function SLAPage({ tenantId }: { tenantId: string }) {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-[var(--border)] pb-0">
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
+        {tabs.map(tabItem => (
+          <button key={tabItem.id} onClick={() => setTab(tabItem.id)}
             className={[
               "px-3 py-1.5 text-xs font-medium rounded-t transition-colors",
-              tab === t.id
+              tab === tabItem.id
                 ? "bg-[var(--surface-2)] text-[var(--brand)] border-b-2 border-[var(--brand)]"
                 : "text-[var(--text-muted)] hover:text-[var(--text)]",
             ].join(" ")}>
-            {t.label}
+            {tabItem.label}
           </button>
         ))}
       </div>
@@ -195,17 +198,17 @@ export function SLAPage({ tenantId }: { tenantId: string }) {
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : (policies.data ?? []).length === 0 ? (
             <p className="text-xs text-[var(--text-muted)] p-4">
-              No SLA policies configured.
+              {t("sla.noItems")}
             </p>
           ) : (
             <table className="w-full text-xs">
               <thead className="bg-[var(--surface-2)]">
                 <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                  <th className="px-4 py-2.5 font-medium">Name</th>
-                  <th className="px-4 py-2.5 font-medium">Severity</th>
-                  <th className="px-4 py-2.5 font-medium">Response</th>
-                  <th className="px-4 py-2.5 font-medium">Resolve</th>
-                  <th className="px-4 py-2.5 font-medium">Status</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colName")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colSeverity")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colResponse")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colResolve")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colStatus")}</th>
                   <th className="px-4 py-2.5 font-medium"></th>
                 </tr>
               </thead>
@@ -224,7 +227,7 @@ export function SLAPage({ tenantId }: { tenantId: string }) {
                     </td>
                     <td className="px-4 py-2.5">
                       <Badge variant={p.enabled ? "success" : "muted"}>
-                        {p.enabled ? "active" : "disabled"}
+                        {p.enabled ? t("sla.statusActive") : t("sla.statusDisabled")}
                       </Badge>
                     </td>
                     <td className="px-4 py-2.5">
@@ -233,7 +236,7 @@ export function SLAPage({ tenantId }: { tenantId: string }) {
                           onClick={() => disableMut.mutate(p.sla_id)}
                           disabled={disableMut.isPending}
                           className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)] underline disabled:opacity-40">
-                          disable
+                          {t("sla.disable")}
                         </button>
                       ) : (
                         <button
@@ -257,48 +260,48 @@ export function SLAPage({ tenantId }: { tenantId: string }) {
           {trackers.isLoading ? (
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : (trackers.data ?? []).length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] p-4">No active SLA trackers.</p>
+            <p className="text-xs text-[var(--text-muted)] p-4">{t("sla.noTrackers")}</p>
           ) : (
             <table className="w-full text-xs">
               <thead className="bg-[var(--surface-2)]">
                 <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                  <th className="px-4 py-2.5 font-medium">Alert</th>
-                  <th className="px-4 py-2.5 font-medium">SLA</th>
-                  <th className="px-4 py-2.5 font-medium">Response by</th>
-                  <th className="px-4 py-2.5 font-medium">Resolve by</th>
-                  <th className="px-4 py-2.5 font-medium">Status</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colAlert")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colSLA")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colResponseBy")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colResolveBy")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colStatus")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
-                {(trackers.data ?? []).map(t => (
-                  <tr key={t.tracker_id} className="hover:bg-[var(--surface-2)] transition-colors">
+                {(trackers.data ?? []).map(tr => (
+                  <tr key={tr.tracker_id} className="hover:bg-[var(--surface-2)] transition-colors">
                     <td className="px-4 py-2.5">
                       <button
-                        onClick={() => navigate(`/alerts?highlight=${t.alert_id}`)}
-                        title={t.alert_id}
+                        onClick={() => navigate(`/alerts?highlight=${tr.alert_id}`)}
+                        title={tr.alert_id}
                         className="font-mono text-[10px] text-[var(--brand)] hover:underline cursor-pointer">
-                        {t.alert_id.slice(0, 20)}…
+                        {tr.alert_id.slice(0, 20)}…
                       </button>
                     </td>
-                    <td className="px-4 py-2.5 text-[var(--text)]">{t.sla_name}</td>
+                    <td className="px-4 py-2.5 text-[var(--text)]">{tr.sla_name}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
-                      <span className={t.response_breached ? "text-[var(--red)]" : "text-[var(--text-muted)]"}>
-                        {fmtTs(t.response_deadline)}
-                        {t.response_breached && " ⚠"}
+                      <span className={tr.response_breached ? "text-[var(--red)]" : "text-[var(--text-muted)]"}>
+                        {fmtTs(tr.response_deadline)}
+                        {tr.response_breached && " ⚠"}
                       </span>
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
-                      <span className={t.resolve_breached ? "text-[var(--red)]" : "text-[var(--text-muted)]"}>
-                        {fmtTs(t.resolve_deadline)}
-                        {t.resolve_breached && " ⚠"}
+                      <span className={tr.resolve_breached ? "text-[var(--red)]" : "text-[var(--text-muted)]"}>
+                        {fmtTs(tr.resolve_deadline)}
+                        {tr.resolve_breached && " ⚠"}
                       </span>
                     </td>
                     <td className="px-4 py-2.5">
-                      {t.resolve_breached || t.response_breached
-                        ? <Badge variant="danger">breached</Badge>
-                        : t.acknowledged_at
-                        ? <Badge variant="info">acknowledged</Badge>
-                        : <Badge variant="warning">open</Badge>
+                      {tr.resolve_breached || tr.response_breached
+                        ? <Badge variant="danger">{t("sla.breached")}</Badge>
+                        : tr.acknowledged_at
+                        ? <Badge variant="info">{t("sla.acknowledged")}</Badge>
+                        : <Badge variant="warning">{t("common.open")}</Badge>
                       }
                     </td>
                   </tr>
@@ -314,16 +317,16 @@ export function SLAPage({ tenantId }: { tenantId: string }) {
           {breaches.isLoading ? (
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : (breaches.data ?? []).length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] p-4">No SLA breaches recorded.</p>
+            <p className="text-xs text-[var(--text-muted)] p-4">{t("sla.noBreaches")}</p>
           ) : (
             <table className="w-full text-xs">
               <thead className="bg-[var(--surface-2)]">
                 <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                  <th className="px-4 py-2.5 font-medium">Alert</th>
-                  <th className="px-4 py-2.5 font-medium">SLA</th>
-                  <th className="px-4 py-2.5 font-medium">Type</th>
-                  <th className="px-4 py-2.5 font-medium">Deadline was</th>
-                  <th className="px-4 py-2.5 font-medium">Breached at</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colAlert")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colSLA")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colType")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colDeadline")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("sla.colBreachedAt")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">

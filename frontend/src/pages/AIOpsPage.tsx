@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
@@ -36,8 +37,14 @@ function sevVariant(s: Finding["severity_hint"]): "danger" | "warning" | "muted"
   return "muted";
 }
 
-function typeLabel(t: Finding["finding_type"]) {
-  return { anomaly: "Anomaly", correlation: "Correlation", root_cause: "Root cause", prediction: "Prediction" }[t];
+function typeLabel(t: Finding["finding_type"], tFn: (k: string) => string) {
+  const map: Record<Finding["finding_type"], string> = {
+    anomaly: tFn("aiops.typeAnomaly"),
+    correlation: tFn("aiops.typeCorrelation"),
+    root_cause: tFn("aiops.typeRootCause"),
+    prediction: tFn("aiops.typePrediction"),
+  };
+  return map[t];
 }
 
 function fmtTs(iso: string) {
@@ -50,6 +57,7 @@ function fmtConfidence(c: number | null) {
 }
 
 export function AIOpsPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const canOperate = useCanOperate();
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -84,9 +92,9 @@ export function AIOpsPage({ tenantId }: { tenantId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold">AIOps Advisory Findings</h2>
+          <h2 className="text-base font-semibold">{t("aiops.title")}</h2>
           <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-            AI-generated analysis · advisory only · does not create or resolve alerts
+            {t("aiops.subtitle")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -100,7 +108,7 @@ export function AIOpsPage({ tenantId }: { tenantId: string }) {
                 : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--text-muted)]",
             ].join(" ")}
           >
-            {showDismissed ? "Ocultar descartados" : "Ver descartados"}
+            {showDismissed ? t("aiops.hideDismissed") : t("aiops.showDismissed")}
           </button>
         </div>
       </div>
@@ -113,11 +121,11 @@ export function AIOpsPage({ tenantId }: { tenantId: string }) {
       {q.isLoading ? (
         <div className="flex justify-center py-10"><Spinner /></div>
       ) : q.isError ? (
-        <p className="text-xs text-[var(--red)]">Failed to load findings.</p>
+        <p className="text-xs text-[var(--red)]">{t("aiops.loadError")}</p>
       ) : findings.length === 0 ? (
         <Card>
           <p className="text-xs text-[var(--text-muted)] py-4 text-center">
-            No active advisory findings. Analysis runs every 30 minutes when there are active alerts.
+            {t("aiops.noFindings")}
           </p>
         </Card>
       ) : (
@@ -127,7 +135,7 @@ export function AIOpsPage({ tenantId }: { tenantId: string }) {
               <CardHeader>
                 <div className="flex items-start gap-2 min-w-0 flex-1">
                   <div className="flex flex-wrap gap-1.5 flex-shrink-0 mt-0.5">
-                    <Badge variant={typeVariant(f.finding_type)}>{typeLabel(f.finding_type)}</Badge>
+                    <Badge variant={typeVariant(f.finding_type)}>{typeLabel(f.finding_type, t)}</Badge>
                     <Badge variant={sevVariant(f.severity_hint)}>{f.severity_hint}</Badge>
                   </div>
                   <button
@@ -149,7 +157,7 @@ export function AIOpsPage({ tenantId }: { tenantId: string }) {
                       disabled={dismiss.isPending}
                       className="text-[10px] text-[var(--text-muted)] hover:text-[var(--red)]"
                     >
-                      Dismiss
+                      {t("aiops.dismiss")}
                     </Button>
                   )}
                 </div>
@@ -161,7 +169,7 @@ export function AIOpsPage({ tenantId }: { tenantId: string }) {
 
                   {f.evidence_refs && f.evidence_refs.length > 0 && (
                     <div>
-                      <p className="text-[10px] text-[var(--text-muted)] mb-1">Referenced evidence</p>
+                      <p className="text-[10px] text-[var(--text-muted)] mb-1">{t("aiops.evidence")}</p>
                       <div className="flex flex-wrap gap-1">
                         {f.evidence_refs.map((ref) => {
                           const isAlert = ref.startsWith("alert:");
@@ -195,9 +203,9 @@ export function AIOpsPage({ tenantId }: { tenantId: string }) {
                   )}
 
                   <div className="flex items-center gap-4 text-[10px] text-[var(--text-muted)]">
-                    <span>Model: <span className="font-mono">{f.model_id}</span></span>
-                    <span>Generated: {fmtTs(f.created_at)}</span>
-                    <span>Expires: {fmtTs(f.expires_at)}</span>
+                    <span>{t("aiops.model")} <span className="font-mono">{f.model_id}</span></span>
+                    <span>{t("aiops.generated")} {fmtTs(f.created_at)}</span>
+                    <span>{t("aiops.expires")} {fmtTs(f.expires_at)}</span>
                   </div>
                 </div>
               )}

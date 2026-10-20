@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -63,6 +64,7 @@ function EventsPanel({
   source: Source;
   tenantId: string;
 }) {
+  const { t } = useTranslation();
   const { data: events = [], isLoading } = useQuery<AlertEvent[]>({
     queryKey: ["amgr-events", source.source_id],
     queryFn: () =>
@@ -92,7 +94,7 @@ function EventsPanel({
         }}
       >
         <div style={{ color: "var(--text-muted)", marginBottom: 4 }}>
-          Alertmanager webhook URL
+          {t("alertmanager.webhookUrl")}
         </div>
         <code
           style={{
@@ -106,19 +108,17 @@ function EventsPanel({
         <div
           style={{ color: "var(--text-muted)", marginTop: 6, fontSize: "0.75rem" }}
         >
-          Set{" "}
-          <code style={{ color: "var(--text)" }}>X-JLM-Webhook-Secret</code>{" "}
-          header to the token shown at source creation.
+          {t("alertmanager.webhookSecret")}
         </div>
       </div>
 
       {isLoading ? (
         <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
-          Loading events…
+          {t("alertmanager.loadingEvents")}
         </div>
       ) : events.length === 0 ? (
         <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
-          No events received yet.
+          {t("alertmanager.noEvents")}
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
@@ -131,7 +131,7 @@ function EventsPanel({
           >
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["Alert", "Severity", "Status", "Received"].map((h) => (
+                {[t("alertmanager.colAlert"), t("alertmanager.colSeverity"), t("alertmanager.colStatus"), t("alertmanager.colReceived")].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -187,6 +187,7 @@ function CreateSourceForm({
   tenantId: string;
   onCreated: (token: string, sourceId: string, name: string) => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
 
   const create = useMutation({
@@ -210,7 +211,7 @@ function CreateSourceForm({
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="Source name (e.g. prod-cluster)"
+        placeholder={t("alertmanager.sourcePlaceholder")}
         style={{
           flex: 1,
           border: "1px solid var(--border)",

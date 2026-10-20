@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card } from "@/components/ui/card";
@@ -543,6 +544,7 @@ function RFCDetail({ rfc, tenantId, onBack }: {
 // ── List ──────────────────────────────────────────────────────────────────────
 
 export function ITSMPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<RFC | null>(null);
@@ -584,7 +586,7 @@ export function ITSMPage({ tenantId }: { tenantId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <h2 className="text-base font-semibold">Change Management</h2>
+          <h2 className="text-base font-semibold">{t("itsm.title")}</h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
             RFCs, aprovações e tarefas de mudança.
           </p>

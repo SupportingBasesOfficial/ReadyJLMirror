@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Bug, CheckCircle, Clock, XCircle, AlertTriangle } from "lucide-react";
@@ -147,6 +148,7 @@ interface Props {
 }
 
 export function BugReportsPage({ tenantId }: Props) {
+  const { t } = useTranslation();
   const [statusFilter, setStatusFilter] = useState<string>("open");
   const [selected, setSelected] = useState<BugReport | null>(null);
 
@@ -160,7 +162,7 @@ export function BugReportsPage({ tenantId }: Props) {
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold flex items-center gap-2">
           <Bug size={15} className="text-[var(--red,#ef4444)]" />
-          Bug Reports
+          {t("nav.bugs")}
         </h2>
         <div className="flex items-center gap-2">
           <label className="text-xs text-[var(--text-muted)]">Status:</label>

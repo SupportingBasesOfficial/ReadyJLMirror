@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import DOMPurify from "dompurify";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -69,28 +70,29 @@ function ArticleModal({
   const [articleStatus, setArticleStatus] = useState(article?.status ?? "draft");
   const [tagsRaw, setTagsRaw] = useState((article?.tags ?? []).join(", "));
 
+  const { t } = useTranslation();
   const isEditing = !!article;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", zIndex: 50, padding: "40px 16px" }}>
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 720 }}>
-        <h3 style={{ fontWeight: 600, marginBottom: 16 }}>{isEditing ? "Edit article" : "New article"}</h3>
+        <h3 style={{ fontWeight: 600, marginBottom: 16 }}>{isEditing ? t("kb.editArticle") : t("kb.newArticleTitle")}</h3>
 
         <label style={{ fontSize: "0.82rem", display: "block", marginBottom: 10 }}>
-          Title
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Article title" style={{ display: "block", width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: 6, padding: "7px 10px", background: "var(--surface-2)", color: "var(--text)", marginTop: 4, fontSize: "0.85rem" }} />
+          {t("kb.titleField")}
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("kb.titlePlaceholder")} style={{ display: "block", width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: 6, padding: "7px 10px", background: "var(--surface-2)", color: "var(--text)", marginTop: 4, fontSize: "0.85rem" }} />
         </label>
 
         <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
           <label style={{ fontSize: "0.82rem", flex: 1 }}>
-            Category
+            {t("kb.categoryField")}
             <select value={catId} onChange={(e) => setCatId(e.target.value)} style={{ display: "block", width: "100%", border: "1px solid var(--border)", borderRadius: 6, padding: "7px 8px", background: "var(--surface-2)", color: "var(--text)", marginTop: 4, fontSize: "0.82rem" }}>
-              <option value="">— no category —</option>
+              <option value="">{t("kb.noCategory")}</option>
               {categories.map((c) => <option key={c.category_id} value={c.category_id}>{c.name}</option>)}
             </select>
           </label>
           <label style={{ fontSize: "0.82rem", flex: 1 }}>
-            Status
+            {t("kb.statusField")}
             <select value={articleStatus} onChange={(e) => setArticleStatus(e.target.value as "draft" | "published" | "archived")} style={{ display: "block", width: "100%", border: "1px solid var(--border)", borderRadius: 6, padding: "7px 8px", background: "var(--surface-2)", color: "var(--text)", marginTop: 4, fontSize: "0.82rem" }}>
               <option value="draft">Draft</option>
               <option value="published">Published</option>
@@ -100,13 +102,13 @@ function ArticleModal({
         </div>
 
         <label style={{ fontSize: "0.82rem", display: "block", marginBottom: 10 }}>
-          Body (Markdown)
+          {t("kb.bodyField")}
           <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={14} style={{ display: "block", width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: 6, padding: "7px 10px", background: "var(--surface-2)", color: "var(--text)", marginTop: 4, fontSize: "0.82rem", fontFamily: "monospace", resize: "vertical" }} />
         </label>
 
         <label style={{ fontSize: "0.82rem", display: "block", marginBottom: 16 }}>
-          Tags (comma-separated)
-          <input value={tagsRaw} onChange={(e) => setTagsRaw(e.target.value)} placeholder="e.g. networking, dns, runbook" style={{ display: "block", width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: 6, padding: "7px 10px", background: "var(--surface-2)", color: "var(--text)", marginTop: 4, fontSize: "0.82rem" }} />
+          {t("kb.tagsField")}
+          <input value={tagsRaw} onChange={(e) => setTagsRaw(e.target.value)} placeholder={t("kb.tagsPlaceholder")} style={{ display: "block", width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: 6, padding: "7px 10px", background: "var(--surface-2)", color: "var(--text)", marginTop: 4, fontSize: "0.82rem" }} />
         </label>
 
         <div style={{ display: "flex", gap: 8 }}>
@@ -118,14 +120,14 @@ function ArticleModal({
                 body,
                 category_id: catId || null,
                 status: articleStatus,
-                tags: tagsRaw.split(",").map((t) => t.trim()).filter(Boolean),
+                tags: tagsRaw.split(",").map((tag) => tag.trim()).filter(Boolean),
               })
             }
             disabled={!title.trim()}
           >
-            {isEditing ? "Save changes" : "Create article"}
+            {isEditing ? t("kb.saveChanges") : t("kb.createArticle")}
           </Button>
-          <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+          <Button variant="secondary" size="sm" onClick={onClose}>{t("common.cancel")}</Button>
         </div>
       </div>
     </div>
@@ -145,6 +147,7 @@ function ArticleDetailView({
   onDelete: () => void;
   onBack: () => void;
 }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [incidentInput, setIncidentInput] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -189,7 +192,7 @@ function ArticleDetailView({
       `}</style>
 
       <button onClick={onBack} style={{ color: "var(--brand)", background: "none", border: "none", cursor: "pointer", fontSize: "0.82rem", marginBottom: 12 }}>
-        ← Back to articles
+        {t("kb.back")}
       </button>
 
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8, gap: 10 }}>
@@ -202,8 +205,8 @@ function ArticleDetailView({
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-          <Button variant="secondary" size="sm" onClick={onEdit}>Edit</Button>
-          <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(true)}>Delete</Button>
+          <Button variant="secondary" size="sm" onClick={onEdit}>{t("common.edit")}</Button>
+          <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(true)}>{t("common.delete")}</Button>
         </div>
       </div>
 
@@ -224,30 +227,30 @@ function ArticleDetailView({
         />
       ) : (
         <div style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 16, marginBottom: 20, minHeight: 80 }}>
-          <span style={{ color: "var(--text-muted)", fontSize: "0.83rem" }}>No content yet.</span>
+          <span style={{ color: "var(--text-muted)", fontSize: "0.83rem" }}>{t("kb.noContent")}</span>
         </div>
       )}
 
       {/* Incident links */}
       <div>
-        <h3 style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 10 }}>Linked incidents</h3>
+        <h3 style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 10 }}>{t("kb.linkedIncidents")}</h3>
         {article.incidents.length === 0 ? (
-          <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 10 }}>No incidents linked.</p>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 10 }}>{t("kb.noIncidents")}</p>
         ) : (
           <div style={{ marginBottom: 10 }}>
             {article.incidents.map((inc) => (
               <div key={inc.incident_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 10px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 6, marginBottom: 4, fontSize: "0.82rem" }}>
                 <span style={{ fontFamily: "monospace", color: "var(--brand)" }}>{inc.incident_id}</span>
-                <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>linked by {inc.linked_by}</span>
-                <button onClick={() => unlinkIncident.mutate(inc.incident_id)} style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem" }}>unlink</button>
+                <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>{inc.linked_by}</span>
+                <button onClick={() => unlinkIncident.mutate(inc.incident_id)} style={{ color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", fontSize: "0.75rem" }}>{t("kb.unlink")}</button>
               </div>
             ))}
           </div>
         )}
         <form onSubmit={(e) => { e.preventDefault(); if (incidentInput.trim()) linkIncident.mutate(incidentInput.trim()); }} style={{ display: "flex", gap: 8 }}>
-          <input value={incidentInput} onChange={(e) => setIncidentInput(e.target.value)} placeholder="Incident ID to link" style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", background: "var(--surface-2)", color: "var(--text)", fontSize: "0.82rem" }} />
+          <input value={incidentInput} onChange={(e) => setIncidentInput(e.target.value)} placeholder={t("kb.incidentIdPlaceholder")} style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", background: "var(--surface-2)", color: "var(--text)", fontSize: "0.82rem" }} />
           <Button type="submit" size="sm" disabled={!incidentInput.trim() || linkIncident.isPending}>
-            {linkIncident.isPending ? "Linking…" : "Link"}
+            {linkIncident.isPending ? t("kb.linking") : t("kb.link")}
           </Button>
         </form>
       </div>
@@ -277,6 +280,7 @@ function loadKbStatus(tenantId: string): string {
 }
 
 export function KnowledgeBasePage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const { toast } = useToast();
   const [search, setSearch] = useState("");
@@ -397,9 +401,9 @@ export function KnowledgeBasePage({ tenantId }: { tenantId: string }) {
       )}
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        <h2 style={{ fontWeight: 600 }}>Knowledge Base</h2>
+        <h2 style={{ fontWeight: 600 }}>{t("kb.title")}</h2>
         <Button size="sm" onClick={() => { setSelectedId(null); setShowEditor(true); }}>
-          New article
+          {t("kb.newArticle")}
         </Button>
       </div>
 
@@ -408,28 +412,28 @@ export function KnowledgeBasePage({ tenantId }: { tenantId: string }) {
         <input
           value={search}
           onChange={(e) => handleSearch(e.target.value)}
-          placeholder="Search articles…"
+          placeholder={t("kb.searchPlaceholder")}
           style={{ flex: 2, minWidth: 160, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", background: "var(--surface-2)", color: "var(--text)", fontSize: "0.82rem" }}
         />
         <select value={filterStatus} onChange={(e) => setAndSaveStatus(e.target.value)} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px", background: "var(--surface-2)", color: "var(--text)", fontSize: "0.82rem" }}>
-          <option value="">All statuses</option>
+          <option value="">{t("kb.allStatuses")}</option>
           <option value="published">Published</option>
           <option value="draft">Draft</option>
           <option value="archived">Archived</option>
         </select>
         <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px", background: "var(--surface-2)", color: "var(--text)", fontSize: "0.82rem" }}>
-          <option value="">All categories</option>
+          <option value="">{t("kb.allCategories")}</option>
           {categories.map((c) => <option key={c.category_id} value={c.category_id}>{c.name}</option>)}
         </select>
         <Button variant="secondary" size="sm" onClick={() => setShowNewCat((v) => !v)}>
-          + Category
+          {t("kb.addCategory")}
         </Button>
       </div>
 
       {/* Category management panel */}
       {showNewCat && (
         <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 14, marginBottom: 14, background: "var(--surface-2)" }}>
-          <h3 style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: 10 }}>Gerenciar categorias</h3>
+          <h3 style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: 10 }}>{t("kb.manageCategories")}</h3>
 
           {categories.length > 0 ? (
             <div style={{ marginBottom: 12 }}>
@@ -448,11 +452,11 @@ export function KnowledgeBasePage({ tenantId }: { tenantId: string }) {
               ))}
             </div>
           ) : (
-            <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: 10 }}>Nenhuma categoria criada.</p>
+            <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: 10 }}>{t("kb.noCategories")}</p>
           )}
 
           <form onSubmit={(e) => { e.preventDefault(); if (newCatName.trim()) createCategory.mutate(newCatName.trim()); }} style={{ display: "flex", gap: 8 }}>
-            <input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Nova categoria…" style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", background: "var(--surface)", color: "var(--text)", fontSize: "0.82rem" }} />
+            <input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder={t("kb.newCategoryPlaceholder")} style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", background: "var(--surface)", color: "var(--text)", fontSize: "0.82rem" }} />
             <Button type="submit" size="sm" disabled={!newCatName.trim() || createCategory.isPending}>Criar</Button>
             <Button variant="secondary" size="sm" type="button" onClick={() => setShowNewCat(false)}>Fechar</Button>
           </form>
@@ -461,9 +465,9 @@ export function KnowledgeBasePage({ tenantId }: { tenantId: string }) {
 
       {/* Article list */}
       {isLoading ? (
-        <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>Loading…</div>
+        <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>{t("kb.loading")}</div>
       ) : articles.length === 0 ? (
-        <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>No articles found.</div>
+        <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>{t("kb.noArticles")}</div>
       ) : (
         <div>
           {articles.map((a) => (

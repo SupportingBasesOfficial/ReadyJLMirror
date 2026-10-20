@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useCanOperate } from "@/hooks/usePermission";
@@ -80,6 +81,7 @@ function PolicyForm({
   onDone: () => void;
   sources: MonitoringSource[];
 }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [form, setForm] = useState<PolicyFormData>({ ...EMPTY_FORM, ...initial });
@@ -126,7 +128,7 @@ function PolicyForm({
     <div className="space-y-3 text-xs">
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-[var(--text-muted)] mb-1">Policy ID</label>
+          <label className="block text-[var(--text-muted)] mb-1">{t("alertPolicies.policyId")}</label>
           <input
             value={form.policy_id}
             onChange={(e) => setForm((f) => ({ ...f, policy_id: e.target.value }))}
@@ -138,7 +140,7 @@ function PolicyForm({
           />
         </div>
         <div>
-          <label className="block text-[var(--text-muted)] mb-1">Source kind</label>
+          <label className="block text-[var(--text-muted)] mb-1">{t("alertPolicies.sourceKind")}</label>
           <select
             value={form.source_kind}
             onChange={(e) =>
@@ -159,7 +161,7 @@ function PolicyForm({
       {form.source_kind === "monitoring_problem" ? (
         <div>
           <label className="block text-[var(--text-muted)] mb-1">
-            Min severity (inclusive)
+            {t("alertPolicies.minSeverity")}
           </label>
           <select
             value={form.problem_min_severity}
@@ -176,7 +178,7 @@ function PolicyForm({
         </div>
       ) : (
         <div>
-          <label className="block text-[var(--text-muted)] mb-1">Health classes (trigger on)</label>
+          <label className="block text-[var(--text-muted)] mb-1">{t("alertPolicies.healthClasses")}</label>
           <div className="flex gap-2 flex-wrap">
             {HEALTH_CLASSES.map((hc) => (
               <label key={hc} className="flex items-center gap-1 cursor-pointer">
@@ -233,10 +235,10 @@ function PolicyForm({
           onClick={() => create.mutate()}
           disabled={!form.policy_id || create.isPending}
         >
-          {create.isPending ? <Spinner className="w-3 h-3" /> : "Create & activate"}
+          {create.isPending ? <Spinner className="w-3 h-3" /> : t("alertPolicies.createBtn")}
         </Button>
         <Button size="sm" variant="secondary" onClick={onDone}>
-          Cancel
+          {t("common.cancel")}
         </Button>
       </div>
     </div>
@@ -244,6 +246,7 @@ function PolicyForm({
 }
 
 export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const canOperate = useCanOperate();
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -315,16 +318,16 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
 
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold">Alert policies</h2>
+          <h2 className="text-base font-semibold">{t("alertPolicies.title")}</h2>
           <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-            Immutable · append-only · version-controlled
+            {t("alertPolicies.subtitle")}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {q.isFetching && <Spinner className="w-3 h-3" />}
           {canOperate && (
             <Button size="sm" onClick={() => { setShowForm(true); setNewVersionFor(null); }}>
-              New policy
+              {t("alertPolicies.newPolicy")}
             </Button>
           )}
         </div>
@@ -333,7 +336,7 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
       {canOperate && (showForm && !newVersionFor) && (
         <Card className="flex flex-col gap-3">
           <CardHeader>
-            <span className="text-sm font-medium">Create policy</span>
+            <span className="text-sm font-medium">{t("alertPolicies.createTitle")}</span>
           </CardHeader>
           <PolicyForm sources={sources} onDone={() => setShowForm(false)} />
         </Card>
@@ -342,9 +345,9 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
       {q.isLoading ? (
         <Spinner className="w-5 h-5" />
       ) : q.isError ? (
-        <p className="text-xs text-[var(--red)]">Could not load policies.</p>
+        <p className="text-xs text-[var(--red)]">{t("alertPolicies.loadError")}</p>
       ) : grouped.size === 0 ? (
-        <p className="text-xs text-[var(--text-muted)]">No alert policies defined.</p>
+        <p className="text-xs text-[var(--text-muted)]">{t("alertPolicies.noItems")}</p>
       ) : (
         <div className="space-y-3">
           {Array.from(grouped.entries()).map(([policyId, pvs]) => {
@@ -383,7 +386,7 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
                         }
                         disabled={toggleEffective.isPending}
                       >
-                        {effective.effective_enabled ? "Disable" : "Enable"}
+                        {effective.effective_enabled ? t("alertPolicies.disable") : t("alertPolicies.enable")}
                       </Button>
                     )}
                     {canOperate && (
@@ -395,7 +398,7 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
                           setShowForm(true);
                         }}
                       >
-                        New version
+                        {t("alertPolicies.newVersion")}
                       </Button>
                     )}
                     {historical.length > 0 && (
@@ -409,7 +412,7 @@ export function AlertPoliciesPage({ tenantId: _tenantId }: { tenantId: string })
                         }
                         className="text-xs text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
                       >
-                        {isExpanded ? "Hide" : `History (${historical.length})`}
+                        {isExpanded ? t("alertPolicies.hide") : t("alertPolicies.history", { count: historical.length })}
                       </button>
                     )}
                     {canOperate && (
