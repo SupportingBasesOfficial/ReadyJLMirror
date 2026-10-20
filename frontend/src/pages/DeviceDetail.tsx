@@ -777,7 +777,7 @@ function Sparkline({
       const till = Math.floor(Date.now() / 1000);
       const from = till - periodSec;
       return api.get<{ items: HistoryPoint[] }>(
-        `/api/v1/monitoring/sources/${sourceId}/metrics/${metricId}/history?window_from=${from}&window_till=${till}`,
+        `/api/v1/monitoring/sources/${sourceId}/metrics/${metricId}/history?window_from=${from}&window_till=${till}&limit=40`,
       );
     },
     enabled: visible,
@@ -835,6 +835,15 @@ function MetricCard({
   const numeric = isNumeric(metric);
   const sparkColor = ACCENT.default;
 
+  // Detect out-of-range percentage values (e.g. Zabbix delta items)
+  const rawN = (() => {
+    if (!metric.value || typeof metric.value !== "object") return null;
+    const v = metric.value as Record<string, unknown>;
+    return "n" in v ? Number(v.n) : null;
+  })();
+  const isPct = isPercent(metric.unit);
+  const outOfRange = isPct && rawN !== null && (rawN < 0 || rawN > 100);
+
   return (
     <div
       className={[
@@ -850,9 +859,17 @@ function MetricCard({
       <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1.5 truncate leading-tight">
         {metric.name}
       </div>
-      <div className="text-xl font-bold tabular-nums leading-none"
-        style={{ color: expanded ? "var(--brand)" : "var(--text)" }}>
-        {displayValue}
+      <div className="flex items-center gap-1.5">
+        <div className="text-xl font-bold tabular-nums leading-none"
+          style={{ color: outOfRange ? "var(--text-warning, #b45309)" : expanded ? "var(--brand)" : "var(--text)" }}>
+          {displayValue}
+        </div>
+        {outOfRange && (
+          <span title={`Valor fora do intervalo esperado (0–100%). Verifique a configuração do item na fonte de monitoramento.`}
+            style={{ fontSize: 13, cursor: "help", color: "var(--text-warning, #b45309)" }}>
+            ⚠
+          </span>
+        )}
       </div>
       {metric.observed_at && (
         <div className="text-[10px] text-[var(--text-muted)] mt-1.5 font-mono">
