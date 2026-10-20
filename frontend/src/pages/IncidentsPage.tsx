@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -38,24 +39,11 @@ interface TimeEntry {
   logged_at: string;
 }
 
-const STATE_LABELS: Record<string, string> = {
-  open: "Aberto",
-  in_progress: "Em andamento",
-  resolved: "Resolvido",
-  closed: "Fechado",
-};
-
 const NEXT_STATES: Record<string, string[]> = {
   open: ["in_progress", "resolved"],
   in_progress: ["resolved"],
   resolved: ["closed"],
   closed: [],
-};
-
-const NEXT_LABELS: Record<string, string> = {
-  in_progress: "Iniciar atendimento",
-  resolved: "Marcar resolvido",
-  closed: "Fechar incidente",
 };
 
 function stateVariant(s: string): "danger" | "warning" | "info" | "muted" | "success" {
@@ -78,12 +66,13 @@ function fmtTs(iso?: string) {
 }
 
 function StateFilters({ active, onChange }: { active: string; onChange: (v: string) => void }) {
+  const { t } = useTranslation();
   const options = [
-    { value: "", label: "Todos" },
-    { value: "open", label: "Abertos" },
-    { value: "in_progress", label: "Em andamento" },
-    { value: "resolved", label: "Resolvidos" },
-    { value: "closed", label: "Fechados" },
+    { value: "", label: t("incidents.filterAll") },
+    { value: "open", label: t("incidents.filterOpen") },
+    { value: "in_progress", label: t("incidents.filterInProgress") },
+    { value: "resolved", label: t("incidents.filterResolved") },
+    { value: "closed", label: t("incidents.filterClosed") },
   ];
   return (
     <div className="flex gap-1 flex-wrap">
@@ -105,6 +94,7 @@ function StateFilters({ active, onChange }: { active: string; onChange: (v: stri
 }
 
 function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; onBack: () => void; tenantId: string }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const canOperate = useCanOperate();
   const qc = useQueryClient();
@@ -164,9 +154,9 @@ function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; on
     return (
       <div>
         <Button variant="ghost" size="sm" onClick={onBack} className="mb-3">
-          <ChevronLeft className="w-4 h-4 mr-1" /> Voltar
+          <ChevronLeft className="w-4 h-4 mr-1" /> {t("common.back")}
         </Button>
-        <p className="text-xs text-[var(--red)]">Falha ao carregar incidente.</p>
+        <p className="text-xs text-[var(--red)]">{t("incidents.loadDetailError")}</p>
       </div>
     );
   }
@@ -182,10 +172,10 @@ function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; on
           onClick={onBack}
           className="text-xs text-[var(--brand)] hover:underline flex items-center gap-1 bg-transparent border-0 p-0 cursor-pointer"
         >
-          <ChevronLeft className="w-3 h-3" /> Incidentes
+          <ChevronLeft className="w-3 h-3" /> {t("incidents.back")}
         </button>
         <h2 className="text-sm font-semibold truncate flex-1">{d.title}</h2>
-        <Badge variant={stateVariant(d.lifecycle_state)}>{STATE_LABELS[d.lifecycle_state]}</Badge>
+        <Badge variant={stateVariant(d.lifecycle_state)}>{t(`incidents.states.${d.lifecycle_state}`)}</Badge>
         {d.severity_class && (
           <Badge variant={sevVariant(d.severity_class)}>{d.severity_class.toUpperCase()}</Badge>
         )}
@@ -204,7 +194,7 @@ function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; on
             >
               {transitionMut.isPending && <Spinner className="w-3 h-3 mr-1" />}
               <ArrowRight className="w-3 h-3 mr-1" />
-              {NEXT_LABELS[s]}
+              {t(`incidents.transitions.${s}`)}
             </Button>
           ))}
         </div>
@@ -213,16 +203,16 @@ function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; on
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Details */}
         <Card>
-          <CardHeader><span className="text-sm font-medium">Detalhes</span></CardHeader>
+          <CardHeader><span className="text-sm font-medium">{t("incidents.details")}</span></CardHeader>
           <dl>
             {[
-              ["Incidente", d.incident_id],
-              ["Alerta", d.alert_id],
-              ["Estado alerta", d.alert_summary?.lifecycle_state ?? "—"],
-              ["Responsável", currentAssignee ? currentAssignee.assignee_principal_id : "—"],
-              ["Aberto em", fmtTs(d.created_at)],
-              ["Atualizado", fmtTs(d.updated_at)],
-              ["Sync ticket", d.provider_sync?.provider_ticket_ref ?? d.provider_sync?.sync_state ?? "—"],
+              [t("incidents.fieldIncident"), d.incident_id],
+              [t("incidents.fieldAlert"), d.alert_id],
+              [t("incidents.fieldAlertState"), d.alert_summary?.lifecycle_state ?? "—"],
+              [t("incidents.fieldAssignee"), currentAssignee ? currentAssignee.assignee_principal_id : "—"],
+              [t("incidents.fieldOpenedAt"), fmtTs(d.created_at)],
+              [t("incidents.fieldUpdated"), fmtTs(d.updated_at)],
+              [t("incidents.fieldSyncTicket"), d.provider_sync?.provider_ticket_ref ?? d.provider_sync?.sync_state ?? "—"],
             ].map(([l, v]) => (
               <div key={l} className="flex gap-3 py-1.5 border-b border-[var(--border)] last:border-0">
                 <dt className="w-32 flex-shrink-0 text-xs text-[var(--text-muted)]">{l}</dt>
@@ -234,18 +224,18 @@ function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; on
 
         {/* Timeline */}
         <Card>
-          <CardHeader><span className="text-sm font-medium">Histórico de estados</span></CardHeader>
+          <CardHeader><span className="text-sm font-medium">{t("incidents.history")}</span></CardHeader>
           {d.transitions.length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] px-4 pb-3">Nenhuma transição ainda.</p>
+            <p className="text-xs text-[var(--text-muted)] px-4 pb-3">{t("incidents.noTransitions")}</p>
           ) : (
             <ul className="space-y-1 px-1 pb-2">
-              {d.transitions.map(t => (
-                <li key={t.incident_transition_id}
+              {d.transitions.map(tr => (
+                <li key={tr.incident_transition_id}
                   className="text-xs border-l-2 border-[var(--border)] pl-3 py-1">
-                  <span className="text-[var(--text-muted)]">{STATE_LABELS[t.from_state] || t.from_state}</span>
+                  <span className="text-[var(--text-muted)]">{t(`incidents.states.${tr.from_state}`, { defaultValue: tr.from_state })}</span>
                   {" → "}
-                  <span className="text-[var(--brand)]">{STATE_LABELS[t.to_state] || t.to_state}</span>
-                  <span className="text-[var(--text-muted)] ml-2">{fmtTs(t.occurred_at)}</span>
+                  <span className="text-[var(--brand)]">{t(`incidents.states.${tr.to_state}`, { defaultValue: tr.to_state })}</span>
+                  <span className="text-[var(--text-muted)] ml-2">{fmtTs(tr.occurred_at)}</span>
                 </li>
               ))}
             </ul>
@@ -258,7 +248,7 @@ function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; on
         <CardHeader>
           <span className="text-sm font-medium flex items-center gap-1.5">
             <MessageSquare className="w-4 h-4" />
-            Comentários {d.comments.length > 0 && `(${d.comments.length})`}
+            {t("incidents.comments")} {d.comments.length > 0 && `(${d.comments.length})`}
           </span>
         </CardHeader>
         <div className="space-y-2 px-4 pb-4">
@@ -278,7 +268,7 @@ function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; on
               <textarea
                 value={comment}
                 onChange={e => setComment(e.target.value)}
-                placeholder="Adicione um comentário…"
+                placeholder={t("incidents.commentPlaceholder")}
                 rows={3}
                 className="w-full text-xs rounded border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] placeholder:text-[var(--text-muted)] px-3 py-2 resize-none focus:outline-none focus:border-[var(--brand)] transition-colors"
               />
@@ -290,7 +280,7 @@ function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; on
                   onClick={() => commentMut.mutate(comment.trim())}
                 >
                   {commentMut.isPending && <Spinner className="w-3 h-3 mr-1" />}
-                  Comentar
+                  {t("incidents.commentAdd")}
                 </Button>
               </div>
             </div>
@@ -303,10 +293,10 @@ function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; on
         <CardHeader>
           <span className="text-sm font-medium flex items-center gap-1.5">
             <Clock className="w-4 h-4" />
-            Tempo gasto
+            {t("incidents.timeSpent")}
             {(timeQ.data?.length ?? 0) > 0 && (
               <span className="text-[var(--text-muted)] font-normal">
-                {" "}— {timeQ.data!.reduce((s, e) => s + e.minutes, 0)} min total
+                {" "}— {timeQ.data!.reduce((s, e) => s + e.minutes, 0)} {t("incidents.timeTotal")}
               </span>
             )}
           </span>
@@ -333,13 +323,13 @@ function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; on
                 max={1440}
                 value={timeMinutes}
                 onChange={e => setTimeMinutes(e.target.value)}
-                placeholder="Minutos"
+                placeholder={t("incidents.minutesPlaceholder")}
                 className="w-24 text-xs rounded border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] placeholder:text-[var(--text-muted)] px-2 py-1.5 focus:outline-none focus:border-[var(--brand)] transition-colors"
               />
               <input
                 value={timeDesc}
                 onChange={e => setTimeDesc(e.target.value)}
-                placeholder="Descrição (opcional)"
+                placeholder={t("incidents.descPlaceholder")}
                 className="flex-1 text-xs rounded border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] placeholder:text-[var(--text-muted)] px-2 py-1.5 focus:outline-none focus:border-[var(--brand)] transition-colors"
               />
               <Button
@@ -349,7 +339,7 @@ function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; on
                 onClick={() => timeMut.mutate({ minutes: Number(timeMinutes), description: timeDesc.trim() })}
               >
                 {timeMut.isPending && <Spinner className="w-3 h-3 mr-1" />}
-                Registrar
+                {t("incidents.logTime")}
               </Button>
             </div>
           )}
@@ -360,6 +350,7 @@ function IncidentDetail({ incident, onBack, tenantId }: { incident: Incident; on
 }
 
 export function IncidentsPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const [stateFilter, setStateFilter] = useState("open");
   const [selected, setSelected] = useState<Incident | null>(null);
 
@@ -386,8 +377,8 @@ export function IncidentsPage({ tenantId }: { tenantId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-base font-semibold">Incidentes</h1>
-          <p className="text-xs text-[var(--text-muted)]">Gestão de tickets de incidente</p>
+          <h1 className="text-base font-semibold">{t("incidents.title")}</h1>
+          <p className="text-xs text-[var(--text-muted)]">{t("incidents.subtitle")}</p>
         </div>
       </div>
 
@@ -398,15 +389,15 @@ export function IncidentsPage({ tenantId }: { tenantId: string }) {
       )}
 
       {q.isError && (
-        <p className="text-xs text-[var(--red)]">Falha ao carregar incidentes.</p>
+        <p className="text-xs text-[var(--red)]">{t("incidents.loadError")}</p>
       )}
 
       {q.isSuccess && q.data.length === 0 && (
         <Card>
           <p className="text-xs text-[var(--text-muted)] px-4 py-6 text-center">
             {stateFilter
-              ? `Nenhum incidente com estado "${STATE_LABELS[stateFilter] ?? stateFilter}".`
-              : "Nenhum incidente encontrado."}
+              ? t("incidents.emptyState", { state: t(`incidents.states.${stateFilter}`, { defaultValue: stateFilter }) })
+              : t("incidents.emptyAll")}
           </p>
         </Card>
       )}
@@ -433,7 +424,7 @@ export function IncidentsPage({ tenantId }: { tenantId: string }) {
                     </Badge>
                   )}
                   <Badge variant={stateVariant(inc.lifecycle_state)}>
-                    {STATE_LABELS[inc.lifecycle_state]}
+                    {t(`incidents.states.${inc.lifecycle_state}`)}
                   </Badge>
                   <span className="text-[10px] text-[var(--text-muted)] hidden sm:block">
                     {fmtTs(inc.updated_at)}

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -42,13 +43,6 @@ function statusColor(status: string): string {
   return "var(--text-muted)";
 }
 
-function statusLabel(status: string): string {
-  if (status === "active") return "Ativa";
-  if (status === "inactive") return "Inativa";
-  if (status === "suspended") return "Suspensa";
-  return status;
-}
-
 // ---------------------------------------------------------------------------
 // Scope management modal
 // ---------------------------------------------------------------------------
@@ -62,6 +56,7 @@ function ScopeModal({
   tenantId: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -109,7 +104,6 @@ function ScopeModal({
         { provider_base_url: selectedSource.provider_base_url, api_token: apiToken.trim() }
       );
       setDiscoveredGroups(groups);
-      // Keep pre-existing checks; add new ones that were already in scope
       const existing = new Set(
         scopeQ.data
           ?.filter((e) => e.source_id === selectedSourceId)
@@ -187,7 +181,7 @@ function ScopeModal({
         <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-[var(--border)]">
           <div>
             <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-              Gerenciar Escopo de Hostgroups
+              {t("companies.scopeTitle")}
             </h3>
             <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
               {company.name}
@@ -206,11 +200,11 @@ function ScopeModal({
           {/* Source selector */}
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-muted)" }}>
-              Fonte de monitoramento
+              {t("companies.scopeSource")}
             </label>
             {sourcesQ.isLoading ? (
               <div className="flex items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
-                <Spinner className="w-3 h-3" /> Carregando fontes…
+                <Spinner className="w-3 h-3" /> {t("companies.scopeLoadingSources")}
               </div>
             ) : (
               <select
@@ -219,7 +213,7 @@ function ScopeModal({
                 className="w-full px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface-2)] text-xs"
                 style={{ color: "var(--text)" }}
               >
-                <option value="">Selecione uma fonte…</option>
+                <option value="">{t("companies.scopeSelectSource")}</option>
                 {sourcesQ.data?.map((s) => (
                   <option key={s.monitoring_source_id} value={s.monitoring_source_id}>
                     {s.display_name} — {s.provider_base_url}
@@ -234,15 +228,15 @@ function ScopeModal({
               {/* Token input */}
               <div>
                 <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-muted)" }}>
-                  Token da API Zabbix
-                  <span className="ml-1 font-normal opacity-60">(para buscar os grupos disponíveis)</span>
+                  {t("companies.scopeApiToken")}
+                  <span className="ml-1 font-normal opacity-60">{t("companies.scopeApiTokenHint")}</span>
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="password"
                     value={apiToken}
                     onChange={(e) => setApiToken(e.target.value)}
-                    placeholder="Cole o token aqui…"
+                    placeholder={t("companies.scopeTokenPlaceholder")}
                     className="flex-1 px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface-2)] text-xs"
                     style={{ color: "var(--text)" }}
                     onKeyDown={(e) => { if (e.key === "Enter") discoverGroups(); }}
@@ -254,7 +248,7 @@ function ScopeModal({
                     disabled={!apiToken.trim() || discovering}
                   >
                     {discovering ? <Spinner className="w-3 h-3" /> : <RefreshCw size={12} />}
-                    {discovering ? "Buscando…" : "Buscar"}
+                    {discovering ? t("companies.scopeDiscovering") : t("companies.scopeDiscover")}
                   </Button>
                 </div>
               </div>
@@ -265,7 +259,7 @@ function ScopeModal({
                   {scopeQ.data.filter((e) => e.source_id === selectedSourceId).length > 0 && (
                     <div>
                       <p className="text-xs font-medium mb-2" style={{ color: "var(--text-muted)" }}>
-                        Grupos atualmente atribuídos nesta fonte
+                        {t("companies.scopeCurrentGroups")}
                       </p>
                       <div className="space-y-1">
                         {scopeQ.data
@@ -279,13 +273,13 @@ function ScopeModal({
                           ))}
                       </div>
                       <p className="text-xs mt-2 opacity-60" style={{ color: "var(--text-muted)" }}>
-                        Busque grupos para alterar as seleções.
+                        {t("companies.scopeEditHint")}
                       </p>
                     </div>
                   )}
                   {scopeQ.data.filter((e) => e.source_id === selectedSourceId).length === 0 && (
                     <p className="text-xs opacity-60" style={{ color: "var(--text-muted)" }}>
-                      Nenhum grupo atribuído para esta fonte. Busque grupos para começar.
+                      {t("companies.scopeEmptyHint")}
                     </p>
                   )}
                 </>
@@ -296,21 +290,21 @@ function ScopeModal({
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>
-                      {discoveredGroups.length} grupos disponíveis
+                      {t("companies.scopeAvailable", { count: discoveredGroups.length })}
                     </p>
                     <div className="flex gap-2 text-xs">
                       <button
                         onClick={() => setCheckedIds(new Set(discoveredGroups.map((g) => g.groupid)))}
                         className="text-[var(--brand)] hover:underline"
                       >
-                        Todos
+                        {t("companies.scopeSelectAll")}
                       </button>
                       <span style={{ color: "var(--text-dim)" }}>·</span>
                       <button
                         onClick={() => setCheckedIds(new Set())}
                         className="text-[var(--brand)] hover:underline"
                       >
-                        Nenhum
+                        {t("companies.scopeSelectNone")}
                       </button>
                     </div>
                   </div>
@@ -334,7 +328,7 @@ function ScopeModal({
                     ))}
                   </div>
                   <p className="text-xs mt-2 opacity-60" style={{ color: "var(--text-muted)" }}>
-                    {checkedIds.size} selecionado{checkedIds.size !== 1 ? "s" : ""}
+                    {t("companies.scopeSelected", { count: checkedIds.size })}
                   </p>
                 </div>
               )}
@@ -345,7 +339,7 @@ function ScopeModal({
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[var(--border)]">
           <Button variant="secondary" size="sm" onClick={onClose}>
-            Cancelar
+            {t("common.cancel")}
           </Button>
           <Button
             size="sm"
@@ -353,7 +347,7 @@ function ScopeModal({
             disabled={!selectedSourceId || saving || (discoveredGroups.length === 0 && (scopeQ.data?.filter((e) => e.source_id === selectedSourceId).length ?? 0) === 0)}
           >
             {saving ? <Spinner className="w-3 h-3" /> : null}
-            {saving ? "Salvando…" : "Salvar escopo"}
+            {saving ? t("companies.scopeSaving") : t("companies.scopeSave")}
           </Button>
         </div>
       </div>
@@ -376,6 +370,7 @@ function CompanyDetail({
   onClose: () => void;
   onDeleted: () => void;
 }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
@@ -459,7 +454,7 @@ function CompanyDetail({
                       style={{ background: statusColor(company.status) }}
                     />
                     <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-                      {statusLabel(company.status)}
+                      {t(`companies.status${company.status.charAt(0).toUpperCase() + company.status.slice(1)}`)}
                     </span>
                     <span className="text-xs opacity-40 mx-1">·</span>
                     <span className="text-xs font-mono" style={{ color: "var(--text-dim)" }}>
@@ -481,7 +476,6 @@ function CompanyDetail({
                   }}
                   className="p-1 rounded hover:bg-[var(--surface-2)] transition-colors flex-shrink-0"
                   style={{ color: "var(--text-muted)" }}
-                  title="Editar"
                 >
                   <Pencil size={12} />
                 </button>
@@ -494,7 +488,7 @@ function CompanyDetail({
                 onChange={(e) => setEditName(e.target.value)}
                 className="w-full px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface-2)] text-xs"
                 style={{ color: "var(--text)" }}
-                placeholder="Nome"
+                placeholder={t("common.name")}
               />
               <select
                 value={editStatus}
@@ -502,9 +496,9 @@ function CompanyDetail({
                 className="w-full px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface-2)] text-xs"
                 style={{ color: "var(--text)" }}
               >
-                <option value="active">Ativa</option>
-                <option value="inactive">Inativa</option>
-                <option value="suspended">Suspensa</option>
+                <option value="active">{t("companies.statusActive")}</option>
+                <option value="inactive">{t("companies.statusInactive")}</option>
+                <option value="suspended">{t("companies.statusSuspended")}</option>
               </select>
               <textarea
                 value={editNotes}
@@ -512,7 +506,7 @@ function CompanyDetail({
                 className="w-full px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface-2)] text-xs resize-none"
                 style={{ color: "var(--text)" }}
                 rows={2}
-                placeholder="Observações (opcional)"
+                placeholder={t("companies.notesLabel")}
               />
               <div className="flex gap-2">
                 <Button
@@ -520,10 +514,10 @@ function CompanyDetail({
                   onClick={() => patchMutation.mutate()}
                   disabled={!editName.trim() || patchMutation.isPending}
                 >
-                  {patchMutation.isPending ? <Spinner className="w-3 h-3" /> : "Salvar"}
+                  {patchMutation.isPending ? <Spinner className="w-3 h-3" /> : t("common.save")}
                 </Button>
                 <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>
-                  Cancelar
+                  {t("common.cancel")}
                 </Button>
               </div>
             </div>
@@ -534,23 +528,23 @@ function CompanyDetail({
         <div className="px-4 py-3">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-semibold" style={{ color: "var(--text)" }}>
-              Escopo de Hostgroups
+              {t("companies.hostgroupsTitle")}
             </span>
             <Button size="sm" variant="secondary" onClick={() => setShowScopeModal(true)}>
               <Plus size={11} />
-              Gerenciar
+              {t("companies.scopeManage")}
             </Button>
           </div>
 
           {scopeQ.isLoading && (
             <div className="flex items-center gap-2 text-xs py-2" style={{ color: "var(--text-muted)" }}>
-              <Spinner className="w-3 h-3" /> Carregando…
+              <Spinner className="w-3 h-3" /> {t("common.loading")}
             </div>
           )}
 
           {!scopeQ.isLoading && Object.keys(scopeBySource).length === 0 && (
             <p className="text-xs py-2" style={{ color: "var(--text-muted)" }}>
-              Nenhum hostgroup atribuído. Clique em Gerenciar para começar.
+              {t("companies.hostgroupsEmpty")}
             </p>
           )}
 
@@ -590,12 +584,12 @@ function CompanyDetail({
             style={{ color: "var(--red, #ef4444)" }}
           >
             <Trash2 size={11} />
-            Remover empresa
+            {t("companies.deleteCompany")}
           </button>
         ) : (
           <div className="space-y-2">
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              Isso remove a empresa e todo seu escopo. Confirmar?
+              {t("companies.deleteConfirmMsg")}
             </p>
             <div className="flex gap-2">
               <Button
@@ -604,10 +598,10 @@ function CompanyDetail({
                 disabled={deleteMutation.isPending}
                 style={{ background: "var(--red, #ef4444)", color: "#fff" }}
               >
-                {deleteMutation.isPending ? <Spinner className="w-3 h-3" /> : "Remover"}
+                {deleteMutation.isPending ? <Spinner className="w-3 h-3" /> : t("companies.deleteBtn")}
               </Button>
               <Button size="sm" variant="secondary" onClick={() => setConfirmDelete(false)}>
-                Cancelar
+                {t("common.cancel")}
               </Button>
             </div>
           </div>
@@ -630,6 +624,7 @@ function CompanyDetail({
 // ---------------------------------------------------------------------------
 
 export function ClientCompaniesPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -684,10 +679,10 @@ export function ClientCompaniesPage({ tenantId }: { tenantId: string }) {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-base font-semibold" style={{ color: "var(--text)" }}>
-              Empresas Clientes
+              {t("companies.title")}
             </h2>
             <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-              Organize os hostgroups monitorados por empresa para escopo de alertas, SLA e usuários.
+              {t("companies.subtitle")}
             </p>
           </div>
           <Button
@@ -695,17 +690,17 @@ export function ClientCompaniesPage({ tenantId }: { tenantId: string }) {
             onClick={() => setShowCreate((v) => !v)}
           >
             <Plus size={13} />
-            Nova empresa
+            {t("companies.newCompany")}
           </Button>
         </div>
 
         {/* Create form */}
         {showCreate && (
           <div className="border border-[var(--border)] rounded-xl p-4 bg-[var(--surface)] space-y-3">
-            <p className="text-xs font-semibold" style={{ color: "var(--text)" }}>Nova empresa</p>
+            <p className="text-xs font-semibold" style={{ color: "var(--text)" }}>{t("companies.createTitle")}</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--text-muted)" }}>Nome</label>
+                <label className="block text-xs mb-1" style={{ color: "var(--text-muted)" }}>{t("common.name")}</label>
                 <input
                   value={createName}
                   onChange={(e) => handleNameChange(e.target.value)}
@@ -716,7 +711,7 @@ export function ClientCompaniesPage({ tenantId }: { tenantId: string }) {
                 />
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: "var(--text-muted)" }}>Slug</label>
+                <label className="block text-xs mb-1" style={{ color: "var(--text-muted)" }}>{t("companies.colSlug")}</label>
                 <input
                   value={createSlug}
                   onChange={(e) => setCreateSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
@@ -727,7 +722,7 @@ export function ClientCompaniesPage({ tenantId }: { tenantId: string }) {
               </div>
             </div>
             <div>
-              <label className="block text-xs mb-1" style={{ color: "var(--text-muted)" }}>Observações (opcional)</label>
+              <label className="block text-xs mb-1" style={{ color: "var(--text-muted)" }}>{t("companies.notesLabel")}</label>
               <input
                 value={createNotes}
                 onChange={(e) => setCreateNotes(e.target.value)}
@@ -742,10 +737,10 @@ export function ClientCompaniesPage({ tenantId }: { tenantId: string }) {
                 onClick={() => createMutation.mutate()}
                 disabled={!createName.trim() || !createSlug.trim() || createMutation.isPending}
               >
-                {createMutation.isPending ? <Spinner className="w-3 h-3" /> : "Criar empresa"}
+                {createMutation.isPending ? <Spinner className="w-3 h-3" /> : t("companies.createBtn")}
               </Button>
               <Button size="sm" variant="secondary" onClick={() => setShowCreate(false)}>
-                Cancelar
+                {t("common.cancel")}
               </Button>
             </div>
           </div>
@@ -763,11 +758,11 @@ export function ClientCompaniesPage({ tenantId }: { tenantId: string }) {
             <div className="flex flex-col items-center justify-center py-12 gap-3">
               <Building2 size={28} style={{ color: "var(--text-dim)" }} />
               <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-                Nenhuma empresa cadastrada ainda.
+                {t("companies.emptyTitle")}
               </p>
               <Button size="sm" onClick={() => setShowCreate(true)}>
                 <Plus size={12} />
-                Criar primeira empresa
+                {t("companies.createFirst")}
               </Button>
             </div>
           )}
@@ -777,16 +772,17 @@ export function ClientCompaniesPage({ tenantId }: { tenantId: string }) {
               <table className="w-full text-xs min-w-[420px]">
                 <thead>
                   <tr className="border-b border-[var(--border)]" style={{ color: "var(--text-muted)" }}>
-                    <th className="text-left px-4 py-2.5 font-medium">Empresa</th>
-                    <th className="text-left px-3 py-2.5 font-medium hidden sm:table-cell">Slug</th>
-                    <th className="text-left px-3 py-2.5 font-medium">Status</th>
-                    <th className="text-right px-4 py-2.5 font-medium">Hostgroups</th>
+                    <th className="text-left px-4 py-2.5 font-medium">{t("companies.colName")}</th>
+                    <th className="text-left px-3 py-2.5 font-medium hidden sm:table-cell">{t("companies.colSlug")}</th>
+                    <th className="text-left px-3 py-2.5 font-medium">{t("companies.colStatus")}</th>
+                    <th className="text-right px-4 py-2.5 font-medium">{t("companies.colHostgroups")}</th>
                     <th className="w-8" />
                   </tr>
                 </thead>
                 <tbody>
                   {companiesQ.data?.map((co) => {
                     const active = co.company_id === selectedId;
+                    const statusKey = `companies.status${co.status.charAt(0).toUpperCase() + co.status.slice(1)}` as const;
                     return (
                       <tr
                         key={co.company_id}
@@ -823,7 +819,7 @@ export function ClientCompaniesPage({ tenantId }: { tenantId: string }) {
                               className="w-1.5 h-1.5 rounded-full flex-shrink-0"
                               style={{ background: statusColor(co.status) }}
                             />
-                            <span style={{ color: "var(--text-muted)" }}>{statusLabel(co.status)}</span>
+                            <span style={{ color: "var(--text-muted)" }}>{t(statusKey)}</span>
                           </span>
                         </td>
                         <td className="px-4 py-2.5 text-right">

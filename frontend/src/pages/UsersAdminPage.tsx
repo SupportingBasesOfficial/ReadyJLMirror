@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -71,7 +72,6 @@ function CopyButton({ text }: { text: string }) {
         text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer transition-colors"
     >
       {copied ? <Check size={11} /> : <Copy size={11} />}
-      {copied ? "Copiado" : "Copiar"}
     </button>
   );
 }
@@ -108,6 +108,7 @@ function InviteModal({
   onClose: () => void;
   onCreated: (email: string, pwd: string) => void;
 }) {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -135,12 +136,12 @@ function InviteModal({
 
   return (
     <Modal onClose={onClose}>
-      <h3 className="text-sm font-semibold mb-4">Convidar usuário</h3>
+      <h3 className="text-sm font-semibold mb-4">{t("users.inviteTitle")}</h3>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="block text-xs text-[var(--text-muted)] mb-1">
-              Nome <span className="text-[var(--red)]">*</span>
+              {t("users.firstName")} <span className="text-[var(--red)]">*</span>
             </label>
             <input
               className={inputCls}
@@ -151,7 +152,7 @@ function InviteModal({
           </div>
           <div>
             <label className="block text-xs text-[var(--text-muted)] mb-1">
-              Sobrenome
+              {t("users.lastName")}
             </label>
             <input
               className={inputCls}
@@ -163,7 +164,7 @@ function InviteModal({
         </div>
         <div>
           <label className="block text-xs text-[var(--text-muted)] mb-1">
-            Email <span className="text-[var(--red)]">*</span>
+            {t("users.email")} <span className="text-[var(--red)]">*</span>
           </label>
           <input
             type="email"
@@ -174,7 +175,7 @@ function InviteModal({
           />
         </div>
         <div>
-          <label className="block text-xs text-[var(--text-muted)] mb-1">Função</label>
+          <label className="block text-xs text-[var(--text-muted)] mb-1">{t("users.role")}</label>
           <select
             className={inputCls + " cursor-pointer"}
             value={role}
@@ -192,10 +193,10 @@ function InviteModal({
             disabled={!email.trim() || !firstName.trim() || invite.isPending}
             className="flex-1"
           >
-            {invite.isPending ? <Spinner className="w-3 h-3" /> : "Criar usuário"}
+            {invite.isPending ? <Spinner className="w-3 h-3" /> : t("users.createUser")}
           </Button>
           <Button variant="ghost" onClick={onClose} className="flex-1">
-            Cancelar
+            {t("common.cancel")}
           </Button>
         </div>
       </div>
@@ -213,6 +214,7 @@ function TempPasswordModal({
   password: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Modal onClose={onClose}>
       <div className="flex flex-col items-center gap-4 text-center">
@@ -220,21 +222,21 @@ function TempPasswordModal({
           <UserPlus size={18} className="text-white" />
         </div>
         <div>
-          <h3 className="text-sm font-semibold">Usuário criado</h3>
+          <h3 className="text-sm font-semibold">{t("users.userCreated")}</h3>
           <p className="text-xs text-[var(--text-muted)] mt-1">
-            Compartilhe estas credenciais com o usuário pelo WhatsApp ou telefone.
+            {t("users.shareCredentials")}
           </p>
         </div>
         <div className="w-full space-y-2 text-left">
           <div>
-            <p className="text-xs text-[var(--text-muted)] mb-1">Email de acesso</p>
+            <p className="text-xs text-[var(--text-muted)] mb-1">{t("users.accessEmail")}</p>
             <div className="flex items-center gap-2 px-2.5 py-1.5 rounded border border-[var(--border)] bg-[var(--surface-2)]">
               <span className="text-sm flex-1 font-mono">{email}</span>
               <CopyButton text={email} />
             </div>
           </div>
           <div>
-            <p className="text-xs text-[var(--text-muted)] mb-1">Senha temporária</p>
+            <p className="text-xs text-[var(--text-muted)] mb-1">{t("users.tempPassword")}</p>
             <div className="flex items-center gap-2 px-2.5 py-1.5 rounded border border-[var(--border)] bg-[var(--surface-2)]">
               <span className="text-sm flex-1 font-mono tracking-widest">{password}</span>
               <CopyButton text={password} />
@@ -242,9 +244,9 @@ function TempPasswordModal({
           </div>
         </div>
         <p className="text-[10px] text-[var(--text-muted)]">
-          O usuário deverá trocar a senha no primeiro login.
+          {t("users.changePasswordHint")}
         </p>
-        <Button onClick={onClose} className="w-full">Entendido</Button>
+        <Button onClick={onClose} className="w-full">{t("users.understood")}</Button>
       </div>
     </Modal>
   );
@@ -252,6 +254,7 @@ function TempPasswordModal({
 
 // ── Edit user modal ───────────────────────────────────────────────────────────
 function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const { toast } = useToast();
   const [firstName, setFirstName] = useState(user.first_name);
@@ -282,7 +285,7 @@ function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (email && (!email.includes("@") || email.length < 3)) {
-      setEmailError("Email inválido.");
+      setEmailError(t("users.invalidEmail"));
       return;
     }
     setEmailError("");
@@ -291,11 +294,11 @@ function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
 
   return (
     <Modal onClose={onClose}>
-      <h3 className="text-sm font-semibold mb-4">Editar usuário</h3>
+      <h3 className="text-sm font-semibold mb-4">{t("users.editTitle")}</h3>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="block text-xs text-[var(--text-muted)] mb-1">Nome</label>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">{t("users.firstName")}</label>
             <input
               className={inputCls}
               value={firstName}
@@ -304,7 +307,7 @@ function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
             />
           </div>
           <div>
-            <label className="block text-xs text-[var(--text-muted)] mb-1">Sobrenome</label>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">{t("users.lastName")}</label>
             <input
               className={inputCls}
               value={lastName}
@@ -314,7 +317,7 @@ function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
           </div>
         </div>
         <div>
-          <label className="block text-xs text-[var(--text-muted)] mb-1">Email</label>
+          <label className="block text-xs text-[var(--text-muted)] mb-1">{t("users.email")}</label>
           <input
             type="email"
             className={inputCls}
@@ -325,10 +328,10 @@ function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
         </div>
         <div className="flex gap-2 pt-1">
           <Button type="submit" disabled={update.isPending} className="flex-1">
-            {update.isPending ? <Spinner className="w-3 h-3" /> : "Salvar"}
+            {update.isPending ? <Spinner className="w-3 h-3" /> : t("common.save")}
           </Button>
           <Button variant="ghost" type="button" onClick={onClose} className="flex-1">
-            Cancelar
+            {t("common.cancel")}
           </Button>
         </div>
       </form>
@@ -354,6 +357,7 @@ function ConfirmModal({
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Modal onClose={onClose}>
       <h3 className="text-sm font-semibold mb-2">{title}</h3>
@@ -367,7 +371,7 @@ function ConfirmModal({
           {isPending ? <Spinner className="w-3 h-3" /> : confirmLabel}
         </Button>
         <Button variant="ghost" onClick={onClose} className="flex-1">
-          Cancelar
+          {t("common.cancel")}
         </Button>
       </div>
     </Modal>
@@ -394,7 +398,6 @@ function RoleCell({ user }: { user: User }) {
       <button
         onClick={() => setEditing(true)}
         className="cursor-pointer"
-        title="Clique para editar"
       >
         <Badge variant={roleVariant(user.role)}>{user.role}</Badge>
       </button>
@@ -418,14 +421,12 @@ function RoleCell({ user }: { user: User }) {
         onClick={() => update.mutate(role)}
         disabled={update.isPending}
         className="text-[var(--brand)] cursor-pointer disabled:opacity-50"
-        title="Salvar"
       >
         {update.isPending ? <Spinner className="w-3 h-3" /> : <Check size={13} />}
       </button>
       <button
         onClick={() => { setRole(user.role as Role); setEditing(false); }}
         className="text-[var(--text-muted)] cursor-pointer"
-        title="Cancelar"
       >
         <X size={13} />
       </button>
@@ -435,6 +436,7 @@ function RoleCell({ user }: { user: User }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export function UsersAdminPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const { toast } = useToast();
   const [showInvite, setShowInvite] = useState(false);
@@ -506,23 +508,22 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-base font-semibold">Usuários</h2>
+        <h2 className="text-base font-semibold">{t("users.title")}</h2>
         <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-          Gerenciamento de acesso · requer tenant:admin
+          {t("users.subtitle")}
         </p>
       </div>
 
       <Card className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <CardHeader>
-            <span className="text-sm font-semibold">Usuários ativos</span>
-            <span className="text-xs text-[var(--text-muted)]">{active.length} usuário{active.length !== 1 ? "s" : ""}</span>
+            <span className="text-sm font-semibold">{t("users.activeUsers")}</span>
           </CardHeader>
           <div className="flex items-center gap-2">
             {q.isFetching && <Spinner className="w-3 h-3" />}
             <Button size="sm" onClick={() => setShowInvite(true)}>
               <UserPlus size={13} />
-              Convidar
+              {t("users.invite")}
             </Button>
           </div>
         </div>
@@ -530,18 +531,18 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
         {q.isLoading ? (
           <Spinner className="w-5 h-5" />
         ) : q.isError ? (
-          <p className="text-xs text-[var(--red)]">Não foi possível carregar os usuários.</p>
+          <p className="text-xs text-[var(--red)]">{t("users.loadError")}</p>
         ) : active.length === 0 ? (
-          <p className="text-xs text-[var(--text-muted)]">Nenhum usuário ativo.</p>
+          <p className="text-xs text-[var(--text-muted)]">{t("users.noActiveUsers")}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs min-w-[580px]">
               <thead>
                 <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
-                  <th className="text-left px-2 py-1.5 font-medium">Nome</th>
-                  <th className="text-left px-2 py-1.5 font-medium">Email</th>
-                  <th className="text-left px-2 py-1.5 font-medium">Função</th>
-                  <th className="text-left px-2 py-1.5 font-medium">Criado</th>
+                  <th className="text-left px-2 py-1.5 font-medium">{t("users.colName")}</th>
+                  <th className="text-left px-2 py-1.5 font-medium">{t("users.colEmail")}</th>
+                  <th className="text-left px-2 py-1.5 font-medium">{t("users.colRole")}</th>
+                  <th className="text-left px-2 py-1.5 font-medium">{t("users.colCreated")}</th>
                   <th className="px-2 py-1.5" />
                 </tr>
               </thead>
@@ -557,7 +558,7 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
                       </div>
                     </td>
                     <td className="px-2 py-2 text-[var(--text-muted)] truncate max-w-[200px]">
-                      {u.email || <span className="italic">sem email</span>}
+                      {u.email || <span className="italic">{t("users.noEmail")}</span>}
                     </td>
                     <td className="px-2 py-2">
                       <RoleCell user={u} />
@@ -571,7 +572,6 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
                           onClick={() => setEditUser(u)}
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--brand)]
                             cursor-pointer transition-colors"
-                          title="Editar usuário"
                         >
                           <Pencil size={13} />
                         </button>
@@ -580,7 +580,6 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
                           disabled={resetPwd.isPending}
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--brand)]
                             cursor-pointer transition-colors"
-                          title="Redefinir senha"
                         >
                           <KeyRound size={13} />
                         </button>
@@ -588,7 +587,6 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
                           onClick={() => setConfirmAction({ type: "deactivate", user: u })}
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--yellow)]
                             cursor-pointer transition-colors"
-                          title="Desativar"
                         >
                           <ShieldOff size={13} />
                         </button>
@@ -596,7 +594,6 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
                           onClick={() => setConfirmAction({ type: "delete", user: u })}
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--red)]
                             cursor-pointer transition-colors"
-                          title="Remover"
                         >
                           <Trash2 size={13} />
                         </button>
@@ -612,7 +609,7 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
         {inactive.length > 0 && (
           <details className="text-xs">
             <summary className="text-[var(--text-muted)] cursor-pointer select-none">
-              {inactive.length} desativado{inactive.length !== 1 ? "s" : ""}
+              {t("users.deactivated", { count: inactive.length })}
             </summary>
             <div className="mt-2 overflow-x-auto">
               <table className="w-full min-w-[480px]">
@@ -630,7 +627,7 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
                           className="inline-flex items-center gap-1 text-[var(--brand)]
                             hover:underline cursor-pointer"
                         >
-                          <ShieldCheck size={11} /> Reativar
+                          <ShieldCheck size={11} /> {t("users.reactivate")}
                         </button>
                       </td>
                       <td className="px-2 py-1.5">
@@ -676,24 +673,24 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
         <ConfirmModal
           title={
             confirmAction.type === "delete"
-              ? "Remover usuário"
+              ? t("users.confirmDelete")
               : confirmAction.type === "deactivate"
-              ? "Desativar usuário"
-              : "Reativar usuário"
+              ? t("users.confirmDeactivate")
+              : t("users.confirmReactivate")
           }
           message={
             confirmAction.type === "delete"
-              ? `Isso vai remover ${fullName(confirmAction.user)} do workspace e revogar o acesso. O registro de auditoria é preservado.`
+              ? t("users.msgDelete", { name: fullName(confirmAction.user) })
               : confirmAction.type === "deactivate"
-              ? `${fullName(confirmAction.user)} não conseguirá fazer login até ser reativado.`
-              : `${fullName(confirmAction.user)} voltará a ter acesso ao workspace.`
+              ? t("users.msgDeactivate", { name: fullName(confirmAction.user) })
+              : t("users.msgReactivate", { name: fullName(confirmAction.user) })
           }
           confirmLabel={
             confirmAction.type === "delete"
-              ? "Remover"
+              ? t("common.remove")
               : confirmAction.type === "deactivate"
-              ? "Desativar"
-              : "Reativar"
+              ? t("common.deactivate")
+              : t("common.reactivate")
           }
           danger={confirmAction.type === "delete"}
           isPending={deactivate.isPending || reactivate.isPending || remove.isPending}

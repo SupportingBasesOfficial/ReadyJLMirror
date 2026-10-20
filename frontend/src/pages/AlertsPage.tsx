@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
@@ -29,13 +30,13 @@ const SNOOZE_OPTIONS = [
   { label: "24 hours", value: 1440 },
 ];
 
-const SEVERITY_FILTERS = [
-  { label: "Todas", value: "all" },
-  { label: "Critical", value: "critical" },
-  { label: "High", value: "degraded" },
-  { label: "Medium", value: "warning" },
-  { label: "Low", value: "informational" },
-  { label: "Info", value: "info" },
+const SEVERITY_VALUES = [
+  { key: "severityAll", value: "all" },
+  { key: "Critical", value: "critical" },
+  { key: "High", value: "degraded" },
+  { key: "Medium", value: "warning" },
+  { key: "Low", value: "informational" },
+  { key: "Info", value: "info" },
 ] as const;
 
 const PAGE_SIZE = 50;
@@ -88,6 +89,7 @@ function SnoozeControl({
   onUnsnooze: () => void;
   isBusy: boolean;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   if (alert.snoozed_until) {
@@ -101,7 +103,7 @@ function SnoozeControl({
           disabled={isBusy}
           className="text-[10px] text-[var(--text-muted)] underline hover:text-[var(--text)] disabled:opacity-40"
         >
-          cancel
+          {t("alerts.cancelSnooze")}
         </button>
       </div>
     );
@@ -140,7 +142,7 @@ function SnoozeControl({
       onClick={(e: React.MouseEvent) => { e.stopPropagation(); setOpen(true); }}
       disabled={isBusy}
     >
-      Snooze
+      {t("alerts.snooze")}
     </Button>
   );
 }
@@ -153,6 +155,7 @@ function loadAlertFilter(tenantId: string): "active" | "all" {
 }
 
 export function AlertsPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const canOperate = useCanOperate();
   const [searchParams] = useSearchParams();
   const highlight = searchParams.get("highlight");
@@ -234,7 +237,7 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h2 className="text-base font-semibold">Alerts</h2>
+        <h2 className="text-base font-semibold">{t("alerts.title")}</h2>
         <div className="flex gap-1.5 flex-wrap">
           {(["active", "all"] as const).map((f) => (
             <button
@@ -247,7 +250,7 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
                   : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--text-muted)]",
               ].join(" ")}
             >
-              {f === "active" ? "Active" : "All"}
+              {f === "active" ? t("alerts.filterActive") : t("alerts.filterAll")}
             </button>
           ))}
         </div>
@@ -255,7 +258,7 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
 
       {/* Severity filter */}
       <div className="flex gap-1.5 flex-wrap items-center">
-        {SEVERITY_FILTERS.map((sf) => (
+        {SEVERITY_VALUES.map((sf) => (
           <button
             key={sf.value}
             onClick={() => { setSeverityFilter(sf.value); setPage(0); }}
@@ -266,12 +269,12 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
                 : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--text-muted)]",
             ].join(" ")}
           >
-            {sf.label}
+            {sf.value === "all" ? t("alerts.severityAll") : sf.key}
           </button>
         ))}
         {allAlerts.length > 0 && (
           <span className="text-[10px] text-[var(--text-muted)] ml-1">
-            {filteredAlerts.length} de {allAlerts.length} alert{allAlerts.length !== 1 ? "s" : ""}
+            {filteredAlerts.length} / {allAlerts.length}
           </span>
         )}
       </div>
@@ -280,23 +283,23 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
         {q.isLoading ? (
           <div className="flex justify-center py-8"><Spinner /></div>
         ) : q.isError ? (
-          <p className="text-xs text-[var(--red)] p-4">Failed to load alerts.</p>
+          <p className="text-xs text-[var(--red)] p-4">{t("alerts.loadError")}</p>
         ) : pagedAlerts.length === 0 ? (
           <p className="text-xs text-[var(--text-muted)] p-4">
             {filteredAlerts.length === 0 && allAlerts.length > 0
-              ? "Nenhum alerta com a severidade selecionada."
-              : "No alerts."}
+              ? t("alerts.noSeverity")
+              : t("alerts.noAlerts")}
           </p>
         ) : (
           <table className="w-full text-xs">
             <thead className="bg-[var(--surface-2)]">
               <tr className="text-left text-[var(--text-muted)] uppercase tracking-wider text-[10px]">
-                <th className="px-4 py-2.5 font-medium">Severity</th>
-                <th className="px-4 py-2.5 font-medium">Event / Resource</th>
-                <th className="px-4 py-2.5 font-medium">State</th>
-                <th className="px-4 py-2.5 font-medium">Source</th>
-                <th className="px-4 py-2.5 font-medium">Opened</th>
-                <th className="px-4 py-2.5 font-medium">Actions</th>
+                <th className="px-4 py-2.5 font-medium">{t("alerts.severity")}</th>
+                <th className="px-4 py-2.5 font-medium">{t("alerts.event")}</th>
+                <th className="px-4 py-2.5 font-medium">{t("alerts.state")}</th>
+                <th className="px-4 py-2.5 font-medium">{t("alerts.source")}</th>
+                <th className="px-4 py-2.5 font-medium">{t("alerts.opened")}</th>
+                <th className="px-4 py-2.5 font-medium">{t("alerts.actions")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
@@ -358,7 +361,7 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
       {filteredAlerts.length > PAGE_SIZE && (
         <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
           <span>
-            Página {page + 1} de {totalPages} · {filteredAlerts.length} alertas
+            {t("alerts.pageInfo", { page: page + 1, total: totalPages, count: filteredAlerts.length })}
           </span>
           <div className="flex gap-2">
             <Button
@@ -367,7 +370,7 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
               disabled={page === 0}
               onClick={() => setPage((p) => Math.max(0, p - 1))}
             >
-              ← Anterior
+              {t("alerts.prev")}
             </Button>
             <Button
               size="sm"
@@ -375,7 +378,7 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
               disabled={page >= totalPages - 1}
               onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
             >
-              Próxima →
+              {t("alerts.next")}
             </Button>
           </div>
         </div>
@@ -383,7 +386,7 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
 
       {q.isFetching && !q.isLoading && (
         <div className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-          <Spinner className="w-3 h-3" /> Refreshing…
+          <Spinner className="w-3 h-3" /> {t("alerts.refreshing")}
         </div>
       )}
     </div>

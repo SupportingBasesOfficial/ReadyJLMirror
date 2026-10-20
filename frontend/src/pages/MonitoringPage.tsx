@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -43,6 +44,7 @@ function stateVariant(state: string): "success" | "warning" | "danger" | "muted"
 }
 
 function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: string }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [form, setForm] = useState<AddSourceForm>({
@@ -154,7 +156,7 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
       >
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h3 style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>Adicionar fonte de monitoramento</h3>
+          <h3 style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>{t("monitoring.addSourceTitle")}</h3>
           <button
             onClick={onClose}
             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted, #8b93a5)", padding: 4 }}
@@ -165,7 +167,7 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
 
         {/* Form */}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <Field label="Nome da fonte *">
+          <Field label={t("monitoring.sourceName") + " *"}>
             <input
               type="text"
               placeholder="Ex: Produção - Cliente X"
@@ -174,7 +176,7 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
             />
           </Field>
 
-          <Field label="URL do Zabbix *">
+          <Field label={t("monitoring.zabbixUrl") + " *"}>
             <input
               type="url"
               placeholder="https://zabbix.exemplo.com"
@@ -183,7 +185,7 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
             />
           </Field>
 
-          <Field label="Token de API do Zabbix *">
+          <Field label={t("monitoring.apiToken") + " *"}>
             <input
               type="password"
               placeholder="Token gerado no Zabbix (User → API tokens)"
@@ -192,7 +194,7 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
             />
           </Field>
 
-          <Field label={`Referência de credencial`} hint={`Auto: "${credRef}"`}>
+          <Field label={t("monitoring.credRef")} hint={t("monitoring.credRefAuto", { ref: credRef })}>
             <input
               type="text"
               placeholder={credRef}
@@ -205,9 +207,9 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text, #e6e8ec)" }}>
-                Grupos de hosts
+                {t("monitoring.hostGroups")}
                 <span style={{ fontWeight: 400, color: "var(--text-muted, #8b93a5)", marginLeft: 6 }}>
-                  {discoveredGroups ? `${selectedGroups.size} de ${discoveredGroups.length} selecionados` : "deixe vazio para todos"}
+                  {discoveredGroups ? t("monitoring.hostGroupsSelected", { count: selectedGroups.size, total: discoveredGroups.length }) : t("monitoring.hostGroupsHint")}
                 </span>
               </span>
               <button
@@ -226,7 +228,7 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
                 }}
               >
                 {discoverLoading ? <Spinner className="w-3 h-3" /> : <Search size={11} />}
-                {discoverLoading ? "Buscando..." : "Buscar grupos"}
+                {discoverLoading ? t("monitoring.discovering") : t("monitoring.discover")}
               </button>
             </div>
 
@@ -264,7 +266,7 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
                   {selectedGroups.size === discoveredGroups.length
                     ? <CheckSquare size={13} style={{ color: "var(--brand, #6366f1)" }} />
                     : <Square size={13} />}
-                  Todos ({discoveredGroups.length})
+                  {t("monitoring.allGroups", { count: discoveredGroups.length })}
                 </button>
                 {discoveredGroups.map((g) => {
                   const checked = selectedGroups.has(g.groupid);
@@ -297,7 +299,7 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
 
             {discoveredGroups && discoveredGroups.length === 0 && (
               <p style={{ fontSize: 12, color: "var(--text-muted, #8b93a5)" }}>
-                Nenhum grupo encontrado nesta fonte.
+                {t("monitoring.noGroups")}
               </p>
             )}
           </div>
@@ -313,7 +315,7 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
               color: "var(--text-muted, #8b93a5)", cursor: "pointer",
             }}
           >
-            Cancelar
+            {t("common.cancel")}
           </button>
           <button
             onClick={() => mutation.mutate(form)}
@@ -327,7 +329,7 @@ function AddSourceModal({ onClose, tenantId }: { onClose: () => void; tenantId: 
             }}
           >
             {mutation.isPending && <Spinner className="w-3 h-3" />}
-            Adicionar fonte
+            {t("monitoring.addSource")}
           </button>
         </div>
       </div>
@@ -376,6 +378,7 @@ function RotateTokenModal({
   tenantId: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [token, setToken] = useState("");
@@ -417,23 +420,22 @@ function RotateTokenModal({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h3 style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>Trocar token de API</h3>
+          <h3 style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>{t("monitoring.changeTokenTitle")}</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted, #8b93a5)", padding: 4 }}>
             <X size={18} />
           </button>
         </div>
 
         <p style={{ fontSize: 12, color: "var(--text-muted, #8b93a5)", margin: 0, lineHeight: 1.5 }}>
-          O novo token será gravado no OpenBao e no arquivo de fallback.
+          {t("monitoring.changeTokenHint")}
           <br />
-          Revogue o token antigo manualmente em{" "}
-          <strong style={{ color: "var(--text, #e6e8ec)" }}>Zabbix → Administration → API tokens</strong>.
+          {t("monitoring.changeTokenManual")}
         </p>
 
-        <Field label="Novo token de API do Zabbix *">
+        <Field label={t("monitoring.newToken") + " *"}>
           <input
             type="password"
-            placeholder="Cole o token gerado no Zabbix"
+            placeholder={t("monitoring.tokenPlaceholder")}
             value={token}
             onChange={(e) => setToken(e.target.value)}
             autoFocus
@@ -449,7 +451,7 @@ function RotateTokenModal({
               color: "var(--text-muted, #8b93a5)", cursor: "pointer",
             }}
           >
-            Cancelar
+            {t("common.cancel")}
           </button>
           <button
             onClick={() => rotate.mutate()}
@@ -463,7 +465,7 @@ function RotateTokenModal({
             }}
           >
             {rotate.isPending && <Spinner className="w-3 h-3" />}
-            Salvar token
+            {t("monitoring.saveToken")}
           </button>
         </div>
       </div>
@@ -472,6 +474,7 @@ function RotateTokenModal({
 }
 
 function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [showRotate, setShowRotate] = useState(false);
@@ -550,7 +553,7 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
               {s.operational_evidence_state}
             </Badge>
             {!hasCred && (
-              <Badge variant="danger">sem credencial</Badge>
+              <Badge variant="danger">{t("monitoring.noCredential")}</Badge>
             )}
           </div>
         </CardHeader>
@@ -570,13 +573,13 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
           )}
           {s.configuration_revision !== undefined && (
             <div className="flex justify-between text-xs">
-              <dt className="text-[var(--text-muted)]">Config rev</dt>
+              <dt className="text-[var(--text-muted)]">{t("monitoring.configRev")}</dt>
               <dd className="text-[var(--text)]">{s.configuration_revision}</dd>
             </div>
           )}
           {s.scope_revision !== undefined && (
             <div className="flex justify-between text-xs">
-              <dt className="text-[var(--text-muted)]">Scope rev</dt>
+              <dt className="text-[var(--text-muted)]">{t("monitoring.scopeRev")}</dt>
               <dd className="text-[var(--text)]">{s.scope_revision}</dd>
             </div>
           )}
@@ -590,19 +593,19 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
               style={{ ...btnBase, color: "var(--text-muted, #8b93a5)", opacity: recheck.isPending ? 0.6 : 1 }}
             >
               {recheck.isPending ? <Spinner className="w-3 h-3" /> : <RefreshCw size={12} />}
-              Revalidar
+              {t("monitoring.revalidate")}
             </button>
           )}
 
           {hasCred ? (
             <button onClick={() => setShowRotate(true)} style={{ ...btnBase, color: "var(--text-muted, #8b93a5)" }}>
               <KeyRound size={12} />
-              Trocar token
+              {t("monitoring.changeToken")}
             </button>
           ) : (
             <button onClick={() => setShowRotate(true)} style={{ ...btnBase, color: "var(--brand, #6366f1)", borderColor: "var(--brand, #6366f1)" }}>
               <KeyRound size={12} />
-              Adicionar token
+              {t("monitoring.addToken")}
             </button>
           )}
 
@@ -612,7 +615,7 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
               style={{ ...btnBase, color: "var(--red, #f87171)" }}
             >
               <Trash2 size={12} />
-              Revogar credencial
+              {t("monitoring.revokeCredential")}
             </button>
           )}
 
@@ -622,7 +625,7 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
                 onClick={() => setConfirmRevoke(false)}
                 style={{ flex: 1, padding: "6px 8px", borderRadius: 8, fontSize: 11, background: "none", border: "1px solid var(--border, #262c3a)", color: "var(--text-muted, #8b93a5)", cursor: "pointer" }}
               >
-                Cancelar
+                {t("common.cancel")}
               </button>
               <button
                 onClick={() => revoke.mutate()}
@@ -630,7 +633,7 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
                 style={{ flex: 1, padding: "6px 8px", borderRadius: 8, fontSize: 11, fontWeight: 600, background: "var(--red, #ef4444)", color: "#fff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, justifyContent: "center" }}
               >
                 {revoke.isPending ? <Spinner className="w-3 h-3" /> : null}
-                Revogar
+                {t("monitoring.revoke")}
               </button>
             </div>
           )}
@@ -641,7 +644,7 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
               style={{ ...btnBase, color: "var(--red, #f87171)", opacity: 0.7 }}
             >
               <Trash2 size={11} />
-              Excluir fonte
+              {t("monitoring.deleteSource")}
             </button>
           ) : (
             <div style={{ display: "flex", gap: 6 }}>
@@ -649,7 +652,7 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
                 onClick={() => setConfirmDelete(false)}
                 style={{ flex: 1, padding: "6px 8px", borderRadius: 8, fontSize: 11, background: "none", border: "1px solid var(--border, #262c3a)", color: "var(--text-muted, #8b93a5)", cursor: "pointer" }}
               >
-                Cancelar
+                {t("common.cancel")}
               </button>
               <button
                 onClick={() => deleteSource.mutate()}
@@ -657,7 +660,7 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
                 style={{ flex: 1, padding: "6px 8px", borderRadius: 8, fontSize: 11, fontWeight: 600, background: "var(--red, #ef4444)", color: "#fff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, justifyContent: "center" }}
               >
                 {deleteSource.isPending ? <Spinner className="w-3 h-3" /> : null}
-                Excluir
+                {t("monitoring.deleteSourceConfirm")}
               </button>
             </div>
           )}
@@ -670,6 +673,7 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
 type CredFilter = "all" | "active" | "no_cred";
 
 export function MonitoringPage({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const [showAdd, setShowAdd] = useState(false);
   const [credFilter, setCredFilter] = useState<CredFilter>("all");
   const q = useQuery({
@@ -699,7 +703,7 @@ export function MonitoringPage({ tenantId }: { tenantId: string }) {
       {showAdd && <AddSourceModal onClose={() => setShowAdd(false)} tenantId={tenantId} />}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">Fontes de Monitoramento</h2>
+        <h2 className="text-base font-semibold">{t("monitoring.title")}</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {q.isFetching && <Spinner className="w-3 h-3" />}
           <button
@@ -712,7 +716,7 @@ export function MonitoringPage({ tenantId }: { tenantId: string }) {
             }}
           >
             <Plus size={14} />
-            Adicionar fonte
+            {t("monitoring.addSource")}
           </button>
         </div>
       </div>
@@ -721,14 +725,14 @@ export function MonitoringPage({ tenantId }: { tenantId: string }) {
       {allSources.length > 0 && (
         <div style={{ display: "flex", gap: 4 }}>
           <button style={tabStyle(credFilter === "all")} onClick={() => setCredFilter("all")}>
-            Todas ({allSources.length})
+            {t("monitoring.filterAll", { count: allSources.length })}
           </button>
           <button style={tabStyle(credFilter === "active")} onClick={() => setCredFilter("active")}>
-            Com credencial ({allSources.length - noCredCount})
+            {t("monitoring.filterActive", { count: allSources.length - noCredCount })}
           </button>
           {noCredCount > 0 && (
             <button style={tabStyle(credFilter === "no_cred")} onClick={() => setCredFilter("no_cred")}>
-              Sem credencial ({noCredCount})
+              {t("monitoring.filterNoCred", { count: noCredCount })}
             </button>
           )}
         </div>
@@ -737,13 +741,13 @@ export function MonitoringPage({ tenantId }: { tenantId: string }) {
       {q.isLoading ? (
         <div className="flex justify-center py-10"><Spinner /></div>
       ) : q.isError ? (
-        <p className="text-xs text-[var(--red)]">Falha ao carregar fontes.</p>
+        <p className="text-xs text-[var(--red)]">{t("monitoring.loadError")}</p>
       ) : sources.length === 0 ? (
         <Card>
           <p className="text-xs text-[var(--text-muted)] py-2">
             {credFilter === "no_cred"
-              ? "Nenhuma fonte sem credencial."
-              : 'Nenhuma fonte configurada. Clique em "Adicionar fonte" para começar.'}
+              ? t("monitoring.emptyNoCred")
+              : t("monitoring.emptyAll")}
           </p>
         </Card>
       ) : (
