@@ -234,7 +234,8 @@ async def list_sources(conn: AsyncConnection, tenant_id: str) -> list[dict]:
                s.operational_evidence_state,
                s.configuration_revision, s.scope_revision,
                g.provider_instance_ref, g.provider_base_url,
-               s.last_successful_sync_at, s.last_attempt_at
+               s.last_successful_sync_at, s.last_attempt_at,
+               s.credential_binding_ref
           FROM monitoring.monitoring_source s
           JOIN monitoring.monitoring_source_generation g
             ON g.tenant_id = s.tenant_id
@@ -248,7 +249,8 @@ async def list_sources(conn: AsyncConnection, tenant_id: str) -> list[dict]:
     rows = await cur.fetchall()
     keys = ("monitoring_source_id", "display_name", "operational_evidence_state",
             "configuration_revision", "scope_revision", "provider_instance_ref",
-            "provider_base_url", "last_successful_sync_at", "last_attempt_at")
+            "provider_base_url", "last_successful_sync_at", "last_attempt_at",
+            "credential_binding_ref")
     return [dict(zip(keys, r)) for r in rows]
 
 

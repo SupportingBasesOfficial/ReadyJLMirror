@@ -41,11 +41,23 @@ export const api = {
 };
 
 export async function logout(): Promise<void> {
-  await fetch("/auth/logout", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "X-CSRF-Token": csrfToken() },
-    redirect: "follow",
-  }).catch(() => {});
+  try {
+    const res = await fetch("/auth/logout", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "X-CSRF-Token": csrfToken() },
+      redirect: "manual",
+    });
+    // 2xx or opaque redirect (manual) both mean BFF retired the session.
+    // Non-2xx that is NOT a redirect means the session was NOT retired —
+    // still navigate away so the user isn't stuck, but the cookie may
+    // remain valid until it expires server-side.
+    if (!res.ok && res.type !== "opaqueredirect") {
+      console.warn("[logout] BFF returned", res.status, "— session may still be active");
+    }
+  } catch {
+    // Network failure: navigate anyway; server TTL will expire the cookie.
+    console.warn("[logout] network error — navigating anyway");
+  }
   window.location.href = "/";
 }

@@ -433,6 +433,19 @@ class SourceDetailResponse(BaseModel):
     provider_instance_ref: str
     provider: str
     provider_base_url: str
+    credential_binding_ref: str
+    has_credential: bool
+
+
+def _check_credential_present(cred_ref: str) -> bool:
+    """Return True if the token file exists in CREDENTIALS_DIR."""
+    import os
+    from pathlib import Path
+    import re
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+", cred_ref):
+        return False
+    creds_dir = Path(os.environ.get("CREDENTIALS_DIR", "/run/secrets"))
+    return (creds_dir / f"{cred_ref}.token").exists()
 
 
 @router.get("/sources", response_model=list[SourceDetailResponse])
@@ -452,6 +465,8 @@ async def list_sources_endpoint(request: Request, tenant_id: str | None = None) 
             provider_instance_ref=r["provider_instance_ref"],
             provider=r["provider_instance_ref"],
             provider_base_url=r["provider_base_url"],
+            credential_binding_ref=r.get("credential_binding_ref", ""),
+            has_credential=_check_credential_present(r.get("credential_binding_ref", "")),
         )
         for r in rows
     ]
@@ -597,6 +612,47 @@ async def revoke_source_credential(
         )
         await conn.commit()
     return {"credential_binding_ref": cred_ref, "revoked": True}
+
+
+@router.delete("/sources/{source_id}", status_code=200)
+async def delete_source(
+    source_id: str,
+    request: Request,
+    tenant_id: str | None = None,
+) -> dict:
+    """Permanently remove a monitoring source and revoke its credential."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    from providers.credentials import BaoCredentialResolver, delete_binding_token
+    from jlmirror_monitoring.validation_worker import CredentialResolutionError
+    async with db_tenant_connection(tenant) as conn:
+        row = await get_source(conn, tenant, source_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="source not found")
+        cred_ref = row["credential_binding_ref"]
+        try:
+            bao = BaoCredentialResolver()
+            if bao.available:
+                await asyncio.to_thread(bao.delete_zabbix_api_token, cred_ref)
+            delete_binding_token(cred_ref)
+        except CredentialResolutionError:
+            pass  # missing credential is fine when deleting
+        await conn.execute(
+            "DELETE FROM monitoring.monitoring_source WHERE tenant_id=%s AND monitoring_source_id=%s",
+            (tenant, source_id),
+        )
+        ctx = getattr(request.state, "jlmirror_context", {}) or {}
+        await record_audit_event(
+            conn, tenant,
+            action="monitoring.source.deleted",
+            actor_kind="principal",
+            actor_id=ctx.get("principal_id"),
+            subject_type="monitoring_source",
+            subject_id=source_id,
+            detail={"credential_binding_ref": cred_ref},
+            correlation_id=ctx.get("correlation_id"),
+        )
+        await conn.commit()
+    return {"monitoring_source_id": source_id, "deleted": True}
 
 
 @router.post("/sync/run", status_code=200)

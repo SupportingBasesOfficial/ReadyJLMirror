@@ -15,6 +15,8 @@ interface Source {
   provider_base_url?: string;
   configuration_revision?: number;
   scope_revision?: number;
+  credential_binding_ref?: string;
+  has_credential?: boolean;
 }
 
 interface AddSourceForm {
@@ -474,6 +476,10 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
   const qc = useQueryClient();
   const [showRotate, setShowRotate] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // Optimistic: track local revoke state so button disappears immediately
+  const [credRevoked, setCredRevoked] = useState(false);
+  const hasCred = !credRevoked && (s.has_credential ?? true);
 
   const recheck = useMutation({
     mutationFn: () =>
@@ -493,6 +499,7 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
     onSuccess: () => {
       toast("Credencial removida. A fonte perderá acesso ao provider.", "success");
       setConfirmRevoke(false);
+      setCredRevoked(true);
       qc.invalidateQueries({ queryKey: ["sources", tenantId] });
     },
     onError: (err: { detail?: string; message?: string }) => {
@@ -500,7 +507,25 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
     },
   });
 
+  const deleteSource = useMutation({
+    mutationFn: () =>
+      api.delete(`/api/v1/monitoring/sources/${s.monitoring_source_id}`),
+    onSuccess: () => {
+      toast("Fonte removida.", "success");
+      qc.invalidateQueries({ queryKey: ["sources", tenantId] });
+    },
+    onError: (err: { detail?: string; message?: string }) => {
+      toast(err?.detail ?? err?.message ?? "Erro ao excluir fonte.", "error");
+    },
+  });
+
   const canRecheck = s.operational_evidence_state !== "current";
+  const btnBase: React.CSSProperties = {
+    display: "flex", alignItems: "center", gap: 6,
+    padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 500,
+    background: "none", border: "1px solid var(--border, #262c3a)",
+    cursor: "pointer", width: "100%", justifyContent: "center",
+  };
 
   return (
     <>
@@ -520,9 +545,14 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
               {s.monitoring_source_id}
             </p>
           </div>
-          <Badge variant={stateVariant(s.operational_evidence_state)}>
-            {s.operational_evidence_state}
-          </Badge>
+          <div className="flex flex-col items-end gap-1">
+            <Badge variant={stateVariant(s.operational_evidence_state)}>
+              {s.operational_evidence_state}
+            </Badge>
+            {!hasCred && (
+              <Badge variant="danger">sem credencial</Badge>
+            )}
+          </div>
         </CardHeader>
 
         <dl className="space-y-1">
@@ -553,82 +583,81 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
         </dl>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: "auto" }}>
-          {canRecheck && (
+          {canRecheck && hasCred && (
             <button
               onClick={() => recheck.mutate()}
               disabled={recheck.isPending}
-              style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 500,
-                background: "none",
-                border: "1px solid var(--border, #262c3a)",
-                color: "var(--text-muted, #8b93a5)",
-                cursor: recheck.isPending ? "not-allowed" : "pointer",
-                opacity: recheck.isPending ? 0.6 : 1,
-                width: "100%", justifyContent: "center",
-              }}
+              style={{ ...btnBase, color: "var(--text-muted, #8b93a5)", opacity: recheck.isPending ? 0.6 : 1 }}
             >
               {recheck.isPending ? <Spinner className="w-3 h-3" /> : <RefreshCw size={12} />}
               Revalidar
             </button>
           )}
 
-          <button
-            onClick={() => setShowRotate(true)}
-            style={{
-              display: "flex", alignItems: "center", gap: 6,
-              padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 500,
-              background: "none",
-              border: "1px solid var(--border, #262c3a)",
-              color: "var(--text-muted, #8b93a5)",
-              cursor: "pointer",
-              width: "100%", justifyContent: "center",
-            }}
-          >
-            <KeyRound size={12} />
-            Trocar token
-          </button>
+          {hasCred ? (
+            <button onClick={() => setShowRotate(true)} style={{ ...btnBase, color: "var(--text-muted, #8b93a5)" }}>
+              <KeyRound size={12} />
+              Trocar token
+            </button>
+          ) : (
+            <button onClick={() => setShowRotate(true)} style={{ ...btnBase, color: "var(--brand, #6366f1)", borderColor: "var(--brand, #6366f1)" }}>
+              <KeyRound size={12} />
+              Adicionar token
+            </button>
+          )}
 
-          {!confirmRevoke ? (
+          {hasCred && !confirmRevoke && (
             <button
               onClick={() => setConfirmRevoke(true)}
-              style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 500,
-                background: "none",
-                border: "1px solid var(--border, #262c3a)",
-                color: "var(--red, #f87171)",
-                cursor: "pointer",
-                width: "100%", justifyContent: "center",
-              }}
+              style={{ ...btnBase, color: "var(--red, #f87171)" }}
             >
               <Trash2 size={12} />
               Revogar credencial
             </button>
-          ) : (
+          )}
+
+          {confirmRevoke && (
             <div style={{ display: "flex", gap: 6 }}>
               <button
                 onClick={() => setConfirmRevoke(false)}
-                style={{
-                  flex: 1, padding: "6px 8px", borderRadius: 8, fontSize: 11,
-                  background: "none", border: "1px solid var(--border, #262c3a)",
-                  color: "var(--text-muted, #8b93a5)", cursor: "pointer",
-                }}
+                style={{ flex: 1, padding: "6px 8px", borderRadius: 8, fontSize: 11, background: "none", border: "1px solid var(--border, #262c3a)", color: "var(--text-muted, #8b93a5)", cursor: "pointer" }}
               >
                 Cancelar
               </button>
               <button
                 onClick={() => revoke.mutate()}
                 disabled={revoke.isPending}
-                style={{
-                  flex: 1, padding: "6px 8px", borderRadius: 8, fontSize: 11, fontWeight: 600,
-                  background: "var(--red, #ef4444)", color: "#fff",
-                  border: "none", cursor: "pointer",
-                  display: "flex", alignItems: "center", gap: 4, justifyContent: "center",
-                }}
+                style={{ flex: 1, padding: "6px 8px", borderRadius: 8, fontSize: 11, fontWeight: 600, background: "var(--red, #ef4444)", color: "#fff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, justifyContent: "center" }}
               >
                 {revoke.isPending ? <Spinner className="w-3 h-3" /> : null}
-                Confirmar
+                Revogar
+              </button>
+            </div>
+          )}
+
+          {!confirmDelete ? (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              style={{ ...btnBase, color: "var(--red, #f87171)", opacity: 0.7 }}
+            >
+              <Trash2 size={11} />
+              Excluir fonte
+            </button>
+          ) : (
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                style={{ flex: 1, padding: "6px 8px", borderRadius: 8, fontSize: 11, background: "none", border: "1px solid var(--border, #262c3a)", color: "var(--text-muted, #8b93a5)", cursor: "pointer" }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => deleteSource.mutate()}
+                disabled={deleteSource.isPending}
+                style={{ flex: 1, padding: "6px 8px", borderRadius: 8, fontSize: 11, fontWeight: 600, background: "var(--red, #ef4444)", color: "#fff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, justifyContent: "center" }}
+              >
+                {deleteSource.isPending ? <Spinner className="w-3 h-3" /> : null}
+                Excluir
               </button>
             </div>
           )}
@@ -638,15 +667,32 @@ function SourceCard({ s, tenantId }: { s: Source; tenantId: string }) {
   );
 }
 
+type CredFilter = "all" | "active" | "no_cred";
+
 export function MonitoringPage({ tenantId }: { tenantId: string }) {
   const [showAdd, setShowAdd] = useState(false);
+  const [credFilter, setCredFilter] = useState<CredFilter>("all");
   const q = useQuery({
     queryKey: ["sources", tenantId],
     queryFn: () => api.get<Source[]>(`/api/v1/monitoring/sources`),
     refetchInterval: 30_000,
   });
 
-  const sources = q.data ?? [];
+  const allSources = q.data ?? [];
+  const sources = allSources.filter((s) => {
+    if (credFilter === "active") return s.has_credential ?? true;
+    if (credFilter === "no_cred") return !(s.has_credential ?? true);
+    return true;
+  });
+  const noCredCount = allSources.filter((s) => !(s.has_credential ?? true)).length;
+
+  const tabStyle = (active: boolean): React.CSSProperties => ({
+    padding: "4px 12px", borderRadius: 6, fontSize: 12, fontWeight: active ? 600 : 400,
+    background: active ? "color-mix(in srgb, var(--brand) 15%, transparent)" : "none",
+    color: active ? "var(--brand)" : "var(--text-muted)",
+    border: active ? "1px solid color-mix(in srgb, var(--brand) 30%, transparent)" : "1px solid transparent",
+    cursor: "pointer",
+  });
 
   return (
     <div className="space-y-4">
@@ -671,6 +717,23 @@ export function MonitoringPage({ tenantId }: { tenantId: string }) {
         </div>
       </div>
 
+      {/* Filter tabs */}
+      {allSources.length > 0 && (
+        <div style={{ display: "flex", gap: 4 }}>
+          <button style={tabStyle(credFilter === "all")} onClick={() => setCredFilter("all")}>
+            Todas ({allSources.length})
+          </button>
+          <button style={tabStyle(credFilter === "active")} onClick={() => setCredFilter("active")}>
+            Com credencial ({allSources.length - noCredCount})
+          </button>
+          {noCredCount > 0 && (
+            <button style={tabStyle(credFilter === "no_cred")} onClick={() => setCredFilter("no_cred")}>
+              Sem credencial ({noCredCount})
+            </button>
+          )}
+        </div>
+      )}
+
       {q.isLoading ? (
         <div className="flex justify-center py-10"><Spinner /></div>
       ) : q.isError ? (
@@ -678,7 +741,9 @@ export function MonitoringPage({ tenantId }: { tenantId: string }) {
       ) : sources.length === 0 ? (
         <Card>
           <p className="text-xs text-[var(--text-muted)] py-2">
-            Nenhuma fonte configurada. Clique em "Adicionar fonte" para começar.
+            {credFilter === "no_cred"
+              ? "Nenhuma fonte sem credencial."
+              : 'Nenhuma fonte configurada. Clique em "Adicionar fonte" para começar.'}
           </p>
         </Card>
       ) : (
