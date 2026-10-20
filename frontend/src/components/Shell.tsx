@@ -48,6 +48,7 @@ import { TeiaPage } from "@/pages/TeiaPage";
 import { StatusPageAdminPage } from "@/pages/StatusPageAdminPage";
 import { BugReportsPage } from "@/pages/BugReportsPage";
 import { ClientCompaniesPage } from "@/pages/ClientCompaniesPage";
+import { PermissionCatalogPage } from "@/pages/PermissionCatalogPage";
 import { useBranding } from "@/hooks/useBranding";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -85,6 +86,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   companies: "/companies",
   users: "/admin/users",
   "platform-admin": "/platform-admin",
+  permissions: "/permissions",
   synthetic: "/synthetic",
   oncall: "/oncall",
   custom_dashboard: "/dashboard",
@@ -412,6 +414,12 @@ export function Shell() {
           icon: ShieldCheck,
           description: "Configurações globais da plataforma",
         },
+        ...(has("platform_admin") || has("tenant:admin") ? [{
+          id: "permissions" as View,
+          label: t("nav.permissions", "Permissões"),
+          icon: ScrollText,
+          description: "Catálogo de acesso por papel",
+        }] : []),
       ],
     }] : []),
   ];
@@ -751,6 +759,7 @@ export function Shell() {
           {view === "platform-admin" && <PlatformAdminPage tenantId={s.tenant_id!} />}
           {view === "teia" && <TeiaPage tenantId={s.tenant_id!} />}
           {view === "companies" && <ClientCompaniesPage tenantId={s.tenant_id!} />}
+          {view === "permissions" && <PermissionCatalogPage tenantId={s.tenant_id!} />}
           </div>
         </main>
       </div>

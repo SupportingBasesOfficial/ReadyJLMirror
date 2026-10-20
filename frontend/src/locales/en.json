@@ -31,6 +31,7 @@
     "companies": "Companies",
     "msp": "Client Portfolio",
     "platform_admin": "Platform Admin",
+    "permissions": "Permissions",
     "kb": "Knowledge Base",
     "groups": {
       "Operações": "Operations",
@@ -793,5 +794,19 @@
     "colLastCheck": "Last check",
     "pending": "pending",
     "expired": "EXPIRED"
+  },
+  "permissions": {
+    "title": "Permission Catalog",
+    "subtitle": "Which pages and routes each user role can access in JLMirror.",
+    "legendFull": "Full access",
+    "legendRead": "Read only",
+    "legendNone": "No access",
+    "allRoles": "All roles",
+    "searchPlaceholder": "Search page or route...",
+    "colPage": "Page",
+    "colPath": "Route",
+    "colNotes": "Notes",
+    "noResults": "No pages found for this filter.",
+    "footnote": "Permissions are managed by Keycloak and validated on the backend. This catalog is a navigation reference."
   }
 }

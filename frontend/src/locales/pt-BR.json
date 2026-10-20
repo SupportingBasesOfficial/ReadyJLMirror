@@ -31,6 +31,7 @@
     "companies": "Empresas",
     "msp": "Portfólio de Clientes",
     "platform_admin": "Administração da Plataforma",
+    "permissions": "Permissões",
     "kb": "Base de Conhecimento",
     "groups": {
       "Operações": "Operações",
@@ -793,5 +794,19 @@
     "colLastCheck": "Última verificação",
     "pending": "pendente",
     "expired": "EXPIRADO"
+  },
+  "permissions": {
+    "title": "Catálogo de Permissões",
+    "subtitle": "Quais telas e rotas cada tipo de usuário pode acessar no JLMirror.",
+    "legendFull": "Acesso completo",
+    "legendRead": "Apenas leitura",
+    "legendNone": "Sem acesso",
+    "allRoles": "Todos os papéis",
+    "searchPlaceholder": "Buscar tela ou rota...",
+    "colPage": "Tela",
+    "colPath": "Rota",
+    "colNotes": "Observações",
+    "noResults": "Nenhuma tela encontrada para este filtro.",
+    "footnote": "As permissões são gerenciadas pelo Keycloak e validadas no backend. Este catálogo é uma referência de navegação."
   }
 }
