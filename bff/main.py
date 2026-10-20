@@ -906,6 +906,44 @@ async def admin_invite_user(request: Request) -> JSONResponse:
     )
 
 
+@app.patch("/api/admin/users/{principal_id}")
+async def admin_update_user(principal_id: str, request: Request) -> JSONResponse:
+    """Update first_name, last_name and/or email via Keycloak."""
+    session = await _require_admin(request)
+    if not _csrf_ok(request, session):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "csrf")
+    tenant_id = session["bound_tenant_id"]
+    body = await request.json()
+    first_name = body.get("first_name")
+    last_name = body.get("last_name")
+    email = body.get("email")
+    if email is not None:
+        email = email.strip().lower()
+        if "@" not in email or len(email) < 3:
+            raise HTTPException(400, "invalid email")
+    if not any(v is not None for v in [first_name, last_name, email]):
+        raise HTTPException(400, "nothing to update")
+    async with db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT idp_subject_ref FROM g1.principals WHERE principal_id = %s",
+                (principal_id,),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                raise HTTPException(404, "principal not found")
+            sub = row[0]
+            await cur.execute(
+                "SELECT 1 FROM g1.tenant_memberships WHERE principal_id=%s AND tenant_id=%s",
+                (principal_id, tenant_id),
+            )
+            if await cur.fetchone() is None:
+                raise HTTPException(403, "user not in this tenant")
+    await keycloak_admin.update_user_profile(sub, first_name=first_name,
+                                              last_name=last_name, email=email)
+    return JSONResponse({"ok": True})
+
+
 @app.patch("/api/admin/users/{principal_id}/role")
 async def admin_update_role(principal_id: str, request: Request) -> JSONResponse:
     session = await _require_admin(request)

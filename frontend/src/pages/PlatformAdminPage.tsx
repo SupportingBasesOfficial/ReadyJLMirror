@@ -56,12 +56,26 @@ interface PlatformHealth {
   services?: Record<string, string>;
 }
 
-interface PlatformUsage {
-  total_orgs?: number;
-  total_tenants?: number;
-  active_tenants?: number;
-  suspended_tenants?: number;
-  [key: string]: unknown;
+interface UsageMeter {
+  usage_id: string;
+  tenant_id: string;
+  meter: string;
+  quantity: number;
+  window_start: string;
+  window_end: string;
+  contract_id: string | null;
+}
+
+interface Principal {
+  principal_id: string;
+  kind: string;
+  active: boolean;
+  created_at: string | null;
+  tenant_id: string | null;
+  role: string | null;
+  membership_id: string | null;
+  display_name: string | null;
+  email: string | null;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -420,6 +434,7 @@ function CreateTenantModal({
 
 function TenantsTab() {
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
 
   const tenantsQ = useQuery({
     queryKey: ["platform-tenants"],
@@ -433,8 +448,18 @@ function TenantsTab() {
     retry: 1,
   });
 
+  const tenantUsersQ = useQuery({
+    queryKey: ["platform-principals", selectedTenantId],
+    queryFn: () =>
+      api.get<Principal[]>(
+        `/api/v1/platform/principals?tenant_id=${selectedTenantId}`
+      ),
+    enabled: !!selectedTenantId,
+  });
+
   const tenants = tenantsQ.data ?? [];
   const orgs = orgsQ.data ?? [];
+  const selectedTenant = tenants.find((t) => t.tenant_id === selectedTenantId);
 
   return (
     <Card className="flex flex-col gap-4">
@@ -479,7 +504,12 @@ function TenantsTab() {
               {tenants.map((t) => (
                 <tr
                   key={t.tenant_id}
-                  className="border-b border-[var(--border)] hover:bg-[var(--surface-2)]"
+                  className="border-b border-[var(--border)] hover:bg-[var(--surface-2)] cursor-pointer"
+                  onClick={() =>
+                    setSelectedTenantId((prev) =>
+                      prev === t.tenant_id ? null : t.tenant_id
+                    )
+                  }
                 >
                   <td
                     className="px-2 py-2 font-mono text-[var(--text-muted)]"
@@ -502,6 +532,63 @@ function TenantsTab() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {selectedTenant && (
+        <div className="border border-[var(--border)] rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-sm font-semibold">{selectedTenant.display_name}</span>
+              <span className="ml-2 text-xs font-mono text-[var(--text-muted)]">
+                {selectedTenant.tenant_id}
+              </span>
+            </div>
+            <button
+              onClick={() => setSelectedTenantId(null)}
+              className="text-[var(--text-muted)] hover:text-[var(--text)]"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          {tenantUsersQ.isLoading ? (
+            <Spinner className="w-4 h-4" />
+          ) : tenantUsersQ.isError ? (
+            <p className="text-xs text-[var(--red)]">Erro ao carregar usuários.</p>
+          ) : (tenantUsersQ.data ?? []).length === 0 ? (
+            <p className="text-xs text-[var(--text-muted)]">Nenhum usuário neste tenant.</p>
+          ) : (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
+                  <th className="text-left py-1 font-medium">Usuário</th>
+                  <th className="text-left py-1 font-medium">Email</th>
+                  <th className="text-left py-1 font-medium">Papel</th>
+                  <th className="text-left py-1 font-medium">Tipo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(tenantUsersQ.data ?? []).map((u) => (
+                  <tr key={u.principal_id + (u.membership_id ?? "")} className="border-b border-[var(--border)]">
+                    <td className="py-1.5 pr-3">
+                      {u.display_name || (
+                        <span className="font-mono text-[var(--text-muted)]">
+                          {truncate(u.principal_id, 8)}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1.5 pr-3 text-[var(--text-muted)]">{u.email || "—"}</td>
+                    <td className="py-1.5 pr-3">{u.role || "—"}</td>
+                    <td className="py-1.5">
+                      <Badge variant={u.kind === "platform_admin_principal" ? "success" : "muted"}>
+                        {u.kind.replace("_principal", "")}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
 
@@ -876,7 +963,7 @@ function HealthTab() {
 
   const usageQ = useQuery({
     queryKey: ["platform-usage"],
-    queryFn: () => api.get<PlatformUsage>("/api/v1/platform/usage"),
+    queryFn: () => api.get<UsageMeter[]>("/api/v1/platform/usage"),
     retry: 0,
   });
 
@@ -895,22 +982,10 @@ function HealthTab() {
         </div>
       ) : (
         <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
-          <StatCard
-            label="Organizações"
-            value={usageQ.data?.total_orgs ?? orgs.length}
-          />
-          <StatCard
-            label="Tenants"
-            value={usageQ.data?.total_tenants ?? tenants.length}
-          />
-          <StatCard
-            label="Tenants ativos"
-            value={usageQ.data?.active_tenants ?? activeTenants}
-          />
-          <StatCard
-            label="Tenants suspensos"
-            value={usageQ.data?.suspended_tenants ?? suspendedTenants}
-          />
+          <StatCard label="Organizações" value={orgs.length} />
+          <StatCard label="Tenants" value={tenants.length} />
+          <StatCard label="Tenants ativos" value={activeTenants} />
+          <StatCard label="Tenants suspensos" value={suspendedTenants} />
         </div>
       )}
 
@@ -961,24 +1036,46 @@ function HealthTab() {
         ) : null}
       </Card>
 
-      {!usageQ.isError && usageQ.data && (
+      {!usageQ.isError && (usageQ.data ?? []).length > 0 && (
         <Card className="flex flex-col gap-3">
           <CardHeader>
             <span className="text-sm font-semibold">Usage consolidado</span>
+            <span className="text-xs text-[var(--text-muted)]">
+              {(usageQ.data ?? []).length} registro{(usageQ.data ?? []).length !== 1 ? "s" : ""}
+            </span>
           </CardHeader>
-          <dl className="space-y-1.5">
-            {Object.entries(usageQ.data).map(([key, value]) => (
-              <div key={key} className="flex justify-between text-xs">
-                <dt className="text-[var(--text-muted)]">{key.replace(/_/g, " ")}</dt>
-                <dd
-                  className="font-mono font-medium tabular-nums"
-                  style={{ color: "var(--text)" }}
-                >
-                  {String(value)}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs min-w-[520px]">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
+                  <th className="text-left px-2 py-1.5 font-medium">Tenant</th>
+                  <th className="text-left px-2 py-1.5 font-medium">Meter</th>
+                  <th className="text-right px-2 py-1.5 font-medium">Qtd</th>
+                  <th className="text-left px-2 py-1.5 font-medium">Início</th>
+                  <th className="text-left px-2 py-1.5 font-medium">Fim</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(usageQ.data ?? []).map((m) => (
+                  <tr key={m.usage_id} className="border-b border-[var(--border)]">
+                    <td className="px-2 py-1.5 font-mono text-[var(--text-muted)]">
+                      {truncate(m.tenant_id, 8)}
+                    </td>
+                    <td className="px-2 py-1.5">{m.meter}</td>
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums">
+                      {m.quantity.toFixed(2)}
+                    </td>
+                    <td className="px-2 py-1.5 text-[var(--text-muted)]">
+                      {fmt(m.window_start)}
+                    </td>
+                    <td className="px-2 py-1.5 text-[var(--text-muted)]">
+                      {fmt(m.window_end)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
     </div>
@@ -1751,15 +1848,6 @@ interface TreeTenant {
   state: string;
 }
 
-interface TreeUser {
-  principal_id: string;
-  display_name?: string | null;
-  email?: string | null;
-  kind: string;
-  role?: string;
-  tenant_id?: string;
-}
-
 function TeiaTab() {
   const orgsQ = useQuery({
     queryKey: ["teia-orgs"],
@@ -1771,7 +1859,7 @@ function TeiaTab() {
   });
   const usersQ = useQuery({
     queryKey: ["teia-users"],
-    queryFn: () => api.get<TreeUser[]>("/api/v1/platform/users"),
+    queryFn: () => api.get<Principal[]>("/api/v1/platform/principals"),
   });
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -1793,7 +1881,7 @@ function TeiaTab() {
     if (!tenantsByOrg[orgKey]) tenantsByOrg[orgKey] = [];
     tenantsByOrg[orgKey].push(t);
   }
-  const usersByTenant: Record<string, TreeUser[]> = {};
+  const usersByTenant: Record<string, Principal[]> = {};
   for (const u of users) {
     if (!u.tenant_id) continue;
     if (!usersByTenant[u.tenant_id]) usersByTenant[u.tenant_id] = [];
@@ -1873,7 +1961,7 @@ function TeiaTab() {
                               {tenantUsers.length === 0 ? (
                                 <p className="text-[10px] text-[var(--text-muted)]">Sem usuários</p>
                               ) : tenantUsers.map((u) => (
-                                <div key={u.principal_id} className="flex items-center gap-2 text-xs py-1">
+                                <div key={u.principal_id + (u.membership_id ?? "")} className="flex items-center gap-2 text-xs py-1">
                                   <span>{kindIcon(u.kind)}</span>
                                   <span className="flex-1 truncate">
                                     {u.display_name || u.email || u.principal_id}

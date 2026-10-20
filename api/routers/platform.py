@@ -707,6 +707,60 @@ async def platform_health(request: Request) -> dict:
     }
 
 
+@router.get("/principals")
+async def list_principals(
+    request: Request, tenant_id: str | None = None
+) -> list[dict]:
+    """All principals with tenant memberships, enriched with Keycloak profile."""
+    await _require_platform_admin(request)
+    clauses: list[str] = []
+    params: list = []
+    if tenant_id:
+        clauses.append("tm.tenant_id = %s")
+        params.append(tenant_id)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            f"""
+            SELECT p.principal_id, p.kind, p.active, p.created_at,
+                   tm.tenant_id, tm.role, tm.membership_id
+              FROM g1.principals p
+              LEFT JOIN g1.tenant_memberships tm ON tm.principal_id = p.principal_id
+            {where}
+             ORDER BY p.created_at DESC LIMIT 500
+            """, tuple(params))
+        rows = await cur.fetchall()
+
+    principal_ids = list({r[0] for r in rows})
+    kc_map: dict = {}
+    if principal_ids:
+        try:
+            from shared import keycloak_admin
+            kc_map = await keycloak_admin.get_users_by_ids(principal_ids)
+        except Exception:
+            pass
+
+    result = []
+    for r in rows:
+        pid, kind, active, created_at, tid, role, mid = r
+        kc = kc_map.get(pid, {})
+        fn = (kc.get("first_name") or "").strip()
+        ln = (kc.get("last_name") or "").strip()
+        display_name = f"{fn} {ln}".strip() or kc.get("email") or None
+        result.append({
+            "principal_id": pid,
+            "kind": kind,
+            "active": active,
+            "created_at": created_at.isoformat() if created_at else None,
+            "tenant_id": tid,
+            "role": role,
+            "membership_id": mid,
+            "display_name": display_name,
+            "email": kc.get("email") if kc else None,
+        })
+    return result
+
+
 class TenantCreate(BaseModel):
     tenant_id: str
     display_name: str

@@ -37,6 +37,8 @@ interface Inventory {
   poc_1_name?: string; poc_1_email?: string; poc_1_phone?: string;
   poc_2_name?: string; poc_2_email?: string; poc_2_phone?: string;
   site_city?: string; site_rack?: string; site_notes?: string;
+  site_address_a?: string; site_state?: string; site_country?: string;
+  location_lat?: string; location_lon?: string;
   url_a?: string; url_b?: string; url_c?: string;
 }
 
@@ -1274,6 +1276,8 @@ export function DeviceDetail({
             {(() => {
               const hasLocationData = inv && (
                 inv.location || inv.site_rack || inv.site_city || inv.site_notes ||
+                inv.site_address_a || inv.site_state || inv.site_country ||
+                inv.location_lat || inv.location_lon ||
                 inv.contact || inv.poc_1_name || inv.poc_1_email || inv.poc_1_phone ||
                 inv.poc_2_name || inv.poc_2_email || inv.url_a || inv.url_b || inv.url_c
               );
@@ -1284,31 +1288,75 @@ export function DeviceDetail({
                   </p>
                 );
               }
+              const lat = inv?.location_lat ? parseFloat(inv.location_lat) : null;
+              const lon = inv?.location_lon ? parseFloat(inv.location_lon) : null;
+              const hasCoords = lat !== null && lon !== null && !isNaN(lat) && !isNaN(lon);
+              const addressParts = [inv?.site_address_a, inv?.site_city, inv?.site_state, inv?.site_country].filter(Boolean);
+              const addressStr = addressParts.join(", ");
+              const googleMapsUrl = hasCoords
+                ? `https://www.google.com/maps?q=${lat},${lon}`
+                : addressStr
+                  ? `https://www.google.com/maps/search/${encodeURIComponent(addressStr)}`
+                  : null;
               return (
-                <dl>
-                  <KV label="Local"         value={inv?.location} />
-                  <KV label="Rack"          value={inv?.site_rack} />
-                  <KV label="Cidade"        value={inv?.site_city} />
-                  <KV label="Observações"   value={inv?.site_notes} />
-                  <KV label="Contato"       value={inv?.contact} />
-                  <KV label="Responsável 1" value={inv?.poc_1_name} />
-                  <KV label="E-mail 1"      value={inv?.poc_1_email} />
-                  <KV label="Telefone 1"    value={inv?.poc_1_phone} />
-                  <KV label="Responsável 2" value={inv?.poc_2_name} />
-                  <KV label="E-mail 2"      value={inv?.poc_2_email} />
-                  {(inv?.url_a || inv?.url_b || inv?.url_c) && (
-                    <KV
-                      label="Acesso remoto"
-                      value={
-                        <span className="flex flex-wrap gap-2">
-                          {inv?.url_a && <a href={inv.url_a} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_a}</a>}
-                          {inv?.url_b && <a href={inv.url_b} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_b}</a>}
-                          {inv?.url_c && <a href={inv.url_c} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_c}</a>}
-                        </span>
-                      }
-                    />
+                <>
+                  {hasCoords && (
+                    <div className="mb-3 rounded-lg overflow-hidden border border-[var(--border)]" style={{ height: 180 }}>
+                      <iframe
+                        title="Mapa de localização"
+                        width="100%"
+                        height="180"
+                        style={{ border: 0, display: "block" }}
+                        src={`https://www.openstreetmap.org/export/embed.html?bbox=${lon - 0.01},${lat - 0.01},${lon + 0.01},${lat + 0.01}&layer=mapnik&marker=${lat},${lon}`}
+                        loading="lazy"
+                      />
+                    </div>
                   )}
-                </dl>
+                  <dl>
+                    <KV label="Local"         value={inv?.location} />
+                    <KV label="Endereço"      value={inv?.site_address_a} />
+                    <KV label="Estado"        value={inv?.site_state} />
+                    <KV label="País"          value={inv?.site_country} />
+                    <KV label="Rack"          value={inv?.site_rack} />
+                    <KV label="Cidade"        value={inv?.site_city} />
+                    {hasCoords && (
+                      <KV label="Coordenadas" value={`${lat?.toFixed(6)}, ${lon?.toFixed(6)}`} />
+                    )}
+                    <KV label="Observações"   value={inv?.site_notes} />
+                    <KV label="Contato"       value={inv?.contact} />
+                    <KV label="Responsável 1" value={inv?.poc_1_name} />
+                    <KV label="E-mail 1"      value={inv?.poc_1_email} />
+                    <KV label="Telefone 1"    value={inv?.poc_1_phone} />
+                    <KV label="Responsável 2" value={inv?.poc_2_name} />
+                    <KV label="E-mail 2"      value={inv?.poc_2_email} />
+                    {(inv?.url_a || inv?.url_b || inv?.url_c) && (
+                      <KV
+                        label="Acesso remoto"
+                        value={
+                          <span className="flex flex-wrap gap-2">
+                            {inv?.url_a && <a href={inv.url_a} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_a}</a>}
+                            {inv?.url_b && <a href={inv.url_b} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_b}</a>}
+                            {inv?.url_c && <a href={inv.url_c} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_c}</a>}
+                          </span>
+                        }
+                      />
+                    )}
+                    {googleMapsUrl && !hasCoords && (
+                      <KV
+                        label="Ver no mapa"
+                        value={<a href={googleMapsUrl} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline text-xs">Abrir no Google Maps</a>}
+                      />
+                    )}
+                  </dl>
+                  {hasCoords && googleMapsUrl && (
+                    <div className="mt-2">
+                      <a href={googleMapsUrl} target="_blank" rel="noreferrer"
+                        className="text-xs text-[var(--brand)] underline">
+                        Abrir no Google Maps
+                      </a>
+                    </div>
+                  )}
+                </>
               );
             })()}
 

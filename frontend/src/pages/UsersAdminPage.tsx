@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
-import { UserPlus, Copy, Check, X, ShieldOff, ShieldCheck, Trash2, KeyRound } from "lucide-react";
+import { UserPlus, Copy, Check, X, ShieldOff, ShieldCheck, Trash2, KeyRound, Pencil } from "lucide-react";
 
 interface User {
   principal_id: string;
@@ -250,6 +250,92 @@ function TempPasswordModal({
   );
 }
 
+// ── Edit user modal ───────────────────────────────────────────────────────────
+function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [firstName, setFirstName] = useState(user.first_name);
+  const [lastName, setLastName] = useState(user.last_name);
+  const [email, setEmail] = useState(user.email);
+  const [emailError, setEmailError] = useState("");
+
+  const update = useMutation({
+    mutationFn: () =>
+      api.patch(`/api/admin/users/${user.principal_id}`, {
+        first_name: firstName.trim() || undefined,
+        last_name: lastName.trim() || undefined,
+        email: email.trim() !== user.email ? email.trim() : undefined,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      toast("Usuário atualizado", "success");
+      onClose();
+    },
+    onError: (e: Error) => toast(e.message || "Erro ao atualizar", "error"),
+  });
+
+  const inputCls =
+    "w-full px-2.5 py-1.5 rounded border border-[var(--border)] " +
+    "bg-[var(--surface-2)] text-[var(--text)] text-sm focus:outline-none " +
+    "focus:ring-1 focus:ring-[var(--brand)]";
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (email && (!email.includes("@") || email.length < 3)) {
+      setEmailError("Email inválido.");
+      return;
+    }
+    setEmailError("");
+    update.mutate();
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <h3 className="text-sm font-semibold mb-4">Editar usuário</h3>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">Nome</label>
+            <input
+              className={inputCls}
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              placeholder="Maria"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">Sobrenome</label>
+            <input
+              className={inputCls}
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              placeholder="Silva"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs text-[var(--text-muted)] mb-1">Email</label>
+          <input
+            type="email"
+            className={inputCls}
+            value={email}
+            onChange={(e) => { setEmail(e.target.value); setEmailError(""); }}
+          />
+          {emailError && <p className="text-[11px] text-[var(--red)] mt-1">{emailError}</p>}
+        </div>
+        <div className="flex gap-2 pt-1">
+          <Button type="submit" disabled={update.isPending} className="flex-1">
+            {update.isPending ? <Spinner className="w-3 h-3" /> : "Salvar"}
+          </Button>
+          <Button variant="ghost" type="button" onClick={onClose} className="flex-1">
+            Cancelar
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 // ── Confirm dialog ────────────────────────────────────────────────────────────
 function ConfirmModal({
   title,
@@ -352,6 +438,7 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [showInvite, setShowInvite] = useState(false);
+  const [editUser, setEditUser] = useState<User | null>(null);
   const [tempPwd, setTempPwd] = useState<{ email: string; pwd: string } | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     type: "deactivate" | "reactivate" | "delete";
@@ -481,6 +568,14 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
                     <td className="px-2 py-2">
                       <div className="flex items-center gap-1 justify-end">
                         <button
+                          onClick={() => setEditUser(u)}
+                          className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--brand)]
+                            cursor-pointer transition-colors"
+                          title="Editar usuário"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
                           onClick={() => resetPwd.mutate(u)}
                           disabled={resetPwd.isPending}
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--brand)]
@@ -563,6 +658,10 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
             setTempPwd({ email, pwd });
           }}
         />
+      )}
+
+      {editUser && (
+        <EditUserModal user={editUser} onClose={() => setEditUser(null)} />
       )}
 
       {tempPwd && (

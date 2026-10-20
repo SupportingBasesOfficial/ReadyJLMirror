@@ -2,6 +2,7 @@ import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import "./index.css";
+import "./i18n";
 import App from "./App";
 import { ToastProvider, useToast } from "@/components/ui/toast";
 import { ErrorBoundary } from "./components/ErrorBoundary";

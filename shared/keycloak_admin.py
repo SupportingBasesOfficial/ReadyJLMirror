@@ -119,6 +119,33 @@ async def reset_password(user_id: str, new_password: str, temporary: bool = True
         resp.raise_for_status()
 
 
+async def update_user_profile(
+    user_id: str,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    email: str | None = None,
+) -> None:
+    """Update a Keycloak user's name and/or email."""
+    payload: dict = {}
+    if first_name is not None:
+        payload["firstName"] = first_name
+    if last_name is not None:
+        payload["lastName"] = last_name
+    if email is not None:
+        payload["email"] = email
+        payload["emailVerified"] = True
+    if not payload:
+        return
+    token = await _admin_token()
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.put(
+            f"{_REALM_BASE}/users/{user_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        resp.raise_for_status()
+
+
 async def delete_user(user_id: str) -> None:
     """Delete a Keycloak user entirely."""
     token = await _admin_token()

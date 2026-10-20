@@ -12,7 +12,7 @@ import {
   MessageSquare, PhoneCall, Users, UserPlus, KeyRound,
   ScrollText, BookOpen, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Building2, ShieldCheck, Network, Radio, CalendarClock,
-  LayoutGrid, Globe,
+  LayoutGrid, Globe, Bug,
 } from "lucide-react";
 import { api, logout } from "@/api/client";
 import { AlertsPage } from "@/pages/AlertsPage";
@@ -46,9 +46,15 @@ import { UsersAdminPage } from "@/pages/UsersAdminPage";
 import { PlatformAdminPage } from "@/pages/PlatformAdminPage";
 import { TeiaPage } from "@/pages/TeiaPage";
 import { StatusPageAdminPage } from "@/pages/StatusPageAdminPage";
+import { BugReportsPage } from "@/pages/BugReportsPage";
+import { ClientCompaniesPage } from "@/pages/ClientCompaniesPage";
 import { useBranding } from "@/hooks/useBranding";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { BugReportButton } from "@/components/BugReportButton";
+import { PageInfoButton } from "@/components/PageInfoButton";
+import { LanguageToggle } from "@/components/LanguageToggle";
+import { useTranslation } from "react-i18next";
 
 const VIEW_TO_PATH: Record<string, string> = {
   noc: "/",
@@ -75,6 +81,8 @@ const VIEW_TO_PATH: Record<string, string> = {
   msp: "/msp",
   kb: "/kb",
   teia: "/teia",
+  bugs: "/admin/bugs",
+  companies: "/companies",
   users: "/admin/users",
   "platform-admin": "/platform-admin",
   synthetic: "/synthetic",
@@ -94,6 +102,7 @@ function currentViewFromPath(pathname: string): View {
 }
 
 export function Shell() {
+  const { t } = useTranslation();
   const { data: session, isLoading } = useSession();
   const qc = useQueryClient();
   const location = useLocation();
@@ -233,7 +242,7 @@ export function Shell() {
   if (!s || s.state === "unavailable") {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-[var(--text-muted)] text-sm">Serviço indisponível.</div>
+        <div className="text-[var(--text-muted)] text-sm">{t("common.serviceUnavailable")}</div>
       </div>
     );
   }
@@ -246,15 +255,15 @@ export function Shell() {
             <span className="text-[var(--brand)]">JL</span>Mirror
           </h1>
           <p className="text-[var(--text-muted)] text-sm mb-6">
-            Plataforma de operações para MSPs e equipes de TI
+            {t("auth.subtitle")}
           </p>
           <a href="/auth/login" className="no-underline">
-            <Button className="w-full">Entrar</Button>
+            <Button className="w-full">{t("common.signIn")}</Button>
           </a>
           {s.environment === "development" && (
             <div className="mt-3">
               <a href="/auth/dev-login" className="text-xs text-[var(--text-muted)] hover:text-[var(--brand)]">
-                dev sign-in
+                {t("auth.devSignIn")}
               </a>
             </div>
           )}
@@ -267,8 +276,8 @@ export function Shell() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-10 min-w-[320px] text-center">
-          <p className="text-[var(--red)] mb-4">Acesso negado — sem associação a um workspace ativo.</p>
-          <Button variant="secondary" onClick={() => logout()}>Sair</Button>
+          <p className="text-[var(--red)] mb-4">{t("auth.accessDenied")}</p>
+          <Button variant="secondary" onClick={() => logout()}>{t("common.signOut")}</Button>
         </div>
       </div>
     );
@@ -282,7 +291,7 @@ export function Shell() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-8 min-w-[320px] max-w-md">
-          <h2 className="text-base font-semibold mb-4">Selecionar workspace</h2>
+          <h2 className="text-base font-semibold mb-4">{t("auth.selectWorkspace")}</h2>
           <div className="space-y-2">
             {memberships.map((t) => (
               <button
@@ -323,83 +332,83 @@ export function Shell() {
     {
       label: "Operações",
       items: [
-        { id: "noc", label: "NOC", icon: LayoutDashboard, description: "Painel em tempo real" },
-        { id: "custom_dashboard" as View, label: "Meu Dashboard", icon: LayoutGrid, description: "Dashboard personalizado com widgets" },
-        { id: "alerts", label: "Alertas", icon: Bell, description: "Alertas ativos" },
-        { id: "incidents", label: "Incidentes", icon: Siren, description: "Gestão de incidentes" },
-        { id: "policies", label: "Políticas", icon: Shield, description: "Regras de alerta" },
+        { id: "noc", label: t("nav.noc"), icon: LayoutDashboard, description: "Painel em tempo real" },
+        { id: "custom_dashboard" as View, label: t("nav.custom_dashboard"), icon: LayoutGrid, description: "Dashboard personalizado com widgets" },
+        { id: "alerts", label: t("nav.alerts"), icon: Bell, description: "Alertas ativos" },
+        { id: "incidents", label: t("nav.incidents"), icon: Siren, description: "Gestão de incidentes" },
+        { id: "policies", label: t("nav.policies"), icon: Shield, description: "Regras de alerta" },
       ],
     },
     ...(has("monitoring:operate") ? [{
       label: "ITSM",
       items: [
-        { id: "changes" as View, label: "Mudanças", icon: GitMerge, description: "Controle de mudanças" },
-        { id: "sla" as View, label: "SLA", icon: Clock, description: "Níveis de serviço" },
-        { id: "automation" as View, label: "Automação", icon: Zap, description: "Scripts e tarefas" },
-        { id: "reports" as View, label: "Relatórios", icon: BarChart2, description: "Relatórios periódicos" },
+        { id: "changes" as View, label: t("nav.changes"), icon: GitMerge, description: "Controle de mudanças" },
+        { id: "sla" as View, label: t("nav.sla"), icon: Clock, description: "Níveis de serviço" },
+        { id: "automation" as View, label: t("nav.automation"), icon: Zap, description: "Scripts e tarefas" },
+        { id: "reports" as View, label: t("nav.reports"), icon: BarChart2, description: "Relatórios periódicos" },
       ],
     }] : []),
     {
       label: "Inteligência",
       items: [
-        { id: "aiops" as View, label: "AIOps", icon: Brain, description: "Correlação por IA" },
-        { id: "finops" as View, label: "FinOps", icon: DollarSign, description: "Custos de infra" },
+        { id: "aiops" as View, label: t("nav.aiops"), icon: Brain, description: "Correlação por IA" },
+        { id: "finops" as View, label: t("nav.finops"), icon: DollarSign, description: "Custos de infra" },
       ],
     },
     {
       label: "Integrações",
       items: [
-        { id: "monitoring" as View, label: "Monitoramento", icon: Activity, description: "Fontes e integrações" },
-        { id: "inventory" as View, label: "Inventário", icon: Package, description: "Hosts e ativos" },
-        { id: "teia" as View, label: "Teia", icon: Network, description: "Mapa relacional do tenant" },
-        { id: "synthetic" as View, label: "Sintético", icon: Radio, description: "Checks HTTP periódicos" },
-        ...(has("monitoring:operate") ? [{ id: "alertmanager" as View, label: "Alertmanager", icon: Webhook, description: "Regras Prometheus" }] : []),
+        { id: "monitoring" as View, label: t("nav.monitoring"), icon: Activity, description: "Fontes e integrações" },
+        { id: "inventory" as View, label: t("nav.inventory"), icon: Package, description: "Hosts e ativos" },
+        { id: "teia" as View, label: t("nav.teia"), icon: Network, description: "Mapa relacional do tenant" },
+        { id: "synthetic" as View, label: t("nav.synthetic"), icon: Radio, description: "Checks HTTP periódicos" },
+        ...(has("monitoring:operate") ? [{ id: "alertmanager" as View, label: t("nav.alertmanager"), icon: Webhook, description: "Regras Prometheus" }] : []),
       ],
     },
     {
       label: "Infraestrutura",
       items: [
         ...(has("monitoring:operate") ? [
-          { id: "infra" as View, label: "Infra", icon: Server, description: "Servidores e redes" },
-          { id: "maintenance" as View, label: "Manutenção", icon: Wrench, description: "Janelas de manutenção" },
+          { id: "infra" as View, label: t("nav.infra"), icon: Server, description: "Servidores e redes" },
+          { id: "maintenance" as View, label: t("nav.maintenance"), icon: Wrench, description: "Janelas de manutenção" },
         ] : []),
-        { id: "platform" as View, label: "Plataforma", icon: Settings2, description: "Configurações gerais" },
-        { id: "status_page" as View, label: "Página de Status", icon: Globe, description: "Status público do tenant" },
+        { id: "platform" as View, label: t("nav.platform"), icon: Settings2, description: "Configurações gerais" },
+        { id: "status_page" as View, label: t("nav.status_page"), icon: Globe, description: "Status público do tenant" },
       ],
     },
     ...(has("monitoring:operate") ? [{
       label: "Notificações",
       items: [
-        { id: "channels" as View, label: "Canais", icon: MessageSquare, description: "Canais de notificação" },
-        { id: "escalation" as View, label: "Escalonamento", icon: PhoneCall, description: "Políticas de escalonamento" },
-        { id: "oncall" as View, label: "Plantão", icon: CalendarClock, description: "Escalas de on-call" },
+        { id: "channels" as View, label: t("nav.channels"), icon: MessageSquare, description: "Canais de notificação" },
+        { id: "escalation" as View, label: t("nav.escalation"), icon: PhoneCall, description: "Políticas de escalonamento" },
+        { id: "oncall" as View, label: t("nav.oncall"), icon: CalendarClock, description: "Escalas de on-call" },
       ],
     }] : []),
     ...((has("tenant:admin") || has("audit:read")) ? [{
       label: "Equipe & Acesso",
       items: [
         ...(has("tenant:admin") ? [
-          { id: "users" as View, label: "Usuários", icon: UserPlus, description: "Convidar e gerir usuários" },
-          { id: "team" as View, label: "Equipe", icon: Users, description: "Membros e funções" },
-          { id: "apikeys" as View, label: "API Keys", icon: KeyRound, description: "Chaves de integração" },
+          { id: "users" as View, label: t("nav.users"), icon: UserPlus, description: "Convidar e gerir usuários" },
+          { id: "team" as View, label: t("nav.team"), icon: Users, description: "Membros e funções" },
+          { id: "apikeys" as View, label: t("nav.apikeys"), icon: KeyRound, description: "Chaves de integração" },
+          { id: "bugs" as View, label: t("nav.bugs"), icon: Bug, description: "Bugs reportados pelos usuários" },
         ] : []),
-        ...(has("audit:read") ? [{ id: "audit" as View, label: "Auditoria", icon: ScrollText, description: "Logs de auditoria" }] : []),
+        ...(has("audit:read") ? [{ id: "audit" as View, label: t("nav.audit"), icon: ScrollText, description: "Logs de auditoria" }] : []),
       ],
     }] : []),
-    ...(hasMSPClients ? [{
+    ...(hasMSPClients || has("tenant:admin") ? [{
       label: "MSP",
       items: [
-        { id: "msp" as View, label: "Portfólio de Clientes", icon: Building2, description: "Clientes MSP" },
+        { id: "companies" as View, label: t("nav.companies"), icon: Building2, description: "Empresas e carteira de clientes" },
+        ...(hasMSPClients ? [{ id: "msp" as View, label: t("nav.msp"), icon: Building2, description: "Clientes MSP" }] : []),
       ],
     }] : []),
-    // Visible to platform_admin permission holders.
-    // Falls back to tenant:admin if platform_admin is not yet present in the permission set.
     ...((has("platform_admin") || has("tenant:admin")) ? [{
       label: "Plataforma",
       items: [
         {
           id: "platform-admin" as View,
-          label: "Administração da Plataforma",
+          label: t("nav.platform_admin"),
           icon: ShieldCheck,
           description: "Configurações globais da plataforma",
         },
@@ -440,9 +449,9 @@ export function Shell() {
         >
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-10 min-w-[320px] max-w-md text-center shadow-2xl">
             <p className="text-sm font-medium mb-5" style={{ color: "var(--text)" }}>
-              Sua sessão expirou.
+              {t("common.sessionExpired")}
             </p>
-            <Button onClick={() => logout()}>Fazer login novamente</Button>
+            <Button onClick={() => logout()}>{t("common.loginAgain")}</Button>
           </div>
         </div>
       )}
@@ -562,7 +571,7 @@ export function Shell() {
         <div className="flex-shrink-0 border-t border-[var(--border)] px-2 py-1.5">
           <button
             onClick={() => goTo("kb")}
-            title={collapsed ? "Base de Conhecimento" : "Documentação e runbooks"}
+            title={collapsed ? t("nav.kb") : "Documentação e runbooks"}
             className={[
               "w-full flex items-center cursor-pointer outline-none transition-all duration-150",
               collapsed ? "justify-center h-8 w-8 mx-auto rounded-lg" : "gap-2.5 px-2.5 py-[5px] rounded-lg",
@@ -579,7 +588,7 @@ export function Shell() {
             {!collapsed && (
               <span className="truncate text-[13px] leading-none flex-1 min-w-0 text-left"
                 style={{ fontWeight: view === "kb" ? 600 : 400 }}>
-                Base de Conhecimento
+                {t("nav.kb")}
               </span>
             )}
           </button>
@@ -636,12 +645,12 @@ export function Shell() {
               collapsed ? "justify-center" : "gap-2 px-2.5",
             ].join(" ")}
             style={{ color: "var(--text-muted)" }}
-            title={collapsed ? "Expandir menu" : "Recolher menu"}
+            title={collapsed ? t("sidebar.expandMenu") : t("sidebar.collapseMenu")}
           >
             {collapsed ? <ChevronRight size={13} /> : (
               <>
                 <ChevronLeft size={13} />
-                <span>Recolher</span>
+                <span>{t("common.collapse")}</span>
               </>
             )}
           </button>
@@ -659,12 +668,15 @@ export function Shell() {
             {s.is_platform_admin && (
               <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
                 style={{ background: "color-mix(in srgb, var(--brand) 15%, transparent)", color: "var(--brand)", border: "1px solid color-mix(in srgb, var(--brand) 30%, transparent)" }}>
-                Platform Admin
+                {t("topbar.platformAdmin")}
               </span>
             )}
+            <LanguageToggle />
+            <PageInfoButton screenId={view} />
+            <BugReportButton screenId={view} />
             <button
               onClick={() => goTo("alerts")}
-              title="Alertas críticos"
+              title={t("topbar.criticalAlerts")}
               className="relative p-1.5 rounded-lg hover:bg-[var(--surface-2)] transition-colors"
               style={{ color: "var(--text-muted)" }}
             >
@@ -693,12 +705,12 @@ export function Shell() {
         {/* MSP shortcut banner — shown on MSP's own tenant when not on the MSP overview */}
         {hasMSPClients && view !== "msp" && (
           <div className="flex items-center gap-2 px-4 py-1.5 bg-[var(--surface-2)] border-b border-[var(--border)] text-xs text-[var(--text-muted)]">
-            <span>Você possui {(mspData?.clients?.length ?? 0) === 1 ? "1 cliente gerenciado" : `${mspData?.clients?.length ?? 0} clientes gerenciados`}</span>
+            <span>{t("msp.managedClient", { count: mspData?.clients?.length ?? 0 })}</span>
             <button
               onClick={() => goTo("msp")}
               className="text-[var(--brand)] hover:underline cursor-pointer font-medium"
             >
-              Ver painel de clientes →
+              {t("msp.viewPortfolio")}
             </button>
           </div>
         )}
@@ -735,8 +747,10 @@ export function Shell() {
           {view === "incidents" && <IncidentsPage tenantId={s.tenant_id!} />}
           {view === "msp" && <MSPOverviewPage tenantId={s.tenant_id!} onSelectTenant={handleSelectTenant} />}
           {view === "users" && <UsersAdminPage tenantId={s.tenant_id!} />}
+          {view === "bugs" && <BugReportsPage tenantId={s.tenant_id!} />}
           {view === "platform-admin" && <PlatformAdminPage tenantId={s.tenant_id!} />}
           {view === "teia" && <TeiaPage tenantId={s.tenant_id!} />}
+          {view === "companies" && <ClientCompaniesPage tenantId={s.tenant_id!} />}
           </div>
         </main>
       </div>

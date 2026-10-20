@@ -35,10 +35,12 @@ from api.routers import (
     alertmanager_ingest,
     api_keys,
     automation,
+    bugreport,
     reports,
     billing,
     branding,
     changes,
+    client_companies,
     escalation,
     finops,
     authority,
@@ -340,6 +342,7 @@ async def verify_context(request: Request, call_next):
         "/api/v1/auth/", "/api/v1/fence/", "/api/v1/monitoring/",
         "/api/v1/alerting/", "/api/v1/async/", "/api/v1/observability/",
         "/api/v1/release/", "/api/v1/aiops/", "/api/v1/finops/",
+        "/api/v1/companies",
     )
     ctx = _verify_bff_context(request)
     display_ctx = False
@@ -517,6 +520,8 @@ app.include_router(status_page.router)
 app.include_router(status_page._public_router)
 app.include_router(noc_stream.router)
 app.include_router(msp.router)
+app.include_router(bugreport.router)
+app.include_router(client_companies.router)
 app.include_router(layout.router)
 app.include_router(synthetic.router)
 app.include_router(oncall.router)
