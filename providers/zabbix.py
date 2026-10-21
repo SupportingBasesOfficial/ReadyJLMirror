@@ -55,14 +55,20 @@ _AVAILABILITY_MAP   = {"0": "unknown",     "1": "available",  "2": "unavailable"
 _MAINTENANCE_STATUS = {"0": "none",        "1": "active"}
 _MAINTENANCE_TYPE   = {"0": "with_data",   "1": "no_data"}
 
-# Zabbix item value_type -> normalized native value type
+# Zabbix item value_type -> normalized native value type.
+# value_type=5 (binary) was introduced in Zabbix 7.x; we treat it as TEXT
+# rather than raising — a binary item should not break the entire batch.
 _ITEM_VALUE_TYPES = {
     0: ZabbixNativeValueType.FLOAT,
     1: ZabbixNativeValueType.CHARACTER,
     2: ZabbixNativeValueType.LOG,
     3: ZabbixNativeValueType.UNSIGNED,
     4: ZabbixNativeValueType.TEXT,
+    5: ZabbixNativeValueType.TEXT,  # binary (Zabbix 7.x)
 }
+
+# Preprocessing step type IDs that produce delta values (may be negative).
+_DELTA_STEP_TYPES: frozenset[int] = frozenset({9, 10})
 
 
 def _item_operational_state(item: dict) -> ZabbixItemOperationalState:
@@ -265,20 +271,29 @@ class ZabbixClient:
         than max_hosts means the snapshot is incomplete (the domain
         requires `hosts <= MAX_HOSTS_PER_SNAPSHOT` for construction).
         """
+        # Zabbix 7.x removed host-level availability fields (available,
+        # snmp_available, ipmi_available, jmx_available) and moved them to
+        # interface objects (each interface now has its own `available` field).
+        # We request both sets; _map_host picks the right one per version.
+        is_v7 = self._v7_group_select is True
+        host_output = [
+            "hostid", "host", "name",
+            "status", "maintenance_status", "maintenance_type",
+            "error", "snmp_error",
+        ]
+        if not is_v7:
+            host_output += ["available", "snmp_available",
+                            "ipmi_available", "jmx_available"]
+
         result = _rpc(
             endpoint.api_url,
             "host.get",
             {
-                "output": [
-                    "hostid", "host", "name",
-                    "status", "available", "snmp_available",
-                    "ipmi_available", "jmx_available",
-                    "error", "snmp_error",
-                    "maintenance_status", "maintenance_type",
-                ],
+                "output": host_output,
                 "groupids": list(host_group_refs),
                 "selectInterfaces": [
-                    "interfaceid", "type", "main", "useip", "ip", "dns", "port"
+                    "interfaceid", "type", "main", "useip",
+                    "ip", "dns", "port", "available",
                 ],
                 **{sel: ["groupid", "name"]
                    for sel in self._group_select_param(endpoint)},
@@ -295,6 +310,37 @@ class ZabbixClient:
         complete = len(result) <= max_hosts
         hosts = [self._map_host(item) for item in result[:max_hosts]]
         return ZabbixHostSnapshot(hosts=tuple(hosts), complete=complete)
+
+    @staticmethod
+    def _derive_availability_from_interfaces(
+        interfaces: list[dict],
+    ) -> dict[str, str]:
+        """Zabbix 7.x: per-interface `available` replaces host-level fields.
+
+        Interface types: 1=agent, 2=snmp, 3=ipmi, 4=jmx.
+        Availability codes: 0=unknown, 1=available, 2=unavailable.
+        We pick the *main* interface of each type; if none is marked main,
+        fall back to the first interface of that type.
+        """
+        by_type: dict[int, list[dict]] = {}
+        for iface in interfaces:
+            t = int(iface.get("type", 0))
+            by_type.setdefault(t, []).append(iface)
+
+        def _best(t: int) -> str:
+            candidates = by_type.get(t, [])
+            mains = [i for i in candidates if str(i.get("main", "0")) == "1"]
+            chosen = mains[0] if mains else (candidates[0] if candidates else None)
+            if chosen is None:
+                return "unknown"
+            return _AVAILABILITY_MAP.get(str(chosen.get("available", "0")), "unknown")
+
+        return {
+            "agent": _best(1),
+            "snmp": _best(2),
+            "ipmi": _best(3),
+            "jmx": _best(4),
+        }
 
     @staticmethod
     def _map_host(item: Any) -> ZabbixHostEvidence:
@@ -388,6 +434,31 @@ class ZabbixClient:
                 maint_type = _MAINTENANCE_TYPE.get(
                     str(item.get("maintenance_type", "0")))
 
+            # Zabbix 7.x: derive availability from interface objects.
+            # Zabbix <7: use host-level availability fields.
+            # We detect version by whether the host-level field is present;
+            # this avoids a second version probe inside the static method.
+            if "available" in item:
+                agent_avail = _AVAILABILITY_MAP.get(
+                    str(item.get("available", "0")), "unknown")
+                snmp_avail = _AVAILABILITY_MAP.get(
+                    str(item.get("snmp_available", "0")), "unknown")
+                ipmi_avail = _AVAILABILITY_MAP.get(
+                    str(item.get("ipmi_available", "0")), "unknown")
+                jmx_avail = _AVAILABILITY_MAP.get(
+                    str(item.get("jmx_available", "0")), "unknown")
+            else:
+                iface_list = [
+                    dict(iface) for iface in item.get("interfaces") or []
+                    if isinstance(iface, dict)
+                ]
+                _avail = ZabbixClient._derive_availability_from_interfaces(
+                    iface_list)
+                agent_avail = _avail["agent"]
+                snmp_avail  = _avail["snmp"]
+                ipmi_avail  = _avail["ipmi"]
+                jmx_avail   = _avail["jmx"]
+
             return ZabbixHostEvidence(
                 hostid=str(item["hostid"]),
                 technical_name=str(item.get("host", "")),
@@ -399,14 +470,10 @@ class ZabbixClient:
                 tags=tags,
                 host_status=_HOST_STATUS_MAP.get(
                     str(item.get("status", "0")), "enabled"),
-                agent_availability=_AVAILABILITY_MAP.get(
-                    str(item.get("available", "0")), "unknown"),
-                snmp_availability=_AVAILABILITY_MAP.get(
-                    str(item.get("snmp_available", "0")), "unknown"),
-                ipmi_availability=_AVAILABILITY_MAP.get(
-                    str(item.get("ipmi_available", "0")), "unknown"),
-                jmx_availability=_AVAILABILITY_MAP.get(
-                    str(item.get("jmx_available", "0")), "unknown"),
+                agent_availability=agent_avail,
+                snmp_availability=snmp_avail,
+                ipmi_availability=ipmi_avail,
+                jmx_availability=jmx_avail,
                 agent_error=_err("error"),
                 snmp_error=_err("snmp_error"),
                 maintenance_status=maint_status,
@@ -435,9 +502,10 @@ class ZabbixClient:
             "item.get",
             {
                 "output": [
-                    "itemid", "hostid", "name", "key_",
+                    "itemid", "hostid", "name", "name_resolved", "key_",
                     "units", "value_type", "state", "status",
                 ],
+                "selectPreprocessing": ["type"],
                 "groupids": list(host_group_refs),
                 "limit": max_items + 1,
             },
@@ -455,19 +523,36 @@ class ZabbixClient:
         if not isinstance(item, dict) or "itemid" not in item:
             raise ProviderProtocolError("item.get malformed entry")
         try:
-            native = _ITEM_VALUE_TYPES.get(int(item.get("value_type", -1)))
-            if native is None:
-                raise ProviderProtocolError(
-                    f"item.get unknown value_type {item.get('value_type')}"
-                )
+            vt = int(item.get("value_type", -1))
+            # value_type=5 (binary, Zabbix 7.x) falls back to TEXT rather
+            # than raising — an unknown binary item must not abort the batch.
+            native = _ITEM_VALUE_TYPES.get(vt, ZabbixNativeValueType.TEXT)
+
+            # Extract preprocessing step types from selectPreprocessing output.
+            # We record only the type IDs; step details are provider-internal.
+            preprocessing_step_types: tuple[int, ...] = ()
+            raw_steps = item.get("preprocessing")
+            if isinstance(raw_steps, list):
+                step_ids: list[int] = []
+                for step in raw_steps:
+                    if isinstance(step, dict):
+                        try:
+                            step_ids.append(int(step["type"]))
+                        except (KeyError, TypeError, ValueError):
+                            pass
+                preprocessing_step_types = tuple(step_ids)
+
+            # Prefer the macro-expanded name when available (Zabbix 7.x).
+            raw_name = item.get("name_resolved") or item.get("name") or ""
             return ZabbixItemEvidence(
                 itemid=str(item["itemid"]),
                 hostid=str(item["hostid"]),
-                name=str(item.get("name", "")),
+                name=str(raw_name),
                 key=str(item.get("key_", "")),
                 unit=str(item.get("units", "")),
                 native_value_type=native,
                 operational_state=_item_operational_state(item),
+                preprocessing_step_types=preprocessing_step_types,
             )
         except (KeyError, AttributeError, TypeError, ValueError) as exc:
             raise ProviderProtocolError(
@@ -595,9 +680,11 @@ class ZabbixClient:
                 "source": 0,
                 "object": 0,
                 "output": ["eventid", "objectid", "clock", "name",
-                           "severity", "acknowledged", "r_eventid"],
+                           "severity", "acknowledged", "r_eventid",
+                           "suppressed", "cause_eventid", "opdata"],
                 "selectTags": "extend",
                 "sortfield": "eventid",
+                "sortorder": "DESC",
                 "limit": max_rows + 1,
                 **({"groupids": list(self.scope_group_ids)}
                    if self.scope_group_ids else {}),
@@ -631,6 +718,9 @@ class ZabbixClient:
                         severity=int(item.get("severity", 0)),
                         acknowledged=str(item.get("acknowledged", "0")) == "1",
                         tags=tags,
+                        suppressed=str(item.get("suppressed", "0")) == "1",
+                        cause_eventid=str(item.get("cause_eventid", "") or ""),
+                        opdata=str(item.get("opdata", "") or "")[:2048],
                     )
                 )
             except (TypeError, ValueError) as exc:
@@ -700,6 +790,8 @@ class ZabbixClient:
             {
                 "output": ["triggerid"],
                 "selectHosts": ["hostid"],
+                "sortfield": "triggerid",
+                "sortorder": "ASC",
                 "limit": max_rows,
                 **({"groupids": list(self.scope_group_ids)}
                    if self.scope_group_ids else {}),

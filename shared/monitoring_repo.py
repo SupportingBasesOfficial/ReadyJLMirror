@@ -1470,19 +1470,21 @@ class PgMetricDefinitionRepository:
                         (tenant_id, metric_definition_id,
                          monitoring_resource_id, monitoring_source_id,
                          source_instance_generation, name, value_kind, unit,
+                         has_delta_preprocessing,
                          scope_state, scope_projection_revision,
                          scope_evidence_state, definition_state,
                          definition_evidence_state,
                          last_confirmed_present_poll_epoch,
                          last_confirmed_present_poll_generation)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s,
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,
                             'in_scope', %s, 'current', 'active', 'current',
                             %s, %s)
                     """,
                     (claim.tenant_id, definition_id, resource_id,
                      claim.monitoring_source_id,
                      claim.source_instance_generation, item.name, value_kind,
-                     item.unit, claim.scope_revision,
+                     item.unit, item.has_delta_preprocessing,
+                     claim.scope_revision,
                      claim.item_definition_poll_epoch,
                      claim.item_definition_poll_generation),
                 )
@@ -1515,6 +1517,7 @@ class PgMetricDefinitionRepository:
                     """
                     UPDATE monitoring.metric_definition
                        SET name = %s, unit = %s,
+                           has_delta_preprocessing = %s,
                            scope_state = 'in_scope',
                            scope_projection_revision = %s,
                            scope_evidence_state = 'current',
@@ -1527,7 +1530,8 @@ class PgMetricDefinitionRepository:
                            updated_at = transaction_timestamp()
                      WHERE tenant_id = %s AND metric_definition_id = %s
                     """,
-                    (item.name, item.unit, claim.scope_revision, ev_state,
+                    (item.name, item.unit, item.has_delta_preprocessing,
+                     claim.scope_revision, ev_state,
                      claim.item_definition_poll_epoch,
                      claim.item_definition_poll_generation,
                      claim.tenant_id, definition_id),
@@ -1565,6 +1569,8 @@ class PgMetricDefinitionRepository:
                         "name": item.name, "key": item.key, "unit": item.unit,
                         "native_value_type": item.native_value_type.value,
                         "operational_state": item.operational_state.value,
+                        "preprocessing_step_types": list(item.preprocessing_step_types),
+                        "has_delta_preprocessing": item.has_delta_preprocessing,
                     }),
                 ),
             )
@@ -3450,8 +3456,12 @@ class PgProblemStateRepository:
                 (claim.tenant_id, problem_id),
             )
             existing = cur.fetchone()
-            metadata = json.dumps(
-                {t.key: t.value for t in prob.tags}, sort_keys=True)
+            metadata = json.dumps({
+                **{t.key: t.value for t in prob.tags},
+                "_suppressed": prob.suppressed,
+                "_opdata": prob.opdata or "",
+                "_cause_eventid": prob.cause_eventid or "",
+            }, sort_keys=True)
 
             if existing is None:
                 self._conn.execute(
@@ -3804,7 +3814,10 @@ async def list_problems(
                p.evidence_state, p.projection_revision,
                p.provider_acknowledged, p.monitoring_resource_id,
                b.provider_external_ref AS provider_eventid,
-               {_PROBLEM_SEV_RANK} AS sev_rank
+               {_PROBLEM_SEV_RANK} AS sev_rank,
+               COALESCE((p.provider_metadata->>'_suppressed')::boolean, false) AS suppressed,
+               COALESCE(p.provider_metadata->>'_opdata', '') AS opdata,
+               COALESCE(p.provider_metadata->>'_cause_eventid', '') AS cause_eventid
           FROM monitoring.monitoring_problem p
           JOIN monitoring.monitoring_problem_provider_binding b
             ON b.tenant_id = p.tenant_id AND b.problem_id = p.problem_id
@@ -3833,7 +3846,8 @@ async def list_problems(
             "severity_class", "opened_at", "resolved_at",
             "last_confirmed_at", "evidence_state", "projection_revision",
             "provider_acknowledged", "monitoring_resource_id",
-            "provider_eventid", "sev_rank")
+            "provider_eventid", "sev_rank",
+            "suppressed", "opdata", "cause_eventid")
     rows = [dict(zip(keys, r)) for r in await cur.fetchall()]
     has_more = len(rows) > limit
     items = rows[:limit]
@@ -4287,7 +4301,7 @@ async def list_resource_current_states(
         """
         SELECT c.metric_definition_id, c.monitoring_resource_id,
                c.observed_at, c.value_kind, c.canonical_value AS value,
-               d.name, d.unit
+               d.name, d.unit, d.has_delta_preprocessing
           FROM monitoring.metric_current_state c
           JOIN monitoring.metric_definition d
             ON d.tenant_id = c.tenant_id
@@ -4303,7 +4317,7 @@ async def list_resource_current_states(
     keys = (
         "metric_definition_id", "monitoring_resource_id",
         "observed_at", "value_kind", "value",
-        "name", "unit",
+        "name", "unit", "has_delta_preprocessing",
     )
     rows = [dict(zip(keys, r)) for r in await cur.fetchall()]
     for row in rows:

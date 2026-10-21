@@ -84,6 +84,7 @@ interface MetricState {
   value?: unknown;
   name: string;
   unit?: string;
+  has_delta_preprocessing?: boolean;
 }
 
 interface Problem {
@@ -835,6 +836,8 @@ function MetricCard({
   const numeric = isNumeric(metric);
   const sparkColor = ACCENT.default;
 
+  const isDelta = !!metric.has_delta_preprocessing;
+
   // Detect out-of-range percentage values (e.g. Zabbix delta items)
   const rawN = (() => {
     if (!metric.value || typeof metric.value !== "object") return null;
@@ -843,6 +846,12 @@ function MetricCard({
   })();
   const isPct = isPercent(metric.unit);
   const outOfRange = isPct && rawN !== null && (rawN < 0 || rawN > 100);
+
+  // Tooltip for out-of-range values: explain delta preprocessing when applicable
+  const outOfRangeTitle = isDelta
+    ? "Valor representa a variação em relação à leitura anterior (preprocessing delta Zabbix). " +
+      "Valores negativos ocorrem quando o contador decresce entre coletas — não é um erro."
+    : "Valor fora do intervalo esperado (0–100%). Verifique a configuração do item na fonte de monitoramento.";
 
   return (
     <div
@@ -856,8 +865,18 @@ function MetricCard({
       style={{ transition: "border-color .15s, box-shadow .15s" }}
       onClick={numeric ? onToggle : undefined}
     >
-      <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1.5 truncate leading-tight">
-        {metric.name}
+      <div className="flex items-center gap-1 mb-1.5">
+        <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider truncate leading-tight flex-1 min-w-0">
+          {metric.name}
+        </div>
+        {isDelta && !outOfRange && (
+          <span
+            title="Métrica delta — valor representa a variação entre leituras consecutivas do Zabbix (preprocessing tipo Δ). Valores podem ser negativos."
+            style={{ fontSize: 10, cursor: "help", color: "var(--text-muted)", flexShrink: 0, letterSpacing: 0 }}
+          >
+            Δ
+          </span>
+        )}
       </div>
       <div className="flex items-center gap-1.5">
         <div className="text-xl font-bold tabular-nums leading-none"
@@ -865,9 +884,9 @@ function MetricCard({
           {displayValue}
         </div>
         {outOfRange && (
-          <span title={`Valor fora do intervalo esperado (0–100%). Verifique a configuração do item na fonte de monitoramento.`}
+          <span title={outOfRangeTitle}
             style={{ fontSize: 13, cursor: "help", color: "var(--text-warning, #b45309)" }}>
-            ⚠
+            {isDelta ? "Δ" : "⚠"}
           </span>
         )}
       </div>
