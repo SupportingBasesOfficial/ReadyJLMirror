@@ -180,8 +180,9 @@ function OrgDetailPanel({ orgId, orgKind, onClose }: {
         <div className="grid grid-cols-2 gap-px bg-[var(--border)]">
           {/* Workspaces */}
           <div className="bg-[var(--surface)] p-3 space-y-1.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2 flex items-center gap-1">
               Workspaces ({data.tenants.length})
+              <InfoIcon text="Tenants que pertencem a esta organização. Um tenant é o ambiente isolado onde os usuários fazem login — cada organização pode ter vários (ex: Produção, Homologação)." position="bottom" align="left" />
             </p>
             {data.tenants.length === 0 ? (
               <p className="text-[11px] text-[var(--text-muted)]">Nenhum workspace.</p>
@@ -198,8 +199,9 @@ function OrgDetailPanel({ orgId, orgKind, onClose }: {
 
           {/* Relationships */}
           <div className="bg-[var(--surface)] p-3 space-y-1.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2 flex items-center gap-1">
               Relacionamentos ({data.relationships.length})
+              <InfoIcon text="Vínculos contratuais com outras organizações. MSP = quem presta monitoramento. Partner = delegação administrativa. A seta indica a direção: ← quem gerencia esta org, → org que esta gerencia." position="bottom" align="right" />
             </p>
             {data.relationships.length === 0 ? (
               <p className="text-[11px] text-[var(--text-muted)]">Sem relacionamentos.</p>
@@ -217,8 +219,9 @@ function OrgDetailPanel({ orgId, orgKind, onClose }: {
 
           {/* Delegated Grants */}
           <div className="bg-[var(--surface)] p-3 space-y-1.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2 flex items-center gap-1">
               Grants Ativos ({activeGrants.length})
+              <InfoIcon text="Permissões que esta organização concedeu a um principal externo (ex: técnico de MSP) para acessar um tenant específico. Cada grant define quais operações são permitidas (monitoring:read, alerting:operate, etc.)." position="bottom" align="left" />
             </p>
             {activeGrants.length === 0 ? (
               <p className="text-[11px] text-[var(--text-muted)]">Nenhum grant ativo.</p>
@@ -241,8 +244,9 @@ function OrgDetailPanel({ orgId, orgKind, onClose }: {
 
           {/* Members */}
           <div className="bg-[var(--surface)] p-3 space-y-1.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2 flex items-center gap-1">
               Membros ({data.members.length})
+              <InfoIcon text="Usuários que têm acesso a algum tenant desta organização. O papel define o nível: member = acesso básico, tenant_admin = pode gerenciar configurações do tenant." position="bottom" align="right" />
             </p>
             {data.members.length === 0 ? (
               <p className="text-[11px] text-[var(--text-muted)]">Sem membros.</p>
