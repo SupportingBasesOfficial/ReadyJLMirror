@@ -9,14 +9,22 @@ import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { X, Plus, Building2, Server, FileText, Activity, Tv2, Network, Copy, Trash2, Users, GitMerge, KeyRound, ShieldOff, ShieldCheck, Search } from "lucide-react";
+import { InfoIcon } from "@/components/ui/tooltip";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
+
+interface OrgTenant {
+  tenant_id: string;
+  display_name: string | null;
+}
 
 interface Organization {
   organization_id: string;
   display_name: string | null;
   state: string;
   created_at: string | null;
+  org_kind: "platform_operator" | "msp" | "client";
+  tenants: OrgTenant[];
 }
 
 interface Tenant {
@@ -96,6 +104,162 @@ function stateVariant(state: string): "success" | "warning" | "danger" | "muted"
   return "muted";
 }
 
+function orgKindBadge(kind: Organization["org_kind"]): { label: string; variant: "success" | "warning" | "danger" | "muted" } {
+  if (kind === "platform_operator") return { label: "Plataforma", variant: "warning" };
+  if (kind === "msp") return { label: "MSP", variant: "success" };
+  return { label: "Cliente", variant: "muted" };
+}
+
+function familyLabel(family: string): string {
+  const m: Record<string, string> = {
+    provides_monitoring_service_for: "MSP",
+    delegated_administration_for: "Partner",
+    billing_responsible_for: "Reseller",
+    contracts_platform: "Plataforma",
+    msp: "MSP", reseller: "Reseller", partner: "Partner",
+  };
+  return m[family] ?? family;
+}
+
+// ── Org 360 types ──────────────────────────────────────────────────────────────
+
+interface Org360 {
+  organization_id: string;
+  display_name: string | null;
+  state: string;
+  created_at: string;
+  tenants: { tenant_id: string; display_name: string; state: string }[];
+  relationships: {
+    relationship_id: string;
+    family: string;
+    direction: "incoming" | "outgoing";
+    other_organization_id: string;
+    state: string;
+  }[];
+  delegated_grants: {
+    grant_id: string;
+    target_tenant_id: string;
+    principal_id: string;
+    permissions: string[];
+    state: string;
+  }[];
+  members: { principal_id: string; tenant_id: string; role: string; state: string }[];
+}
+
+function OrgDetailPanel({ orgId, orgKind, onClose }: {
+  orgId: string;
+  orgKind: Organization["org_kind"];
+  onClose: () => void;
+}) {
+  const q = useQuery({
+    queryKey: ["org-360", orgId],
+    queryFn: () => api.get<Org360>(`/api/v1/platform/organizations/${orgId}`),
+  });
+  const { label, variant } = orgKindBadge(orgKind);
+  const data = q.data;
+  const activeGrants = data?.delegated_grants.filter(g => g.state === "active") ?? [];
+
+  return (
+    <div className="mt-1 mb-2 border border-[var(--border)] rounded-xl bg-[var(--surface)] overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)] bg-[var(--surface-2)]">
+        <div className="flex items-center gap-2">
+          <Building2 size={13} style={{ color: "var(--brand)" }} />
+          <span className="text-xs font-semibold">{data?.display_name || orgId}</span>
+          <Badge variant={variant}>{label}</Badge>
+          {data && <Badge variant={stateVariant(data.state)}>{data.state}</Badge>}
+        </div>
+        <button onClick={onClose} className="p-1 rounded hover:bg-[var(--surface)] text-[var(--text-muted)]">
+          <X size={12} />
+        </button>
+      </div>
+
+      {q.isLoading && <div className="flex justify-center py-6"><Spinner /></div>}
+      {q.isError && <p className="text-xs text-[var(--red)] px-4 py-3">Erro ao carregar detalhes.</p>}
+
+      {data && (
+        <div className="grid grid-cols-2 gap-px bg-[var(--border)]">
+          {/* Workspaces */}
+          <div className="bg-[var(--surface)] p-3 space-y-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+              Workspaces ({data.tenants.length})
+            </p>
+            {data.tenants.length === 0 ? (
+              <p className="text-[11px] text-[var(--text-muted)]">Nenhum workspace.</p>
+            ) : data.tenants.map(t => (
+              <div key={t.tenant_id} className="flex items-center gap-2 text-xs">
+                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  style={{ background: t.state === "active" ? "var(--green,#22c55e)" : "var(--text-muted)" }} />
+                <span className="font-medium flex-1 truncate">{t.display_name || t.tenant_id}</span>
+                <span className="font-mono text-[var(--text-muted)] text-[10px] shrink-0">{truncate(t.tenant_id, 14)}</span>
+                <Badge variant={stateVariant(t.state)}>{t.state}</Badge>
+              </div>
+            ))}
+          </div>
+
+          {/* Relationships */}
+          <div className="bg-[var(--surface)] p-3 space-y-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+              Relacionamentos ({data.relationships.length})
+            </p>
+            {data.relationships.length === 0 ? (
+              <p className="text-[11px] text-[var(--text-muted)]">Sem relacionamentos.</p>
+            ) : data.relationships.map(r => (
+              <div key={r.relationship_id} className="flex items-center gap-1.5 text-xs flex-wrap">
+                <Badge variant="muted">{familyLabel(r.family)}</Badge>
+                <span className="text-[var(--text-muted)] text-[10px]">
+                  {r.direction === "outgoing" ? "→ gerencia" : "← gerenciado por"}
+                </span>
+                <span className="font-mono text-[10px] text-[var(--text)] flex-1 truncate">{r.other_organization_id}</span>
+                <Badge variant={stateVariant(r.state)}>{r.state}</Badge>
+              </div>
+            ))}
+          </div>
+
+          {/* Delegated Grants */}
+          <div className="bg-[var(--surface)] p-3 space-y-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+              Grants Ativos ({activeGrants.length})
+            </p>
+            {activeGrants.length === 0 ? (
+              <p className="text-[11px] text-[var(--text-muted)]">Nenhum grant ativo.</p>
+            ) : activeGrants.map(g => (
+              <div key={g.grant_id} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 space-y-0.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono text-[10px] flex-1 truncate">{g.target_tenant_id}</span>
+                  <Badge variant="success">ativo</Badge>
+                </div>
+                <p className="text-[10px] text-[var(--text-muted)] font-mono truncate">{truncate(g.principal_id, 16)}</p>
+                <div className="flex flex-wrap gap-0.5">
+                  {g.permissions.slice(0, 3).map(p => (
+                    <code key={p} className="text-[9px] bg-[var(--surface-2)] border border-[var(--border)] px-1 rounded">{p}</code>
+                  ))}
+                  {g.permissions.length > 3 && <span className="text-[9px] text-[var(--text-muted)]">+{g.permissions.length - 3}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Members */}
+          <div className="bg-[var(--surface)] p-3 space-y-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+              Membros ({data.members.length})
+            </p>
+            {data.members.length === 0 ? (
+              <p className="text-[11px] text-[var(--text-muted)]">Sem membros.</p>
+            ) : data.members.map((m, i) => (
+              <div key={m.principal_id + i} className="flex items-center gap-1.5 text-xs">
+                <span className="font-mono text-[10px] text-[var(--text-muted)] flex-1 truncate">{truncate(m.principal_id, 14)}</span>
+                <Badge variant="muted">{m.role}</Badge>
+                <span className="text-[10px] text-[var(--text-muted)] truncate max-w-[80px]">{truncate(m.tenant_id, 10)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function capLabel(cap: string): string {
   return (
     { monitoring: "Monitoring", alerting: "Alerting", itsm: "ITSM", aiops: "AIOps" }[cap] ?? cap
@@ -141,6 +305,7 @@ function CreateOrgModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [orgKind, setOrgKind] = useState<Organization["org_kind"]>("client");
   const [error, setError] = useState<string | null>(null);
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -150,6 +315,7 @@ function CreateOrgModal({ onClose }: { onClose: () => void }) {
       api.post<Organization>("/api/v1/platform/organizations", {
         organization_id: slug.trim(),
         display_name: displayName.trim() || name.trim() || undefined,
+        org_kind: orgKind,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-organizations"] });
@@ -194,6 +360,20 @@ function CreateOrgModal({ onClose }: { onClose: () => void }) {
             placeholder="Acme Corporation"
           />
         </div>
+        <div>
+          <label className="block text-xs text-[var(--text-muted)] mb-1">
+            Tipo <span className="text-[var(--red)]">*</span>
+          </label>
+          <select
+            className={inputCls}
+            value={orgKind}
+            onChange={(e) => setOrgKind(e.target.value as Organization["org_kind"])}
+          >
+            <option value="client">Cliente</option>
+            <option value="msp">MSP / Integrador</option>
+            <option value="platform_operator">Operador da Plataforma</option>
+          </select>
+        </div>
         {error && <p className="text-xs text-[var(--red)]">{error}</p>}
         <div className="flex gap-2 pt-1">
           <Button
@@ -217,6 +397,7 @@ function OrgsTab() {
   const { toast } = useToast();
   const [showCreate, setShowCreate] = useState(false);
   const [confirmSuspend, setConfirmSuspend] = useState<Organization | null>(null);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
 
   const q = useQuery({
     queryKey: ["platform-organizations"],
@@ -272,9 +453,30 @@ function OrgsTab() {
           <table className="w-full text-xs min-w-[520px]">
             <thead>
               <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
-                <th className="text-left px-2 py-1.5 font-medium">Nome</th>
-                <th className="text-left px-2 py-1.5 font-medium">Slug</th>
-                <th className="text-left px-2 py-1.5 font-medium">Estado</th>
+                <th className="text-left px-2 py-1.5 font-medium">
+                  <span className="inline-flex items-center">
+                    Nome
+                    <InfoIcon text="Nome da organização. Abaixo aparecem os workspaces (tenants) que pertencem a ela — são os ambientes que os usuários acessam ao fazer login." position="bottom" align="left" />
+                  </span>
+                </th>
+                <th className="text-left px-2 py-1.5 font-medium">
+                  <span className="inline-flex items-center">
+                    Tipo
+                    <InfoIcon text="Cliente: empresa que contrata o serviço de monitoramento. MSP: parceiro que gerencia clientes em nome da plataforma. Plataforma: o próprio operador do JLMirror." position="bottom" />
+                  </span>
+                </th>
+                <th className="text-left px-2 py-1.5 font-medium">
+                  <span className="inline-flex items-center">
+                    ID
+                    <InfoIcon text="Identificador único e imutável da organização no sistema. Usado em integrações e APIs." position="bottom" />
+                  </span>
+                </th>
+                <th className="text-left px-2 py-1.5 font-medium">
+                  <span className="inline-flex items-center">
+                    Estado
+                    <InfoIcon text="active: organização operacional, usuários podem acessar. suspended: acesso bloqueado para todos os tenants desta organização." position="bottom" align="right" />
+                  </span>
+                </th>
                 <th className="text-left px-2 py-1.5 font-medium">Criado</th>
                 <th className="px-2 py-1.5" />
               </tr>
@@ -283,10 +485,27 @@ function OrgsTab() {
               {orgs.map((org) => (
                 <tr
                   key={org.organization_id}
-                  className="border-b border-[var(--border)] hover:bg-[var(--surface-2)]"
+                  className="border-b border-[var(--border)] hover:bg-[var(--surface-2)] cursor-pointer"
+                  onClick={() => setSelectedOrgId(prev => prev === org.organization_id ? null : org.organization_id)}
                 >
-                  <td className="px-2 py-2 font-medium" style={{ color: "var(--text)" }}>
-                    {org.display_name || org.organization_id}
+                  <td className="px-2 py-2">
+                    <div className="font-medium flex items-center gap-1.5" style={{ color: selectedOrgId === org.organization_id ? "var(--brand)" : "var(--text)" }}>
+                      <span>{org.display_name || org.organization_id}</span>
+                      <span className="text-[10px] text-[var(--text-muted)]">{selectedOrgId === org.organization_id ? "▲" : "▼"}</span>
+                    </div>
+                    {org.tenants.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1 mt-1">
+                        {org.tenants.map(t => (
+                          <span key={t.tenant_id} className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--surface-2)] text-[var(--text-muted)] font-mono">
+                            {t.display_name || t.tenant_id}
+                          </span>
+                        ))}
+                        <InfoIcon text="Workspaces (tenants) desta organização. São os ambientes que aparecem na tela de login para os usuários desta org." />
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-2 py-2">
+                    {(() => { const k = orgKindBadge(org.org_kind); return <Badge variant={k.variant}>{k.label}</Badge>; })()}
                   </td>
                   <td className="px-2 py-2 font-mono text-[var(--text-muted)]">{org.organization_id}</td>
                   <td className="px-2 py-2">
@@ -321,6 +540,17 @@ function OrgsTab() {
           </table>
         </div>
       )}
+
+      {selectedOrgId && (() => {
+        const org = orgs.find(o => o.organization_id === selectedOrgId);
+        return org ? (
+          <OrgDetailPanel
+            orgId={selectedOrgId}
+            orgKind={org.org_kind}
+            onClose={() => setSelectedOrgId(null)}
+          />
+        ) : null;
+      })()}
 
       {showCreate && <CreateOrgModal onClose={() => setShowCreate(false)} />}
 
@@ -1479,7 +1709,7 @@ function RelationshipsTab() {
           <div className="space-y-1">
             {(relsQ.data ?? []).map(r => (
               <div key={r.relationship_id} className="flex items-center gap-3 text-xs bg-[var(--surface-2)] rounded-lg px-3 py-2.5">
-                <Badge variant="muted">{r.family}</Badge>
+                <Badge variant="muted">{familyLabel(r.family)}</Badge>
                 <span className="font-medium">{orgName(r.source_organization_id)}</span>
                 <span className="text-[var(--text-muted)]">→</span>
                 <span className="font-medium">{orgName(r.target_organization_id)}</span>
@@ -1854,6 +2084,7 @@ interface TreeOrg {
   organization_id: string;
   display_name: string | null;
   state: string;
+  org_kind?: Organization["org_kind"];
 }
 
 interface TreeTenant {
@@ -1936,9 +2167,10 @@ function TeiaTab() {
                     <Building2 size={15} />
                   </span>
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm font-semibold truncate block">
-                      {org.display_name || org.organization_id}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-semibold truncate">{org.display_name || org.organization_id}</span>
+                      {org.org_kind && (() => { const k = orgKindBadge(org.org_kind!); return <Badge variant={k.variant}>{k.label}</Badge>; })()}
+                    </div>
                     <span className="text-[10px] font-mono text-[var(--text-muted)]">{org.organization_id}</span>
                   </div>
                   <span style={{ color: stateColor(org.state) }} className="text-xs">{org.state}</span>

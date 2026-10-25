@@ -38,9 +38,13 @@ async def _require_platform_admin(request: Request) -> str:
     return ctx["principal_id"]
 
 
+_ORG_KINDS = {"platform_operator", "msp", "client"}
+
+
 class OrganizationCreate(BaseModel):
     organization_id: str
     display_name: str
+    org_kind: str = "client"
 
 
 @router.get("/organizations")
@@ -48,30 +52,46 @@ async def list_organizations(request: Request) -> list[dict]:
     await _require_platform_admin(request)
     async with db_connection() as conn:
         cur = await conn.execute(
-            "SELECT organization_id, display_name, state, created_at "
-            "FROM g1.organizations ORDER BY organization_id")
+            """
+            SELECT o.organization_id, o.display_name, o.state, o.created_at, o.org_kind,
+                   COALESCE(
+                       json_agg(json_build_object('tenant_id', t.tenant_id, 'display_name', t.display_name)
+                           ORDER BY t.tenant_id)
+                       FILTER (WHERE t.tenant_id IS NOT NULL),
+                       '[]'
+                   ) AS tenants
+            FROM g1.organizations o
+            LEFT JOIN g1.tenants t ON t.organization_id = o.organization_id
+            GROUP BY o.organization_id, o.display_name, o.state, o.created_at, o.org_kind
+            ORDER BY o.organization_id
+            """)
         return [{"organization_id": r[0], "display_name": r[1],
                  "state": r[2],
-                 "created_at": r[3].isoformat()}
+                 "created_at": r[3].isoformat(),
+                 "org_kind": r[4],
+                 "tenants": r[5]}
                 for r in await cur.fetchall()]
 
 
 @router.post("/organizations", status_code=201)
 async def create_organization(request: Request,
                               body: OrganizationCreate) -> dict:
+    if body.org_kind not in _ORG_KINDS:
+        raise HTTPException(status_code=422,
+                            detail=f"org_kind must be one of {sorted(_ORG_KINDS)}")
     actor = await _require_platform_admin(request)
     async with db_tenant_connection("platform") as conn:
         await conn.execute(
-            "INSERT INTO g1.organizations (organization_id, "
-            "display_name) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-            (body.organization_id, body.display_name))
+            "INSERT INTO g1.organizations (organization_id, display_name, org_kind) "
+            "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            (body.organization_id, body.display_name, body.org_kind))
         await record_audit_event(
             conn, "platform",
             action="platform.organization.created",
             actor_kind="platform_admin", actor_id=actor,
             subject_type="organization",
             subject_id=body.organization_id,
-            detail={"display_name": body.display_name})
+            detail={"display_name": body.display_name, "org_kind": body.org_kind})
         await conn.commit()
     return {"organization_id": body.organization_id}
 
@@ -261,7 +281,7 @@ async def organization_360(request: Request,
     await _require_platform_admin(request)
     async with db_connection() as conn:
         cur = await conn.execute(
-            "SELECT organization_id, display_name, state, created_at "
+            "SELECT organization_id, display_name, state, created_at, org_kind "
             "FROM g1.organizations WHERE organization_id = %s",
             (organization_id,))
         org = await cur.fetchone()
@@ -320,6 +340,7 @@ async def organization_360(request: Request,
     return {
         "organization_id": org[0], "display_name": org[1],
         "state": org[2], "created_at": org[3].isoformat(),
+        "org_kind": org[4],
         "tenants": tenants, "relationships": relationships,
         "delegated_grants": grants, "members": members,
     }
@@ -531,14 +552,82 @@ class CommercialAccountCreate(BaseModel):
 
 @router.get("/commercial-accounts")
 async def list_commercial_accounts(request: Request) -> list[dict]:
+    """Return commercial accounts with nested contracts and entitlements.
+
+    Field names are aligned with the frontend CommercialAccount interface:
+    commercial_account_id (was account_id), name (org display_name fallback),
+    org_id (organization_id), contracts[], entitlements[].
+    """
     await _require_platform_admin(request)
     async with db_connection() as conn:
         cur = await conn.execute(
-            "SELECT account_id, organization_id, state, created_at "
-            "FROM g1.commercial_accounts ORDER BY account_id")
-        return [{"account_id": r[0], "organization_id": r[1],
-                 "state": r[2], "created_at": r[3].isoformat()}
-                for r in await cur.fetchall()]
+            """
+            SELECT ca.account_id,
+                   COALESCE(o.display_name, ca.account_id) AS name,
+                   ca.organization_id, ca.state, ca.created_at
+              FROM g1.commercial_accounts ca
+              LEFT JOIN g1.organizations o USING (organization_id)
+             ORDER BY ca.account_id
+            """)
+        accounts = [{"commercial_account_id": r[0], "name": r[1],
+                     "org_id": r[2], "state": r[3],
+                     "created_at": r[4].isoformat()}
+                    for r in await cur.fetchall()]
+
+        if not accounts:
+            return accounts
+
+        account_ids = [a["commercial_account_id"] for a in accounts]
+
+        cur = await conn.execute(
+            """
+            SELECT contract_id, account_id, plan_ref, state,
+                   effective_from, effective_until
+              FROM g1.contracts WHERE account_id = ANY(%s)
+            """, (account_ids,))
+        contracts_by_account: dict[str, list] = {}
+        all_contract_ids: list[str] = []
+        for r in await cur.fetchall():
+            cid, aid, plan_ref, state, eff_from, eff_until = r
+            contracts_by_account.setdefault(aid, []).append({
+                "contract_id": cid,
+                "commercial_account_id": aid,
+                "plan_ref": plan_ref,
+                "state": state,
+                "effective_from": eff_from.isoformat() if eff_from else None,
+                "effective_until": eff_until.isoformat() if eff_until else None,
+            })
+            all_contract_ids.append(cid)
+
+        entitlements_by_account: dict[str, list] = {}
+        if all_contract_ids:
+            contract_to_account = {
+                c["contract_id"]: c["commercial_account_id"]
+                for cs in contracts_by_account.values()
+                for c in cs
+            }
+            cur = await conn.execute(
+                """
+                SELECT entitlement_id, contract_id, capability, state
+                  FROM g1.entitlements WHERE contract_id = ANY(%s)
+                """, (all_contract_ids,))
+            for r in await cur.fetchall():
+                eid, cid, cap, state = r
+                aid = contract_to_account.get(cid)
+                if aid:
+                    entitlements_by_account.setdefault(aid, []).append({
+                        "entitlement_id": eid,
+                        "contract_id": cid,
+                        "capability": cap,
+                        "state": state,
+                    })
+
+        for acc in accounts:
+            aid = acc["commercial_account_id"]
+            acc["contracts"] = contracts_by_account.get(aid, [])
+            acc["entitlements"] = entitlements_by_account.get(aid, [])
+
+    return accounts
 
 
 @router.post("/commercial-accounts", status_code=201)
