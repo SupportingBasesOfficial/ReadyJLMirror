@@ -1290,9 +1290,10 @@ function HealthTab() {
           <p className="text-xs text-[var(--text-muted)] py-2">Nenhum registro de uso encontrado para este período.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs min-w-[520px]">
+            <table className="w-full text-xs min-w-[600px]">
               <thead>
                 <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
+                  <th className="text-left px-2 py-1.5 font-medium">Organização</th>
                   <th className="text-left px-2 py-1.5 font-medium">Tenant</th>
                   <th className="text-left px-2 py-1.5 font-medium">Métrica</th>
                   <th className="text-right px-2 py-1.5 font-medium">Quantidade</th>
@@ -1301,23 +1302,37 @@ function HealthTab() {
                 </tr>
               </thead>
               <tbody>
-                {(usageQ.data ?? []).map((m) => (
-                  <tr key={m.usage_id} className="border-b border-[var(--border)]">
-                    <td className="px-2 py-1.5 font-mono text-[var(--text-muted)]">
-                      {truncate(m.tenant_id, 8)}
-                    </td>
-                    <td className="px-2 py-1.5">{m.meter}</td>
-                    <td className="px-2 py-1.5 text-right font-mono tabular-nums">
-                      {m.quantity.toFixed(2)}
-                    </td>
-                    <td className="px-2 py-1.5 text-[var(--text-muted)]">
-                      {fmt(m.window_start)}
-                    </td>
-                    <td className="px-2 py-1.5 text-[var(--text-muted)]">
-                      {fmt(m.window_end)}
-                    </td>
-                  </tr>
-                ))}
+                {(usageQ.data ?? []).map((m) => {
+                  const tenant = tenants.find(t => t.tenant_id === m.tenant_id);
+                  const org = tenant ? orgs.find(o => o.organization_id === tenant.organization_id) : null;
+                  const { label: kindLabel, variant: kindVariant } = org ? orgKindBadge(org.org_kind) : { label: "—", variant: "muted" as const };
+                  return (
+                    <tr key={m.usage_id} className="border-b border-[var(--border)]">
+                      <td className="px-2 py-1.5">
+                        {org ? (
+                          <div className="flex items-center gap-1">
+                            <span className="truncate max-w-[100px]">{org.display_name || org.organization_id}</span>
+                            <Badge variant={kindVariant}>{kindLabel}</Badge>
+                          </div>
+                        ) : <span className="text-[var(--text-muted)]">—</span>}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <span className="font-medium">{tenant?.display_name || ""}</span>
+                        <span className="text-[var(--text-muted)] font-mono ml-1">{truncate(m.tenant_id, 8)}</span>
+                      </td>
+                      <td className="px-2 py-1.5">{m.meter}</td>
+                      <td className="px-2 py-1.5 text-right font-mono tabular-nums">
+                        {m.quantity.toFixed(2)}
+                      </td>
+                      <td className="px-2 py-1.5 text-[var(--text-muted)]">
+                        {fmt(m.window_start)}
+                      </td>
+                      <td className="px-2 py-1.5 text-[var(--text-muted)]">
+                        {fmt(m.window_end)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1604,6 +1619,8 @@ function RelationshipsTab() {
   const qc = useQueryClient();
   const [showCreateRel, setShowCreateRel] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
+  const [confirmEndRel, setConfirmEndRel] = useState<string | null>(null);
+  const [showTransfer, setShowTransfer] = useState(false);
 
   const relsQ = useQuery({
     queryKey: ["platform-relationships"],
@@ -1641,6 +1658,16 @@ function RelationshipsTab() {
     onError: (e: Error) => toast(e.message || "Erro", "error"),
   });
 
+  const endRel = useMutation({
+    mutationFn: (id: string) => api.post(`/api/v1/platform/relationships/${id}/end`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["platform-relationships"] });
+      toast("Relacionamento encerrado", "success");
+      setConfirmEndRel(null);
+    },
+    onError: (e: Error) => toast(e.message || "Erro ao encerrar", "error"),
+  });
+
   const revokeGrant = useMutation({
     mutationFn: (id: string) => api.post(`/api/v1/platform/delegated-grants/${id}/revoke`, {}),
     onSuccess: () => {
@@ -1664,9 +1691,14 @@ function RelationshipsTab() {
       <Card>
         <div className="flex items-center justify-between mb-4">
           <span className="text-sm font-semibold">Relacionamentos MSP</span>
-          <Button size="sm" onClick={() => setShowCreateRel(true)}>
-            <Plus size={13} /> Novo relacionamento
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setShowTransfer(true)}>
+              <GitMerge size={13} /> Transferir prestador
+            </Button>
+            <Button size="sm" onClick={() => setShowCreateRel(true)}>
+              <Plus size={13} /> Novo relacionamento
+            </Button>
+          </div>
         </div>
 
         {showCreateRel && (
@@ -1714,6 +1746,15 @@ function RelationshipsTab() {
                 <span className="text-[var(--text-muted)]">→</span>
                 <span className="font-medium">{orgName(r.target_organization_id)}</span>
                 <Badge variant={stateVariant(r.state)} className="ml-auto">{r.state}</Badge>
+                {r.state === "active" && (
+                  <button
+                    onClick={() => setConfirmEndRel(r.relationship_id)}
+                    className="p-1 rounded hover:bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--red,#ef4444)] shrink-0"
+                    title="Encerrar relacionamento"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -1766,11 +1807,194 @@ function RelationshipsTab() {
           onCancel={() => setConfirmRevoke(null)}
         />
       )}
+
+      {confirmEndRel && (
+        <ConfirmModal
+          title="Encerrar relacionamento"
+          description="O relacionamento será encerrado. Grants vinculados permanecem até serem revogados manualmente."
+          confirmLabel="Encerrar"
+          destructive
+          onConfirm={() => endRel.mutate(confirmEndRel)}
+          onCancel={() => setConfirmEndRel(null)}
+        />
+      )}
+
+      {showTransfer && (
+        <ServiceProviderTransferModal
+          orgs={orgs}
+          onClose={() => setShowTransfer(false)}
+          onSuccess={() => {
+            qc.invalidateQueries({ queryKey: ["platform-relationships"] });
+            qc.invalidateQueries({ queryKey: ["platform-grants"] });
+            setShowTransfer(false);
+          }}
+        />
+      )}
     </div>
   );
 }
 
+// ── Service Provider Transfer Modal ───────────────────────────────────────────
+
+function ServiceProviderTransferModal({
+  orgs,
+  onClose,
+  onSuccess,
+}: {
+  orgs: Organization[];
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [targetOrgId, setTargetOrgId] = useState("");
+  const [fromOrgId, setFromOrgId] = useState("");
+  const [toOrgId, setToOrgId] = useState("");
+  const [result, setResult] = useState<{
+    fenced_grants: string[];
+    ended_relationships: string[];
+    successor_relationships: string[];
+  } | null>(null);
+
+  const transfer = useMutation({
+    mutationFn: () =>
+      api.post<{
+        fenced_grants: string[];
+        ended_relationships: string[];
+        successor_relationships: string[];
+      }>("/api/v1/platform/service-provider-transfer", {
+        target_organization_id: targetOrgId,
+        from_organization_id: fromOrgId,
+        to_organization_id: toOrgId,
+      }),
+    onSuccess: (data) => {
+      setResult(data);
+      toast("Transferência concluída", "success");
+      onSuccess();
+    },
+    onError: (e: Error) => toast(e.message || "Erro na transferência", "error"),
+  });
+
+  const orgName = (id: string) => orgs.find(o => o.organization_id === id)?.display_name || id;
+
+  const mspOrgs = orgs.filter(o => o.org_kind === "msp");
+  const clientOrgs = orgs.filter(o => o.org_kind === "client");
+
+  if (result) {
+    return (
+      <Modal onClose={onClose}>
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <span style={{ color: "var(--green,#22c55e)", fontSize: 20 }}>✓</span>
+            <h3 className="text-sm font-semibold">Transferência concluída</h3>
+          </div>
+          <div className="space-y-1.5 text-xs">
+            <div className="flex justify-between">
+              <span className="text-[var(--text-muted)]">Cliente transferido</span>
+              <span className="font-medium">{orgName(targetOrgId)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-[var(--text-muted)]">Prestador anterior</span>
+              <span>{orgName(fromOrgId)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-[var(--text-muted)]">Novo prestador</span>
+              <span>{orgName(toOrgId)}</span>
+            </div>
+          </div>
+          <div className="rounded-lg bg-[var(--surface-2)] border border-[var(--border)] p-3 space-y-1.5 text-[11px] text-[var(--text-muted)]">
+            <p>Grants revogados: <span className="font-mono text-[var(--text)]">{result.fenced_grants.length}</span></p>
+            <p>Relacionamentos encerrados: <span className="font-mono text-[var(--text)]">{result.ended_relationships.length}</span></p>
+            <p>Novos relacionamentos: <span className="font-mono text-[var(--text)]">{result.successor_relationships.length}</span></p>
+          </div>
+          <Button className="w-full" onClick={onClose}>Fechar</Button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold">Transferir prestador de serviço</h3>
+          <p className="text-xs text-[var(--text-muted)] mt-1">
+            Move um cliente de um MSP para outro. O prestador antigo perde todos os grants e
+            relacionamentos; o novo assume as mesmas famílias.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">Cliente a transferir *</label>
+            <select className={inputCls} value={targetOrgId} onChange={(e) => setTargetOrgId(e.target.value)}>
+              <option value="">Selecione o cliente…</option>
+              {clientOrgs.map(o => (
+                <option key={o.organization_id} value={o.organization_id}>
+                  {o.display_name || o.organization_id}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">Prestador atual (saindo) *</label>
+            <select className={inputCls} value={fromOrgId} onChange={(e) => setFromOrgId(e.target.value)}>
+              <option value="">Selecione o MSP atual…</option>
+              {mspOrgs.filter(o => o.organization_id !== toOrgId).map(o => (
+                <option key={o.organization_id} value={o.organization_id}>
+                  {o.display_name || o.organization_id}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">Novo prestador (entrando) *</label>
+            <select className={inputCls} value={toOrgId} onChange={(e) => setToOrgId(e.target.value)}>
+              <option value="">Selecione o novo MSP…</option>
+              {mspOrgs.filter(o => o.organization_id !== fromOrgId).map(o => (
+                <option key={o.organization_id} value={o.organization_id}>
+                  {o.display_name || o.organization_id}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {targetOrgId && fromOrgId && toOrgId && (
+          <div className="rounded-lg bg-[color-mix(in_srgb,var(--yellow,#f59e0b)_8%,transparent)] border border-[color-mix(in_srgb,var(--yellow,#f59e0b)_30%,transparent)] p-3 text-[11px] space-y-0.5">
+            <p className="font-semibold" style={{ color: "var(--yellow,#f59e0b)" }}>Atenção — operação irreversível</p>
+            <p className="text-[var(--text-muted)]">
+              Todos os grants do <strong>{orgName(fromOrgId)}</strong> sobre{" "}
+              <strong>{orgName(targetOrgId)}</strong> serão revogados e os relacionamentos
+              encerrados. O <strong>{orgName(toOrgId)}</strong> assume como novo prestador.
+            </p>
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <Button
+            className="flex-1"
+            onClick={() => transfer.mutate()}
+            disabled={!targetOrgId || !fromOrgId || !toOrgId || fromOrgId === toOrgId || transfer.isPending}
+          >
+            {transfer.isPending ? <Spinner className="w-3 h-3" /> : "Executar transferência"}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Usuários (cross-tenant) ────────────────────────────────────────────────────
+
+interface KcUserTenant {
+  tenant_id: string;
+  tenant_name: string | null;
+  role: string;
+  state: string;
+  organization_id: string;
+  organization_name: string | null;
+}
 
 interface KcUser {
   user_id: string;
@@ -1778,6 +2002,7 @@ interface KcUser {
   firstName: string;
   lastName: string;
   enabled: boolean;
+  tenants?: KcUserTenant[];
 }
 
 function UsersTab() {
@@ -1866,10 +2091,24 @@ function UsersTab() {
         {(searchQ.data ?? []).length > 0 && (
           <div className="space-y-1">
             {(searchQ.data ?? []).map((u) => (
-              <div key={u.user_id} className="flex items-center gap-3 text-xs bg-[var(--surface-2)] rounded-lg px-3 py-2.5">
+              <div key={u.user_id} className="flex items-start gap-3 text-xs bg-[var(--surface-2)] rounded-lg px-3 py-2.5">
                 <div className="flex-1 min-w-0">
                   <p className="font-medium truncate">{[u.firstName, u.lastName].filter(Boolean).join(" ") || u.email}</p>
                   <p className="text-[var(--text-muted)] text-[10px] truncate">{u.email}</p>
+                  {(u.tenants ?? []).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {(u.tenants ?? []).map((t) => (
+                        <span key={t.tenant_id} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]">
+                          <span className="font-medium text-[var(--text)]">{t.tenant_name || t.tenant_id}</span>
+                          <span className="opacity-60">·</span>
+                          <span>{t.role === "tenant_admin" ? "admin" : "membro"}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {(u.tenants ?? []).length === 0 && searched && (
+                    <p className="text-[10px] text-[var(--text-muted)] opacity-60 mt-0.5">sem tenant</p>
+                  )}
                 </div>
                 <Badge variant={u.enabled ? "success" : "muted"}>{u.enabled ? "ativo" : "inativo"}</Badge>
                 <div className="flex items-center gap-1 shrink-0">

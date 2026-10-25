@@ -272,6 +272,31 @@ async def revoke_grant(request: Request, grant_id: str) -> dict:
     return {"grant_id": grant_id, "state": "revoked"}
 
 
+@router.post("/relationships/{relationship_id}/end")
+async def end_relationship(request: Request, relationship_id: str) -> dict:
+    """End an active organization relationship."""
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        cur = await conn.execute(
+            """
+            UPDATE g1.organization_relationships
+               SET state = 'ended',
+                   effective_until = transaction_timestamp()
+             WHERE relationship_id = %s AND state = 'active'
+            """, (relationship_id,))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404,
+                                detail="relationship not found or not active")
+        await record_audit_event(
+            conn, "platform",
+            action="platform.relationship.ended",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="organization_relationship",
+            subject_id=relationship_id)
+        await conn.commit()
+    return {"relationship_id": relationship_id, "state": "ended"}
+
+
 @router.get("/organizations/{organization_id}")
 async def organization_360(request: Request,
                            organization_id: str) -> dict:
@@ -1053,15 +1078,52 @@ async def provision_user(request: Request, body: UserProvision,
 
 @router.get("/users")
 async def search_users(request: Request, q: str = "") -> list[dict]:
-    """Search Keycloak users by email or name fragment."""
+    """Search Keycloak users by email or name fragment, enriched with tenant memberships."""
     await _require_platform_admin(request)
     from shared import keycloak_admin
     try:
-        return await keycloak_admin.search_users(q, max_results=50)
+        kc_users = await keycloak_admin.search_users(q, max_results=50)
     except httpx.HTTPStatusError as exc:
         raise HTTPException(
             status_code=502,
             detail=f"Keycloak error: {exc.response.status_code}")
+
+    if not kc_users:
+        return kc_users
+
+    user_ids = [u["user_id"] for u in kc_users if u.get("user_id")]
+    memberships_by_user: dict[str, list[dict]] = {}
+    if user_ids:
+        async with db_connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT p.idp_subject_ref,
+                       m.tenant_id, t.display_name,
+                       m.role, m.state,
+                       o.organization_id, o.display_name
+                  FROM g1.principals p
+                  JOIN g1.tenant_memberships m USING (principal_id)
+                  JOIN g1.tenants t USING (tenant_id)
+                  JOIN g1.organizations o
+                    ON o.organization_id = t.organization_id
+                 WHERE p.idp_subject_ref = ANY(%s)
+                   AND m.state = 'active'
+                """, (user_ids,))
+            for r in await cur.fetchall():
+                idp_ref = r[0]
+                memberships_by_user.setdefault(idp_ref, []).append({
+                    "tenant_id": r[1],
+                    "tenant_name": r[2],
+                    "role": r[3],
+                    "state": r[4],
+                    "organization_id": r[5],
+                    "organization_name": r[6],
+                })
+
+    for u in kc_users:
+        u["tenants"] = memberships_by_user.get(u.get("user_id", ""), [])
+
+    return kc_users
 
 
 @router.post("/users/{user_id}/disable")
