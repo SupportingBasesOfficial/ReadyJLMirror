@@ -1,0 +1,22 @@
+{
+    email {$CADDY_ACME_EMAIL}
+}
+
+# ── Aplicação principal (BFF) ─────────────────────────────────────────────────
+{$PUBLIC_DOMAIN} {
+    encode gzip zstd
+
+    # Service worker precisa de Referrer-Policy sem downgrade
+    header Referrer-Policy "strict-origin-when-cross-origin"
+    header X-Content-Type-Options "nosniff"
+    header X-Frame-Options "DENY"
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+    reverse_proxy bff:8080
+}
+
+# ── Keycloak (autenticação) ───────────────────────────────────────────────────
+{$KC_DOMAIN} {
+    encode gzip zstd
+    reverse_proxy keycloak:8080
+}
