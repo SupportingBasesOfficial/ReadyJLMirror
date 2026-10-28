@@ -5,6 +5,24 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Não lançado] — wave2-intelligence-modules
+
+### Adicionado
+- **APM — API Performance Monitor** — middleware `APMMiddleware` em `main.py` que registra método, path, status code e latência de cada chamada `/api/v1/*` na tabela `g1.apm_request_log`; endpoints `GET /api/v1/apm/overview` (p50/p95/p99, taxa de erro, top 20 endpoints, volume por hora) e `DELETE /api/v1/apm/purge` (retenção 7 dias); `APMPage` com stat tiles, SVG bar chart de volume horário e tabela de endpoints com destaque de latência por severidade
+- **Config Drift** — tabelas `monitoring.config_baseline` e `config_drift_event`; 8 endpoints CRUD para baselines, scan de desvios, acknowledge/resolve de eventos; `ConfigDriftPage` com abas (Eventos / Baselines), filtro por estado, linha de KPI e formulário inline de adição de baseline
+- **Feature Flags** — tabela `g1.feature_flag` com 14 flags padrão por tenant (aiops, finops, synthetic, oncall, kb, drift, executive, reports, automation, sla, maintenance, chatops, push, client_portal); endpoints `GET/PUT/POST /api/v1/feature-flags`; `FeatureFlagsPage` com toggles, seção beta, restore-to-defaults, guards de permissão `tenant:admin`
+- **Tenant Settings** — tabela `g1.tenant_settings` (SMTP, notificações, timezone, idioma); endpoints `GET/PUT /api/v1/tenant-settings` e `POST /api/v1/tenant-settings/smtp-test`; `TenantSettingsPage` com 3 abas (SMTP / Branding / Preferências) com teste de envio de e-mail
+- **Executive Dashboard** — endpoint `GET /api/v1/executive/overview` com KPIs de alertas, incidentes, mudanças, fontes de monitoramento e violações de SLA 30 d; `ExecutiveDashboardPage` com stat tiles e top-tenants por volume (platform admin)
+- **Account Security** — endpoints de sessões ativas Keycloak, revogação individual, TOTP MFA (QR code), LGPD export; `AccountSecurityPage` com abas (Sessões / MFA / Privacidade)
+- **AIOps Avançado** — detecção de anomalias, previsões de falha, planejamento de capacidade; 3 novas abas em `AIOpsPage`
+
+### Corrigido
+- `account_security.py` — import corrigido: `shared.settings` → `shared.config`
+- `config_drift.py` — endpoint DELETE retorna JSON body (FastAPI rejeita status 204 + body)
+- `DeviceDetail.tsx` — pontos do gráfico ordenados por timestamp antes da renderização
+
+---
+
 ## [Não lançado] — feat/g11-incident-response
 
 ### Adicionado
