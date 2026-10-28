@@ -5,6 +5,12 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Não lançado] — wave1-2-3-backlog-recovery
+
+### Adicionado
+- **Push Notifications** — Web Push API com VAPID (chaves geradas em `.env`); service worker `public/sw.js` com trigger-only pattern (fetch `/push/latest`); hook `usePushNotifications`; endpoints `GET /vapid-public-key`, `POST /subscribe`, `DELETE /unsubscribe`, `POST /send-test`; 4ª aba "Notificações Push" em `AccountSecurityPage`
+- **Client Portal** — visão read-only simplificada para clientes finais do MSP; endpoints `GET /api/v1/portal/overview|alerts|incidents|sla|status`; `ClientPortalPage` com header de status (Operacional / Degradado / Interrupção), KPI tiles, tabelas de alertas e incidentes; auto-refresh 2 min; nav item "Portal do Cliente" visível para todos os autenticados
+
 ## [Não lançado] — wave2-intelligence-modules
 
 ### Adicionado
