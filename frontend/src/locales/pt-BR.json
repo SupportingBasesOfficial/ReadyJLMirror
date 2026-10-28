@@ -11,6 +11,7 @@
     "reports": "Relatórios",
     "aiops": "AIOps",
     "finops": "FinOps",
+    "executive": "Executivo",
     "monitoring": "Monitoramento",
     "inventory": "Inventário",
     "teia": "Teia",
@@ -726,6 +727,49 @@
     "colHealth": "Saúde",
     "colLastSeen": "Última vez visto"
   },
+  "executive": {
+    "title": "Dashboard Executivo",
+    "scope_platform": "Agregação da plataforma — todos os tenants",
+    "scope_tenant": "Visão do tenant",
+    "error": "Falha ao carregar visão executiva.",
+    "kpi": {
+      "alerts_active": "Alertas Ativos",
+      "alerts_resolved_sub": "{{n}} resolvidos em 24 h",
+      "incidents_open": "Incidentes Abertos",
+      "incidents_total_sub": "{{n}} no total",
+      "changes_active": "Mudanças Ativas",
+      "changes_total_sub": "{{n}} no total",
+      "sources_enabled": "Fontes Ativas",
+      "sources_total_sub": "{{n}} no total",
+      "sla_breaches": "Violações de SLA",
+      "sla_sub": "Últimos 30 dias"
+    },
+    "section": {
+      "incidents": "Incidentes por Estado",
+      "changes": "Mudanças por Estado",
+      "top_tenants": "Top Tenants por Volume de Alertas"
+    },
+    "incident": {
+      "open": "Aberto",
+      "in_progress": "Em Andamento",
+      "resolved": "Resolvido",
+      "closed": "Fechado"
+    },
+    "change": {
+      "draft": "Rascunho",
+      "review": "Em Revisão",
+      "approved": "Aprovada",
+      "scheduled": "Agendada",
+      "implementing": "Implementando",
+      "complete": "Concluída",
+      "cancelled": "Cancelada"
+    },
+    "table": {
+      "tenant": "Tenant",
+      "active_alerts": "Alertas Ativos",
+      "total_alerts": "Total de Alertas"
+    }
+  },
   "finops": {
     "title": "FinOps",
     "subtitle": "Plano, direitos e medição de uso — somente observação",
@@ -1104,6 +1148,61 @@
       "noOrgs": "Nenhuma organização encontrada.",
       "noTenants": "Sem tenants",
       "noUsers": "Sem usuários"
+    }
+  },
+  "accountSecurity": {
+    "title": "Segurança da Conta",
+    "tabs": {
+      "sessions": "Sessões",
+      "mfa": "Autenticação de 2 Fatores",
+      "privacy": "Privacidade (LGPD)"
+    },
+    "sessions": {
+      "heading": "Sessões Ativas",
+      "current": "Atual",
+      "ipAddress": "Endereço IP",
+      "lastAccess": "Último Acesso",
+      "started": "Iniciada em",
+      "clients": "Clientes",
+      "revoke": "Revogar",
+      "revokeConfirm": "Revogar esta sessão?",
+      "revokeSuccess": "Sessão revogada",
+      "revokeError": "Falha ao revogar sessão",
+      "empty": "Nenhuma sessão ativa encontrada"
+    },
+    "mfa": {
+      "heading": "Autenticação de Dois Fatores (TOTP)",
+      "enabled": "2FA está habilitado",
+      "disabled": "2FA não está habilitado",
+      "setup": "Configurar 2FA",
+      "disable": "Desabilitar 2FA",
+      "disableConfirm": "Desabilitar autenticação de dois fatores?",
+      "disableSuccess": "2FA desabilitado",
+      "disableError": "Falha ao desabilitar 2FA",
+      "setupStep1": "Escaneie o código ou insira o segredo manualmente no seu aplicativo autenticador:",
+      "secret": "Segredo",
+      "copySecret": "Copiar segredo",
+      "copied": "Copiado!",
+      "setupStep2": "Insira o código de 6 dígitos do seu aplicativo autenticador para confirmar:",
+      "codeLabel": "Código de verificação",
+      "verify": "Verificar e Habilitar",
+      "verifySuccess": "2FA habilitado com sucesso",
+      "verifyError": "Código inválido. Tente novamente."
+    },
+    "privacy": {
+      "heading": "Privacidade e Direitos de Dados (LGPD)",
+      "exportHeading": "Exportar Seus Dados",
+      "exportDescription": "Baixe uma cópia de todos os dados pessoais associados à sua conta, em conformidade com a LGPD (Lei nº 13.709/2018).",
+      "exportButton": "Exportar Meus Dados",
+      "exportSuccess": "Dados exportados",
+      "deletionHeading": "Solicitar Exclusão de Conta",
+      "deletionDescription": "Solicite a exclusão permanente da sua conta e dos dados associados. Este processo é irreversível e será analisado pela nossa equipe.",
+      "deletionWarning": "Esta ação não pode ser desfeita. Sua conta e todos os dados associados serão permanentemente excluídos.",
+      "deletionButton": "Solicitar Exclusão",
+      "deletionConfirmLabel": "Entendo que esta ação é irreversível",
+      "deletionSuccess": "Solicitação de exclusão enviada. Nossa equipe processará em até 30 dias.",
+      "deletionError": "Falha ao enviar solicitação de exclusão",
+      "alreadyPending": "Você já tem uma solicitação de exclusão pendente."
     }
   }
 }

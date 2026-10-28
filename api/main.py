@@ -30,6 +30,7 @@ from shared.config import settings
 from shared.db import check_db_ready, close_pool, db_connection, init_pool
 from shared import telemetry
 from api.routers import (
+    account_security,
     aiops,
     alerting,
     alertmanager_ingest,
@@ -42,6 +43,7 @@ from api.routers import (
     changes,
     client_companies,
     escalation,
+    executive,
     finops,
     authority,
     async_ops,
@@ -514,6 +516,7 @@ app.include_router(platform.router)
 app.include_router(tenant.router)
 app.include_router(aiops.router)
 app.include_router(finops.router)
+app.include_router(executive.router)
 app.include_router(maintenance.router)
 app.include_router(sla.router)
 app.include_router(status_page.router)
@@ -525,6 +528,7 @@ app.include_router(client_companies.router)
 app.include_router(layout.router)
 app.include_router(synthetic.router)
 app.include_router(oncall.router)
+app.include_router(account_security.router)
 
 
 @app.get("/metrics", tags=["health"])

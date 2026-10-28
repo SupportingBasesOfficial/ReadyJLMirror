@@ -77,6 +77,23 @@ const PAGE_INFO: Record<string, PageInfo> = {
     permissions: ["observability:read"],
     actions: ["Consultar análise", "Ver correlações", "Exportar insights"],
   },
+  executive: {
+    title: "Dashboard Executivo",
+    description: "Visão agregada de KPIs globais da plataforma para gestão. Exibe alertas ativos/resolvidos, incidentes por estado, mudanças em curso, saúde das fontes de monitoramento e violações de SLA nos últimos 30 dias. Admins de plataforma veem dados cross-tenant; admins de tenant veem apenas seu escopo.",
+    permissions: ["tenant:admin", "platform_admin"],
+    actions: [
+      "Ver alertas ativos e resolvidos nas últimas 24 h",
+      "Acompanhar incidentes por estado",
+      "Monitorar mudanças em andamento",
+      "Ver saúde das fontes de monitoramento",
+      "Consultar violações de SLA (30 dias)",
+      "Top tenants por volume de alertas (platform_admin)",
+    ],
+    notes: [
+      "Dados atualizados a cada 60 segundos automaticamente.",
+      "Platform admins veem agregação cross-tenant; tenant admins veem apenas o próprio tenant.",
+    ],
+  },
   finops: {
     title: "FinOps",
     description: "Visibilidade de custos de infraestrutura e uso de recursos. Consolida dados de billing por tenant, organização e contrato.",
@@ -212,6 +229,20 @@ const PAGE_INFO: Record<string, PageInfo> = {
     description: "Página pública de status de serviços. Mostra estado atual e histórico de incidentes para usuários externos.",
     permissions: ["tenant:admin"],
     actions: ["Criar página de status", "Publicar incidente", "Gerenciar componentes"],
+  },
+  "account-security": {
+    title: "Segurança da Conta",
+    description: "Gerencie a segurança da sua conta: sessões ativas, autenticação de dois fatores (TOTP) e direitos de privacidade (LGPD).",
+    permissions: ["qualquer autenticado"],
+    actions: [
+      "Ver e revogar sessões ativas",
+      "Configurar autenticação de dois fatores (TOTP/RFC 6238)",
+      "Exportar dados pessoais (LGPD art. 18)",
+      "Solicitar exclusão de conta (LGPD art. 18)",
+    ],
+    notes: [
+      "A solicitação de exclusão é processada manualmente em até 30 dias. Sessão atual não pode ser revogada.",
+    ],
   },
 };
 

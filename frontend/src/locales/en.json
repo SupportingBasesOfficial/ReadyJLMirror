@@ -11,6 +11,7 @@
     "reports": "Reports",
     "aiops": "AIOps",
     "finops": "FinOps",
+    "executive": "Executive",
     "monitoring": "Monitoring",
     "inventory": "Inventory",
     "teia": "Network Map",
@@ -726,6 +727,49 @@
     "colHealth": "Health",
     "colLastSeen": "Last seen"
   },
+  "executive": {
+    "title": "Executive Dashboard",
+    "scope_platform": "Platform-wide aggregation — all tenants",
+    "scope_tenant": "Tenant-scoped view",
+    "error": "Failed to load executive overview.",
+    "kpi": {
+      "alerts_active": "Active Alerts",
+      "alerts_resolved_sub": "{{n}} resolved in 24 h",
+      "incidents_open": "Open Incidents",
+      "incidents_total_sub": "{{n}} total",
+      "changes_active": "Active Changes",
+      "changes_total_sub": "{{n}} total",
+      "sources_enabled": "Sources Enabled",
+      "sources_total_sub": "{{n}} total",
+      "sla_breaches": "SLA Breaches",
+      "sla_sub": "Last 30 days"
+    },
+    "section": {
+      "incidents": "Incidents by State",
+      "changes": "Changes by State",
+      "top_tenants": "Top Tenants by Alert Volume"
+    },
+    "incident": {
+      "open": "Open",
+      "in_progress": "In Progress",
+      "resolved": "Resolved",
+      "closed": "Closed"
+    },
+    "change": {
+      "draft": "Draft",
+      "review": "In Review",
+      "approved": "Approved",
+      "scheduled": "Scheduled",
+      "implementing": "Implementing",
+      "complete": "Complete",
+      "cancelled": "Cancelled"
+    },
+    "table": {
+      "tenant": "Tenant",
+      "active_alerts": "Active Alerts",
+      "total_alerts": "Total Alerts"
+    }
+  },
   "finops": {
     "title": "FinOps",
     "subtitle": "Plan, entitlements and usage metering — observation only",
@@ -1104,6 +1148,61 @@
       "noOrgs": "No organizations found.",
       "noTenants": "No tenants",
       "noUsers": "No users"
+    }
+  },
+  "accountSecurity": {
+    "title": "Account Security",
+    "tabs": {
+      "sessions": "Sessions",
+      "mfa": "Two-Factor Auth",
+      "privacy": "Privacy (LGPD)"
+    },
+    "sessions": {
+      "heading": "Active Sessions",
+      "current": "Current",
+      "ipAddress": "IP Address",
+      "lastAccess": "Last Access",
+      "started": "Started",
+      "clients": "Clients",
+      "revoke": "Revoke",
+      "revokeConfirm": "Revoke this session?",
+      "revokeSuccess": "Session revoked",
+      "revokeError": "Failed to revoke session",
+      "empty": "No active sessions found"
+    },
+    "mfa": {
+      "heading": "Two-Factor Authentication (TOTP)",
+      "enabled": "2FA is enabled",
+      "disabled": "2FA is not enabled",
+      "setup": "Set up 2FA",
+      "disable": "Disable 2FA",
+      "disableConfirm": "Disable two-factor authentication?",
+      "disableSuccess": "2FA disabled",
+      "disableError": "Failed to disable 2FA",
+      "setupStep1": "Scan this code or enter the secret manually in your authenticator app:",
+      "secret": "Secret",
+      "copySecret": "Copy secret",
+      "copied": "Copied!",
+      "setupStep2": "Enter the 6-digit code from your authenticator app to confirm:",
+      "codeLabel": "Verification code",
+      "verify": "Verify and Enable",
+      "verifySuccess": "2FA enabled successfully",
+      "verifyError": "Invalid code. Please try again."
+    },
+    "privacy": {
+      "heading": "Privacy & Data Rights (LGPD)",
+      "exportHeading": "Export Your Data",
+      "exportDescription": "Download a copy of all personal data associated with your account, in compliance with LGPD (Lei nº 13.709/2018).",
+      "exportButton": "Export My Data",
+      "exportSuccess": "Data exported",
+      "deletionHeading": "Request Account Deletion",
+      "deletionDescription": "Request permanent deletion of your account and associated data. This process is irreversible and will be reviewed by our team.",
+      "deletionWarning": "This action cannot be undone. Your account and all associated data will be permanently deleted.",
+      "deletionButton": "Request Deletion",
+      "deletionConfirmLabel": "I understand this is irreversible",
+      "deletionSuccess": "Deletion request submitted. Our team will process it within 30 days.",
+      "deletionError": "Failed to submit deletion request",
+      "alreadyPending": "You already have a pending deletion request."
     }
   }
 }

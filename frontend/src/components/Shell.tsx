@@ -12,7 +12,7 @@ import {
   MessageSquare, PhoneCall, Users, UserPlus, KeyRound,
   ScrollText, BookOpen, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Building2, ShieldCheck, Network, Radio, CalendarClock,
-  LayoutGrid, Globe, Bug,
+  LayoutGrid, Globe, Bug, TrendingUp,
 } from "lucide-react";
 import { api, logout } from "@/api/client";
 import { AlertsPage } from "@/pages/AlertsPage";
@@ -21,6 +21,7 @@ import { InventoryPage } from "@/pages/InventoryPage";
 import { NOCDashboard } from "@/pages/NOCDashboard";
 import { AIOpsPage } from "@/pages/AIOpsPage";
 import { FinOpsPage } from "@/pages/FinOpsPage";
+import { ExecutiveDashboardPage } from "@/pages/ExecutiveDashboardPage";
 import { PlatformPage } from "@/pages/PlatformPage";
 import { AuditPage } from "@/pages/AuditPage";
 import { AlertPoliciesPage } from "@/pages/AlertPoliciesPage";
@@ -49,6 +50,7 @@ import { StatusPageAdminPage } from "@/pages/StatusPageAdminPage";
 import { BugReportsPage } from "@/pages/BugReportsPage";
 import { ClientCompaniesPage } from "@/pages/ClientCompaniesPage";
 import { PermissionCatalogPage } from "@/pages/PermissionCatalogPage";
+import { AccountSecurityPage } from "@/pages/AccountSecurityPage";
 import { useBranding } from "@/hooks/useBranding";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useRef } from "react";
@@ -68,6 +70,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   reports: "/reports",
   aiops: "/aiops",
   finops: "/finops",
+  executive: "/executive",
   monitoring: "/monitoring",
   inventory: "/inventory",
   alertmanager: "/alertmanager",
@@ -91,6 +94,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   oncall: "/oncall",
   custom_dashboard: "/dashboard",
   status_page: "/status-page-admin",
+  "account-security": "/account/security",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -351,6 +355,9 @@ export function Shell() {
         { id: "alerts", label: t("nav.alerts"), icon: Bell, description: "Alertas ativos" },
         { id: "incidents", label: t("nav.incidents"), icon: Siren, description: "Gestão de incidentes" },
         { id: "policies", label: t("nav.policies"), icon: Shield, description: "Regras de alerta" },
+        ...((has("tenant:admin") || s.is_platform_admin) ? [
+          { id: "executive" as View, label: t("nav.executive"), icon: TrendingUp, description: "KPIs executivos da plataforma" },
+        ] : []),
       ],
     },
     ...(has("monitoring:operate") ? [{
@@ -648,6 +655,17 @@ export function Shell() {
             {!collapsed && (
               <button
                 type="button"
+                title={t("accountSecurity.title")}
+                onClick={() => goTo("account-security")}
+                className="p-1 rounded-md hover:bg-[var(--surface-2)] transition-colors"
+                style={{ color: "var(--text-muted)" }}
+              >
+                <ShieldCheck size={13} />
+              </button>
+            )}
+            {!collapsed && (
+              <button
+                type="button"
                 title="Sair"
                 onClick={() => logout()}
                 className="p-1 rounded-md hover:bg-[var(--surface-2)] transition-colors"
@@ -782,6 +800,7 @@ export function Shell() {
           {view === "inventory" && <InventoryPage tenantId={s.tenant_id!} />}
           {view === "aiops" && <AIOpsPage tenantId={s.tenant_id!} />}
           {view === "finops" && <FinOpsPage tenantId={s.tenant_id!} />}
+          {view === "executive" && <ExecutiveDashboardPage tenantId={s.tenant_id!} />}
           {view === "platform" && <PlatformPage tenantId={s.tenant_id!} />}
           {view === "audit" && <AuditPage tenantId={s.tenant_id!} />}
           {view === "policies" && <AlertPoliciesPage tenantId={s.tenant_id!} />}
@@ -809,6 +828,7 @@ export function Shell() {
           {view === "teia" && <TeiaPage tenantId={s.tenant_id!} />}
           {view === "companies" && <ClientCompaniesPage tenantId={s.tenant_id!} />}
           {view === "permissions" && <PermissionCatalogPage tenantId={s.tenant_id!} />}
+          {view === "account-security" && <AccountSecurityPage tenantId={s.tenant_id!} />}
           </div>
         </main>
       </div>
