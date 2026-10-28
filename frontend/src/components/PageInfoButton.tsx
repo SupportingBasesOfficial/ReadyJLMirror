@@ -100,6 +100,22 @@ const PAGE_INFO: Record<string, PageInfo> = {
     permissions: ["tenant:read"],
     actions: ["Ver custos por período", "Comparar tenants", "Exportar"],
   },
+  apm: {
+    title: "APM — Performance de API",
+    description: "Monitor de performance de API. Exibe latência p50/p95/p99, taxa de erro e volume de requisições por endpoint nas últimas 24 h. Dados coletados pelo APMMiddleware a cada chamada à API.",
+    permissions: ["tenant:read"],
+    actions: [
+      "Ver latência percentílica por endpoint",
+      "Identificar endpoints lentos (p95 > 500 ms)",
+      "Monitorar taxa de erro 5xx",
+      "Ver volume de requisições por hora",
+    ],
+    notes: [
+      "Dados aparecem após as primeiras chamadas à API autenticadas.",
+      "Registros mantidos por 7 dias.",
+      "Platform admins veem dados cross-tenant.",
+    ],
+  },
   platform: {
     title: "Plataforma",
     description: "Configurações da plataforma de monitoramento: fontes de dados, credenciais, integrações e configurações avançadas.",

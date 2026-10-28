@@ -382,6 +382,7 @@ export function Shell() {
       items: [
         { id: "aiops" as View, label: t("nav.aiops"), icon: Brain, description: "Correlação por IA" },
         { id: "finops" as View, label: t("nav.finops"), icon: DollarSign, description: "Custos de infra" },
+        { id: "apm" as View, label: t("nav.apm"), icon: Gauge, description: "Latência e erros de API" },
       ],
     },
     {
@@ -403,7 +404,6 @@ export function Shell() {
         ] : []),
         { id: "platform" as View, label: t("nav.platform"), icon: Settings2, description: "Configurações gerais" },
         { id: "config-drift" as View, label: t("nav.config_drift"), icon: GitCompare, description: "Desvio de configuração" },
-        ...(has("tenant:admin") ? [{ id: "tenant-settings" as View, label: t("nav.tenant_settings"), icon: Settings2, description: "SMTP, branding e preferências" }] : []),
         { id: "status_page" as View, label: t("nav.status_page"), icon: Globe, description: "Status público do tenant" },
       ],
     },
@@ -454,6 +454,12 @@ export function Shell() {
           label: t("nav.feature_flags"),
           icon: ToggleLeft,
           description: "Módulos ativos do tenant",
+        }] : []),
+        ...(has("tenant:admin") ? [{
+          id: "tenant-settings" as View,
+          label: t("nav.tenant_settings"),
+          icon: Settings2,
+          description: "SMTP, branding e configurações avançadas",
         }] : []),
       ],
     }] : []),
@@ -848,6 +854,7 @@ export function Shell() {
           {view === "config-drift" && <ConfigDriftPage tenantId={s.tenant_id!} />}
           {view === "feature-flags" && <FeatureFlagsPage tenantId={s.tenant_id!} />}
           {view === "tenant-settings" && <TenantSettingsPage tenantId={s.tenant_id!} />}
+          {view === "apm" && <APMPage tenantId={s.tenant_id!} />}
           </div>
         </main>
       </div>

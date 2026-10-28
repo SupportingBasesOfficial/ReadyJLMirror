@@ -36,6 +36,7 @@
     "permissions": "Permissões",
     "feature_flags": "Feature Flags",
     "tenant_settings": "Configurações do Tenant",
+    "apm": "APM",
     "kb": "Base de Conhecimento",
     "groups": {
       "Operações": "Operações",
@@ -1365,5 +1366,21 @@
       "module_push": "Notificações Push",
       "module_client_portal": "Portal do Cliente"
     }
+  },
+  "apm": {
+    "title": "Monitor de Performance de API",
+    "last24h": "Últimas 24 h",
+    "requests": "Requisições",
+    "errorRate": "Taxa de erro",
+    "avgLatency": "Média",
+    "requestsPerHour": "Requisições por hora",
+    "total": "Total",
+    "errors": "Erros",
+    "topEndpoints": "Top 20 endpoints — 24 h",
+    "noData": "Nenhuma requisição registrada ainda. Os dados aparecem assim que a API recebe chamadas.",
+    "method": "Método",
+    "path": "Path",
+    "count": "Req",
+    "latencyLegend": "Latência:"
   }
 }

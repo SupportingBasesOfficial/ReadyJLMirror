@@ -37,6 +37,10 @@
     "feature_flags": "Feature Flags",
     "tenant_settings": "Tenant Settings",
     "kb": "Knowledge Base",
+    "apm": "APM",
+    "feature_flags": "Feature Flags",
+    "tenant_settings": "Tenant Settings",
+    "config_drift": "Config Drift",
     "groups": {
       "Operações": "Operations",
       "ITSM": "ITSM",
@@ -1365,5 +1369,21 @@
       "module_push": "Push Notifications",
       "module_client_portal": "Client Portal"
     }
+  },
+  "apm": {
+    "title": "API Performance Monitor",
+    "last24h": "Last 24 h",
+    "requests": "Requests",
+    "errorRate": "Error Rate",
+    "avgLatency": "Avg",
+    "requestsPerHour": "Requests per hour",
+    "total": "Total",
+    "errors": "Errors",
+    "topEndpoints": "Top 20 endpoints — 24 h",
+    "noData": "No requests logged yet. Data appears once the API receives calls.",
+    "method": "Method",
+    "path": "Path",
+    "count": "Req",
+    "latencyLegend": "Latency:"
   }
 }
