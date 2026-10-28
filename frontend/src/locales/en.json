@@ -21,6 +21,7 @@
     "maintenance": "Maintenance",
     "platform": "Platform",
     "status_page": "Status Page",
+    "config_drift": "Config Drift",
     "channels": "Channels",
     "escalation": "Escalation",
     "oncall": "On-Call",
@@ -33,6 +34,8 @@
     "msp": "Client Portfolio",
     "platform_admin": "Platform Admin",
     "permissions": "Permissions",
+    "feature_flags": "Feature Flags",
+    "tenant_settings": "Tenant Settings",
     "kb": "Knowledge Base",
     "groups": {
       "Operações": "Operations",
@@ -1193,6 +1196,46 @@
       "noUsers": "No users"
     }
   },
+  "tenantSettings": {
+    "title": "Tenant Settings",
+    "saved": "Settings saved successfully.",
+    "saveError": "Failed to save settings.",
+    "tabs": {
+      "branding": "Branding",
+      "smtp": "SMTP Email",
+      "preferences": "Preferences"
+    },
+    "branding": {
+      "name": "Display Name",
+      "logoUrl": "Logo URL",
+      "color": "Brand Color",
+      "save": "Save Branding"
+    },
+    "smtp": {
+      "warning": "SMTP password is stored encrypted and displayed masked after saving.",
+      "host": "SMTP Host",
+      "port": "Port",
+      "user": "Username",
+      "password": "Password",
+      "fromName": "From Name",
+      "fromEmail": "From Email",
+      "tls": "Use TLS/SSL",
+      "save": "Save SMTP",
+      "test": "Send Test",
+      "testTitle": "Send a test email",
+      "send": "Send",
+      "testOk": "Test email sent successfully."
+    },
+    "prefs": {
+      "notifications": "Notifications",
+      "alertCritical": "Notify on critical alerts",
+      "incidentOpen": "Notify on incident opened",
+      "slaBreach": "Notify on SLA breach",
+      "timezone": "Timezone",
+      "dateFormat": "Date Format",
+      "save": "Save Preferences"
+    }
+  },
   "accountSecurity": {
     "title": "Account Security",
     "tabs": {
@@ -1246,6 +1289,81 @@
       "deletionSuccess": "Deletion request submitted. Our team will process it within 30 days.",
       "deletionError": "Failed to submit deletion request",
       "alreadyPending": "You already have a pending deletion request."
+    }
+  },
+  "drift": {
+    "title": "Config Drift Detection",
+    "subtitle": "Detect deviations from your expected device configurations",
+    "total_baselines": "Total Baselines",
+    "open_drifts": "Open Drifts",
+    "last_scan": "Last Scan",
+    "run_scan": "Run Scan",
+    "scanning": "Scanning...",
+    "scan_complete": "Scan Complete",
+    "scan_result": "Checked {{scanned}} baselines, found {{found}} new drift(s).",
+    "scan_error": "Scan failed",
+    "tab_events": "Drift Events",
+    "tab_baselines": "Baselines",
+    "all": "All",
+    "state_open": "Open",
+    "state_acknowledged": "Acknowledged",
+    "state_resolved": "Resolved",
+    "no_events": "No drift events for this filter.",
+    "no_baselines": "No baselines defined yet.",
+    "add_baseline": "Add Baseline",
+    "save_baseline": "Save Baseline",
+    "baseline_created": "Baseline saved",
+    "baseline_error": "Failed to save baseline",
+    "baseline_deleted": "Baseline deleted",
+    "delete_error": "Failed to delete baseline",
+    "acknowledge": "Ack",
+    "resolve": "Resolve",
+    "col_resource": "Resource",
+    "col_key": "Config Key",
+    "col_expected": "Expected",
+    "col_actual": "Actual",
+    "col_detected": "Detected At",
+    "col_state": "State",
+    "col_actions": "Actions",
+    "col_captured_by": "Captured By",
+    "col_captured_at": "Captured At",
+    "field_source_id": "Source ID",
+    "field_resource_ref": "Resource Ref",
+    "field_config_key": "Config Key",
+    "field_expected_value": "Expected Value",
+    "placeholder_source_id": "e.g. uuid of the monitoring source",
+    "placeholder_resource_ref": "e.g. host.example.com",
+    "placeholder_config_key": "e.g. ntp.server",
+    "placeholder_expected_value": "e.g. ntp1.example.com"
+  },
+  "featureFlags": {
+    "title": "Feature Flags",
+    "subtitle": "Enable or disable optional modules for this tenant.",
+    "modules": "Modules",
+    "beta": "Beta Features",
+    "enable": "Enable",
+    "disable": "Disable",
+    "updated": "Flag updated.",
+    "updateError": "Failed to update flag.",
+    "reset": "Restore Defaults",
+    "resetDone": "Restored {{count}} missing default(s).",
+    "resetError": "Failed to restore defaults.",
+    "loadError": "Failed to load feature flags.",
+    "keys": {
+      "module_aiops": "AIOps & Intelligent Analysis",
+      "module_finops": "FinOps & Cost Management",
+      "module_synthetic": "Synthetic Monitoring",
+      "module_oncall": "On-Call Management",
+      "module_kb": "Knowledge Base",
+      "module_drift": "Config Drift Detection",
+      "module_executive": "Executive Dashboard",
+      "module_reports": "Scheduled Reports",
+      "module_automation": "Automation & Scripts",
+      "module_sla": "SLA & Services",
+      "module_maintenance": "Maintenance Windows",
+      "module_chatops": "Slack/Teams Integration",
+      "module_push": "Push Notifications",
+      "module_client_portal": "Client Portal"
     }
   }
 }

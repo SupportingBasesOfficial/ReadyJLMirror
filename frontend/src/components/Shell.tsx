@@ -12,7 +12,7 @@ import {
   MessageSquare, PhoneCall, Users, UserPlus, KeyRound,
   ScrollText, BookOpen, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Building2, ShieldCheck, Network, Radio, CalendarClock,
-  LayoutGrid, Globe, Bug, TrendingUp,
+  LayoutGrid, Globe, Bug, TrendingUp, GitCompare, ToggleLeft, Gauge,
 } from "lucide-react";
 import { api, logout } from "@/api/client";
 import { AlertsPage } from "@/pages/AlertsPage";
@@ -51,6 +51,10 @@ import { BugReportsPage } from "@/pages/BugReportsPage";
 import { ClientCompaniesPage } from "@/pages/ClientCompaniesPage";
 import { PermissionCatalogPage } from "@/pages/PermissionCatalogPage";
 import { AccountSecurityPage } from "@/pages/AccountSecurityPage";
+import { ConfigDriftPage } from "@/pages/ConfigDriftPage";
+import { FeatureFlagsPage } from "@/pages/FeatureFlagsPage";
+import { TenantSettingsPage } from "@/pages/TenantSettingsPage";
+import { APMPage } from "@/pages/APMPage";
 import { useBranding } from "@/hooks/useBranding";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useRef } from "react";
@@ -95,6 +99,10 @@ const VIEW_TO_PATH: Record<string, string> = {
   custom_dashboard: "/dashboard",
   status_page: "/status-page-admin",
   "account-security": "/account/security",
+  "config-drift": "/config-drift",
+  "feature-flags": "/feature-flags",
+  "tenant-settings": "/settings/tenant",
+  apm: "/apm",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -394,6 +402,8 @@ export function Shell() {
           { id: "maintenance" as View, label: t("nav.maintenance"), icon: Wrench, description: "Janelas de manutenção" },
         ] : []),
         { id: "platform" as View, label: t("nav.platform"), icon: Settings2, description: "Configurações gerais" },
+        { id: "config-drift" as View, label: t("nav.config_drift"), icon: GitCompare, description: "Desvio de configuração" },
+        ...(has("tenant:admin") ? [{ id: "tenant-settings" as View, label: t("nav.tenant_settings"), icon: Settings2, description: "SMTP, branding e preferências" }] : []),
         { id: "status_page" as View, label: t("nav.status_page"), icon: Globe, description: "Status público do tenant" },
       ],
     },
@@ -438,6 +448,12 @@ export function Shell() {
           label: t("nav.permissions", "Permissões"),
           icon: ScrollText,
           description: "Catálogo de acesso por papel",
+        }] : []),
+        ...(has("tenant:admin") ? [{
+          id: "feature-flags" as View,
+          label: t("nav.feature_flags"),
+          icon: ToggleLeft,
+          description: "Módulos ativos do tenant",
         }] : []),
       ],
     }] : []),
@@ -829,6 +845,9 @@ export function Shell() {
           {view === "companies" && <ClientCompaniesPage tenantId={s.tenant_id!} />}
           {view === "permissions" && <PermissionCatalogPage tenantId={s.tenant_id!} />}
           {view === "account-security" && <AccountSecurityPage tenantId={s.tenant_id!} />}
+          {view === "config-drift" && <ConfigDriftPage tenantId={s.tenant_id!} />}
+          {view === "feature-flags" && <FeatureFlagsPage tenantId={s.tenant_id!} />}
+          {view === "tenant-settings" && <TenantSettingsPage tenantId={s.tenant_id!} />}
           </div>
         </main>
       </div>

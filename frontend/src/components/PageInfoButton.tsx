@@ -230,6 +230,21 @@ const PAGE_INFO: Record<string, PageInfo> = {
     permissions: ["tenant:admin"],
     actions: ["Criar página de status", "Publicar incidente", "Gerenciar componentes"],
   },
+  "tenant-settings": {
+    title: "Configurações do Tenant",
+    description: "Configure identidade visual, servidor de e-mail SMTP e preferências operacionais do tenant.",
+    permissions: ["tenant:admin"],
+    actions: [
+      "Personalizar nome, cor e logo do tenant (Branding)",
+      "Configurar servidor SMTP e enviar e-mail de teste",
+      "Ativar/desativar notificações por tipo (alertas, incidentes, SLA)",
+      "Definir fuso horário e formato de data",
+    ],
+    notes: [
+      "A senha SMTP é armazenada criptografada e exibida mascarada.",
+      "Branding é salvo em g1.tenant_branding; SMTP e preferências em g1.tenant_settings.",
+    ],
+  },
   "account-security": {
     title: "Segurança da Conta",
     description: "Gerencie a segurança da sua conta: sessões ativas, autenticação de dois fatores (TOTP) e direitos de privacidade (LGPD).",
@@ -242,6 +257,19 @@ const PAGE_INFO: Record<string, PageInfo> = {
     ],
     notes: [
       "A solicitação de exclusão é processada manualmente em até 30 dias. Sessão atual não pode ser revogada.",
+    ],
+  },
+  "feature-flags": {
+    title: "Feature Flags",
+    description: "Controle quais módulos opcionais estão ativos para este tenant. Alterações têm efeito imediato para todos os usuários.",
+    permissions: ["tenant:admin"],
+    actions: [
+      "Ativar ou desativar módulos individualmente",
+      "Restaurar flags padrão para flags faltantes",
+      "Ver quem atualizou cada flag por último",
+    ],
+    notes: [
+      "Flags beta estão em desenvolvimento ativo e podem ser instáveis. Ative com cautela em produção.",
     ],
   },
 };

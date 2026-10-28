@@ -21,6 +21,7 @@
     "maintenance": "Manutenção",
     "platform": "Plataforma",
     "status_page": "Página de Status",
+    "config_drift": "Desvio de Config",
     "channels": "Canais",
     "escalation": "Escalonamento",
     "oncall": "Plantão",
@@ -33,6 +34,8 @@
     "msp": "Portfólio de Clientes",
     "platform_admin": "Administração da Plataforma",
     "permissions": "Permissões",
+    "feature_flags": "Feature Flags",
+    "tenant_settings": "Configurações do Tenant",
     "kb": "Base de Conhecimento",
     "groups": {
       "Operações": "Operações",
@@ -1193,6 +1196,46 @@
       "noUsers": "Sem usuários"
     }
   },
+  "tenantSettings": {
+    "title": "Configurações do Tenant",
+    "saved": "Configurações salvas com sucesso.",
+    "saveError": "Falha ao salvar configurações.",
+    "tabs": {
+      "branding": "Identidade Visual",
+      "smtp": "E-mail SMTP",
+      "preferences": "Preferências"
+    },
+    "branding": {
+      "name": "Nome de Exibição",
+      "logoUrl": "URL do Logo",
+      "color": "Cor da Marca",
+      "save": "Salvar Identidade Visual"
+    },
+    "smtp": {
+      "warning": "A senha SMTP é armazenada criptografada e exibida mascarada após salvar.",
+      "host": "Servidor SMTP",
+      "port": "Porta",
+      "user": "Usuário",
+      "password": "Senha",
+      "fromName": "Nome do Remetente",
+      "fromEmail": "E-mail do Remetente",
+      "tls": "Usar TLS/SSL",
+      "save": "Salvar SMTP",
+      "test": "Enviar Teste",
+      "testTitle": "Enviar um e-mail de teste",
+      "send": "Enviar",
+      "testOk": "E-mail de teste enviado com sucesso."
+    },
+    "prefs": {
+      "notifications": "Notificações",
+      "alertCritical": "Notificar em alertas críticos",
+      "incidentOpen": "Notificar ao abrir incidente",
+      "slaBreach": "Notificar em violação de SLA",
+      "timezone": "Fuso Horário",
+      "dateFormat": "Formato de Data",
+      "save": "Salvar Preferências"
+    }
+  },
   "accountSecurity": {
     "title": "Segurança da Conta",
     "tabs": {
@@ -1246,6 +1289,81 @@
       "deletionSuccess": "Solicitação de exclusão enviada. Nossa equipe processará em até 30 dias.",
       "deletionError": "Falha ao enviar solicitação de exclusão",
       "alreadyPending": "Você já tem uma solicitação de exclusão pendente."
+    }
+  },
+  "drift": {
+    "title": "Detecção de Desvio de Configuração",
+    "subtitle": "Detecte desvios em relação às configurações esperadas dos dispositivos",
+    "total_baselines": "Total de Baselines",
+    "open_drifts": "Desvios Abertos",
+    "last_scan": "Último Scan",
+    "run_scan": "Executar Scan",
+    "scanning": "Escaneando...",
+    "scan_complete": "Scan Concluído",
+    "scan_result": "Verificados {{scanned}} baselines, encontrados {{found}} desvio(s) novo(s).",
+    "scan_error": "Falha no scan",
+    "tab_events": "Eventos de Desvio",
+    "tab_baselines": "Baselines",
+    "all": "Todos",
+    "state_open": "Aberto",
+    "state_acknowledged": "Reconhecido",
+    "state_resolved": "Resolvido",
+    "no_events": "Nenhum evento de desvio para este filtro.",
+    "no_baselines": "Nenhuma baseline definida ainda.",
+    "add_baseline": "Adicionar Baseline",
+    "save_baseline": "Salvar Baseline",
+    "baseline_created": "Baseline salva",
+    "baseline_error": "Falha ao salvar baseline",
+    "baseline_deleted": "Baseline removida",
+    "delete_error": "Falha ao remover baseline",
+    "acknowledge": "Reconhecer",
+    "resolve": "Resolver",
+    "col_resource": "Recurso",
+    "col_key": "Chave de Config",
+    "col_expected": "Esperado",
+    "col_actual": "Atual",
+    "col_detected": "Detectado Em",
+    "col_state": "Estado",
+    "col_actions": "Ações",
+    "col_captured_by": "Capturado Por",
+    "col_captured_at": "Capturado Em",
+    "field_source_id": "ID da Fonte",
+    "field_resource_ref": "Ref. do Recurso",
+    "field_config_key": "Chave de Configuração",
+    "field_expected_value": "Valor Esperado",
+    "placeholder_source_id": "ex.: uuid da fonte de monitoramento",
+    "placeholder_resource_ref": "ex.: host.example.com",
+    "placeholder_config_key": "ex.: ntp.server",
+    "placeholder_expected_value": "ex.: ntp1.example.com"
+  },
+  "featureFlags": {
+    "title": "Feature Flags",
+    "subtitle": "Ative ou desative módulos opcionais para este tenant.",
+    "modules": "Módulos",
+    "beta": "Funcionalidades Beta",
+    "enable": "Ativar",
+    "disable": "Desativar",
+    "updated": "Flag atualizada.",
+    "updateError": "Falha ao atualizar flag.",
+    "reset": "Restaurar Padrões",
+    "resetDone": "{{count}} padrão(ões) restaurado(s).",
+    "resetError": "Falha ao restaurar padrões.",
+    "loadError": "Falha ao carregar feature flags.",
+    "keys": {
+      "module_aiops": "AIOps e Análise Inteligente",
+      "module_finops": "FinOps e Gestão de Custos",
+      "module_synthetic": "Monitoramento Sintético",
+      "module_oncall": "Gestão de Plantão",
+      "module_kb": "Base de Conhecimento",
+      "module_drift": "Detecção de Desvio de Config",
+      "module_executive": "Dashboard Executivo",
+      "module_reports": "Relatórios Agendados",
+      "module_automation": "Automação e Scripts",
+      "module_sla": "SLA e Serviços",
+      "module_maintenance": "Janelas de Manutenção",
+      "module_chatops": "Integração Slack/Teams",
+      "module_push": "Notificações Push",
+      "module_client_portal": "Portal do Cliente"
     }
   }
 }

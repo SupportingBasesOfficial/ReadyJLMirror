@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import asyncio
 import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
@@ -32,6 +33,10 @@ from shared import telemetry
 from api.routers import (
     account_security,
     aiops,
+    apm,
+    config_drift,
+    tenant_settings,
+    feature_flags,
     alerting,
     alertmanager_ingest,
     api_keys,
@@ -424,6 +429,40 @@ async def verify_context(request: Request, call_next):
     return response
 
 
+async def _apm_write(
+    method: str, path: str, status_code: int, duration_ms: float,
+    tenant_id: Optional[str], principal_id: Optional[str],
+) -> None:
+    try:
+        async with db_connection() as conn:
+            await conn.execute(
+                "INSERT INTO g1.apm_request_log"
+                " (method, path, status_code, duration_ms, tenant_id, principal_id)"
+                " VALUES ($1, $2, $3, $4, $5, $6)",
+                method, path, status_code, duration_ms, tenant_id, principal_id,
+            )
+    except Exception:
+        pass
+
+
+@app.middleware("http")
+async def apm_middleware(request: Request, call_next) -> Response:
+    start = time.perf_counter()
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        duration_ms = (time.perf_counter() - start) * 1000
+        ctx = getattr(request.state, "jlmirror_context", None)
+        asyncio.create_task(_apm_write(
+            request.method,
+            request.url.path,
+            response.status_code,
+            round(duration_ms, 2),
+            ctx.get("tenant_id") if ctx else None,
+            ctx.get("principal_id") if ctx else None,
+        ))
+    return response
+
+
 # ---------------------------------------------------------------------------
 # G1 protected endpoints
 # ---------------------------------------------------------------------------
@@ -529,6 +568,10 @@ app.include_router(layout.router)
 app.include_router(synthetic.router)
 app.include_router(oncall.router)
 app.include_router(account_security.router)
+app.include_router(config_drift.router)
+app.include_router(feature_flags.router)
+app.include_router(tenant_settings.router)
+app.include_router(apm.router)
 
 
 @app.get("/metrics", tags=["health"])
