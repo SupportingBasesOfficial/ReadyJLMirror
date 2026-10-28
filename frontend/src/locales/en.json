@@ -1246,7 +1246,8 @@
     "tabs": {
       "sessions": "Sessions",
       "mfa": "Two-Factor Auth",
-      "privacy": "Privacy (LGPD)"
+      "privacy": "Privacy (LGPD)",
+      "push": "Push Notifications"
     },
     "sessions": {
       "heading": "Active Sessions",
@@ -1294,6 +1295,20 @@
       "deletionSuccess": "Deletion request submitted. Our team will process it within 30 days.",
       "deletionError": "Failed to submit deletion request",
       "alreadyPending": "You already have a pending deletion request."
+    },
+    "push": {
+      "active": "Push notifications enabled",
+      "inactive": "Push notifications disabled",
+      "unsupported": "Not supported in this browser",
+      "denied": "Permission denied",
+      "description": "Receive real-time alerts directly in your browser",
+      "subscribe": "Enable",
+      "unsubscribe": "Disable",
+      "sendTest": "Send test",
+      "testSent": "Test notification sent ({{count}} subscription(s))",
+      "testError": "Failed to send test notification",
+      "deniedNote": "Push notifications are blocked in your browser settings. Reset the permission and reload to try again.",
+      "unsupportedNote": "Your browser does not support Web Push notifications."
     }
   },
   "drift": {

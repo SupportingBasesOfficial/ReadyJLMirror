@@ -14,18 +14,20 @@ import {
   Check,
   Download,
   AlertTriangle,
+  Bell,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/hooks/use-toast";
 import { PageInfoButton } from "@/components/PageInfoButton";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 
 interface Props {
   tenantId: string;
 }
 
-type Tab = "sessions" | "mfa" | "privacy";
+type Tab = "sessions" | "mfa" | "privacy" | "push";
 
 // ── API helpers ──────────────────────────────────────────────────────────────
 
@@ -399,12 +401,120 @@ function PrivacyTab() {
   );
 }
 
+// ── Push Notifications tab ────────────────────────────────────────────────────
+
+function PushTab() {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const { state, error, subscribe, unsubscribe } = usePushNotifications();
+
+  const sendTest = useMutation({
+    mutationFn: () =>
+      apiFetch<{ sent: number; failed: number; total: number }>(
+        "/api/v1/push/send-test",
+        { method: "POST" }
+      ),
+    onSuccess: ({ sent }) => {
+      toast({ title: t("accountSecurity.push.testSent", { count: sent }) });
+    },
+    onError: (e: Error) => {
+      toast({
+        title: t("accountSecurity.push.testError"),
+        description: e.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const isSubscribed = state === "subscribed";
+  const iconColor = isSubscribed ? "text-green-500" : "text-[var(--text-muted)]";
+  const iconBg = isSubscribed ? "bg-green-500/10" : "bg-[var(--surface-2)]";
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className={`p-2 rounded-full ${iconBg}`}>
+            <Bell size={18} className={iconColor} />
+          </div>
+          <div>
+            <p className="text-sm font-medium">
+              {state === "subscribed"
+                ? t("accountSecurity.push.active")
+                : state === "unsupported"
+                ? t("accountSecurity.push.unsupported")
+                : state === "denied"
+                ? t("accountSecurity.push.denied")
+                : t("accountSecurity.push.inactive")}
+            </p>
+            <p className="text-xs text-[var(--text-muted)]">
+              {t("accountSecurity.push.description")}
+            </p>
+          </div>
+        </div>
+        {state !== "unsupported" && (
+          isSubscribed ? (
+            <div className="flex gap-2 flex-shrink-0">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={sendTest.isPending}
+                onClick={() => sendTest.mutate()}
+              >
+                {sendTest.isPending ? <Spinner className="mr-1.5 h-3 w-3" /> : null}
+                {t("accountSecurity.push.sendTest")}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-[var(--red)] border-[var(--red)] hover:bg-[var(--red)]/10"
+                onClick={unsubscribe}
+              >
+                {t("accountSecurity.push.unsubscribe")}
+              </Button>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              disabled={state === "loading" || state === "denied"}
+              onClick={subscribe}
+            >
+              {state === "loading" ? <Spinner className="mr-1.5 h-3 w-3" /> : null}
+              {t("accountSecurity.push.subscribe")}
+            </Button>
+          )
+        )}
+      </div>
+
+      {error && (
+        <p className="text-xs text-[var(--red)]">{error}</p>
+      )}
+
+      {state === "denied" && (
+        <div className="rounded-md bg-[var(--red)]/10 border border-[var(--red)]/30 p-3 flex items-start gap-2">
+          <AlertTriangle size={14} className="text-[var(--red)] mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-[var(--red)] leading-relaxed">
+            {t("accountSecurity.push.deniedNote")}
+          </p>
+        </div>
+      )}
+
+      {state === "unsupported" && (
+        <p className="text-xs text-[var(--text-muted)]">
+          {t("accountSecurity.push.unsupportedNote")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 const TABS: { id: Tab; labelKey: string }[] = [
   { id: "sessions", labelKey: "accountSecurity.tabs.sessions" },
   { id: "mfa", labelKey: "accountSecurity.tabs.mfa" },
   { id: "privacy", labelKey: "accountSecurity.tabs.privacy" },
+  { id: "push", labelKey: "accountSecurity.tabs.push" },
 ];
 
 export function AccountSecurityPage({ tenantId: _tenantId }: Props) {
@@ -443,6 +553,7 @@ export function AccountSecurityPage({ tenantId: _tenantId }: Props) {
       {tab === "sessions" && <SessionsTab />}
       {tab === "mfa" && <MFATab />}
       {tab === "privacy" && <PrivacyTab />}
+      {tab === "push" && <PushTab />}
     </div>
   );
 }

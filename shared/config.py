@@ -129,6 +129,17 @@ class Settings:
         default_factory=lambda: _env("COOKIE_SECURE", "true").lower() == "true"
     )
 
+    # Web Push (VAPID — RFC 8292)
+    vapid_private_key: str = field(
+        default_factory=lambda: _env("VAPID_PRIVATE_KEY", "")
+    )
+    vapid_public_key: str = field(
+        default_factory=lambda: _env("VAPID_PUBLIC_KEY", "")
+    )
+    vapid_claims_email: str = field(
+        default_factory=lambda: _env("VAPID_CLAIMS_EMAIL", "push@jlinformatica.com.br")
+    )
+
     # Dev-only auth bypass: simulates the OIDC callback without Keycloak.
     # MUST be false in production. Only honored when environment=development.
     dev_auth_bypass: bool = field(

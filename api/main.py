@@ -36,6 +36,7 @@ from api.routers import (
     apm,
     client_portal,
     config_drift,
+    push,
     tenant_settings,
     feature_flags,
     alerting,
@@ -573,6 +574,7 @@ app.include_router(config_drift.router)
 app.include_router(feature_flags.router)
 app.include_router(tenant_settings.router)
 app.include_router(apm.router)
+app.include_router(push.router)
 app.include_router(client_portal.router)
 
 

@@ -1243,7 +1243,8 @@
     "tabs": {
       "sessions": "Sessões",
       "mfa": "Autenticação de 2 Fatores",
-      "privacy": "Privacidade (LGPD)"
+      "privacy": "Privacidade (LGPD)",
+      "push": "Notificações Push"
     },
     "sessions": {
       "heading": "Sessões Ativas",
@@ -1291,6 +1292,20 @@
       "deletionSuccess": "Solicitação de exclusão enviada. Nossa equipe processará em até 30 dias.",
       "deletionError": "Falha ao enviar solicitação de exclusão",
       "alreadyPending": "Você já tem uma solicitação de exclusão pendente."
+    },
+    "push": {
+      "active": "Notificações push ativas",
+      "inactive": "Notificações push desativadas",
+      "unsupported": "Não suportado neste navegador",
+      "denied": "Permissão negada",
+      "description": "Receba alertas em tempo real diretamente no seu navegador",
+      "subscribe": "Ativar",
+      "unsubscribe": "Desativar",
+      "sendTest": "Enviar teste",
+      "testSent": "Notificação de teste enviada ({{count}} inscrição(ões))",
+      "testError": "Falha ao enviar notificação de teste",
+      "deniedNote": "Notificações push estão bloqueadas nas configurações do navegador. Redefina a permissão e recarregue para tentar novamente.",
+      "unsupportedNote": "Seu navegador não suporta notificações Web Push."
     }
   },
   "drift": {
