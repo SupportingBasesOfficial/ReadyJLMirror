@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { i18n } from "@/i18n";
 import { useSession } from "@/hooks/useSession";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -90,7 +92,7 @@ interface Principal {
 
 function fmt(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("pt-BR", { dateStyle: "short" });
+  return new Date(iso).toLocaleDateString(i18n.language, { dateStyle: "short" });
 }
 
 function truncate(id: string, len = 8): string {
@@ -104,19 +106,21 @@ function stateVariant(state: string): "success" | "warning" | "danger" | "muted"
   return "muted";
 }
 
-function orgKindBadge(kind: Organization["org_kind"]): { label: string; variant: "success" | "warning" | "danger" | "muted" } {
-  if (kind === "platform_operator") return { label: "Plataforma", variant: "warning" };
-  if (kind === "msp") return { label: "MSP", variant: "success" };
-  return { label: "Cliente", variant: "muted" };
+function orgKindBadge(kind: Organization["org_kind"], t: (key: string) => string): { label: string; variant: "success" | "warning" | "danger" | "muted" } {
+  if (kind === "platform_operator") return { label: t("platformAdmin.orgKind.platform_operator"), variant: "warning" };
+  if (kind === "msp") return { label: t("platformAdmin.orgKind.msp"), variant: "success" };
+  return { label: t("platformAdmin.orgKind.client"), variant: "muted" };
 }
 
-function familyLabel(family: string): string {
+function familyLabel(family: string, t: (key: string) => string): string {
   const m: Record<string, string> = {
-    provides_monitoring_service_for: "MSP",
-    delegated_administration_for: "Partner",
-    billing_responsible_for: "Reseller",
-    contracts_platform: "Plataforma",
-    msp: "MSP", reseller: "Reseller", partner: "Partner",
+    provides_monitoring_service_for: t("platformAdmin.relationships.typeMsp"),
+    delegated_administration_for: t("platformAdmin.relationships.typePartner"),
+    billing_responsible_for: t("platformAdmin.relationships.typeReseller"),
+    contracts_platform: t("platformAdmin.orgKind.platform_operator"),
+    msp: t("platformAdmin.relationships.typeMsp"),
+    reseller: t("platformAdmin.relationships.typeReseller"),
+    partner: t("platformAdmin.relationships.typePartner"),
   };
   return m[family] ?? family;
 }
@@ -151,11 +155,12 @@ function OrgDetailPanel({ orgId, orgKind, onClose }: {
   orgKind: Organization["org_kind"];
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const q = useQuery({
     queryKey: ["org-360", orgId],
     queryFn: () => api.get<Org360>(`/api/v1/platform/organizations/${orgId}`),
   });
-  const { label, variant } = orgKindBadge(orgKind);
+  const { label, variant } = orgKindBadge(orgKind, t);
   const data = q.data;
   const activeGrants = data?.delegated_grants.filter(g => g.state === "active") ?? [];
 
@@ -174,18 +179,18 @@ function OrgDetailPanel({ orgId, orgKind, onClose }: {
       </div>
 
       {q.isLoading && <div className="flex justify-center py-6"><Spinner /></div>}
-      {q.isError && <p className="text-xs text-[var(--red)] px-4 py-3">Erro ao carregar detalhes.</p>}
+      {q.isError && <p className="text-xs text-[var(--red)] px-4 py-3">{t("platformAdmin.org360.loadError")}</p>}
 
       {data && (
         <div className="grid grid-cols-2 gap-px bg-[var(--border)]">
           {/* Workspaces */}
           <div className="bg-[var(--surface)] p-3 space-y-1.5">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2 flex items-center gap-1">
-              Workspaces ({data.tenants.length})
-              <InfoIcon text="Tenants que pertencem a esta organização. Um tenant é o ambiente isolado onde os usuários fazem login — cada organização pode ter vários (ex: Produção, Homologação)." position="bottom" align="left" />
+              {t("platformAdmin.org360.workspacesSection", { count: data.tenants.length })}
+              <InfoIcon text={t("platformAdmin.org360.workspacesTooltip")} position="bottom" align="left" />
             </p>
             {data.tenants.length === 0 ? (
-              <p className="text-[11px] text-[var(--text-muted)]">Nenhum workspace.</p>
+              <p className="text-[11px] text-[var(--text-muted)]">{t("platformAdmin.org360.noWorkspaces")}</p>
             ) : data.tenants.map(t => (
               <div key={t.tenant_id} className="flex items-center gap-2 text-xs">
                 <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
@@ -200,16 +205,16 @@ function OrgDetailPanel({ orgId, orgKind, onClose }: {
           {/* Relationships */}
           <div className="bg-[var(--surface)] p-3 space-y-1.5">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2 flex items-center gap-1">
-              Relacionamentos ({data.relationships.length})
-              <InfoIcon text="Vínculos contratuais com outras organizações. MSP = quem presta monitoramento. Partner = delegação administrativa. A seta indica a direção: ← quem gerencia esta org, → org que esta gerencia." position="bottom" align="right" />
+              {t("platformAdmin.org360.relationshipsSection", { count: data.relationships.length })}
+              <InfoIcon text={t("platformAdmin.org360.relationshipsTooltip")} position="bottom" align="right" />
             </p>
             {data.relationships.length === 0 ? (
-              <p className="text-[11px] text-[var(--text-muted)]">Sem relacionamentos.</p>
+              <p className="text-[11px] text-[var(--text-muted)]">{t("platformAdmin.org360.noRelationships")}</p>
             ) : data.relationships.map(r => (
               <div key={r.relationship_id} className="flex items-center gap-1.5 text-xs flex-wrap">
-                <Badge variant="muted">{familyLabel(r.family)}</Badge>
+                <Badge variant="muted">{familyLabel(r.family, t)}</Badge>
                 <span className="text-[var(--text-muted)] text-[10px]">
-                  {r.direction === "outgoing" ? "→ gerencia" : "← gerenciado por"}
+                  {r.direction === "outgoing" ? t("platformAdmin.org360.outgoing") : t("platformAdmin.org360.incoming")}
                 </span>
                 <span className="font-mono text-[10px] text-[var(--text)] flex-1 truncate">{r.other_organization_id}</span>
                 <Badge variant={stateVariant(r.state)}>{r.state}</Badge>
@@ -220,16 +225,16 @@ function OrgDetailPanel({ orgId, orgKind, onClose }: {
           {/* Delegated Grants */}
           <div className="bg-[var(--surface)] p-3 space-y-1.5">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2 flex items-center gap-1">
-              Grants Ativos ({activeGrants.length})
-              <InfoIcon text="Permissões que esta organização concedeu a um principal externo (ex: técnico de MSP) para acessar um tenant específico. Cada grant define quais operações são permitidas (monitoring:read, alerting:operate, etc.)." position="bottom" align="left" />
+              {t("platformAdmin.org360.grantsSection", { count: activeGrants.length })}
+              <InfoIcon text={t("platformAdmin.org360.grantsTip")} position="bottom" align="left" />
             </p>
             {activeGrants.length === 0 ? (
-              <p className="text-[11px] text-[var(--text-muted)]">Nenhum grant ativo.</p>
+              <p className="text-[11px] text-[var(--text-muted)]">{t("platformAdmin.org360.noGrants")}</p>
             ) : activeGrants.map(g => (
               <div key={g.grant_id} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 space-y-0.5">
                 <div className="flex items-center gap-1.5">
                   <span className="font-mono text-[10px] flex-1 truncate">{g.target_tenant_id}</span>
-                  <Badge variant="success">ativo</Badge>
+                  <Badge variant="success">{t("platformAdmin.org360.grantActive")}</Badge>
                 </div>
                 <p className="text-[10px] text-[var(--text-muted)] font-mono truncate">{truncate(g.principal_id, 16)}</p>
                 <div className="flex flex-wrap gap-0.5">
@@ -245,11 +250,11 @@ function OrgDetailPanel({ orgId, orgKind, onClose }: {
           {/* Members */}
           <div className="bg-[var(--surface)] p-3 space-y-1.5">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2 flex items-center gap-1">
-              Membros ({data.members.length})
-              <InfoIcon text="Usuários que têm acesso a algum tenant desta organização. O papel define o nível: member = acesso básico, tenant_admin = pode gerenciar configurações do tenant." position="bottom" align="right" />
+              {t("platformAdmin.org360.membersSection", { count: data.members.length })}
+              <InfoIcon text={t("platformAdmin.org360.membersTip")} position="bottom" align="right" />
             </p>
             {data.members.length === 0 ? (
-              <p className="text-[11px] text-[var(--text-muted)]">Sem membros.</p>
+              <p className="text-[11px] text-[var(--text-muted)]">{t("platformAdmin.org360.noMembers")}</p>
             ) : data.members.map((m, i) => (
               <div key={m.principal_id + i} className="flex items-center gap-1.5 text-xs">
                 <span className="font-mono text-[10px] text-[var(--text-muted)] flex-1 truncate">{truncate(m.principal_id, 14)}</span>
@@ -306,6 +311,7 @@ function Modal({ onClose, children }: { onClose: () => void; children: React.Rea
 // ── Aba 1: Organizações ────────────────────────────────────────────────────────
 
 function CreateOrgModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -323,19 +329,19 @@ function CreateOrgModal({ onClose }: { onClose: () => void }) {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-organizations"] });
-      toast("Organização criada", "success");
+      toast(t("platformAdmin.createOrg.createdToast"), "success");
       onClose();
     },
-    onError: (e: Error) => setError(e.message || "Erro ao criar organização"),
+    onError: (e: Error) => setError(e.message),
   });
 
   return (
     <Modal onClose={onClose}>
-      <h3 className="text-sm font-semibold mb-4">Criar organização</h3>
+      <h3 className="text-sm font-semibold mb-4">{t("platformAdmin.createOrg.title")}</h3>
       <div className="space-y-3">
         <div>
           <label className="block text-xs text-[var(--text-muted)] mb-1">
-            Nome <span className="text-[var(--red)]">*</span>
+            {t("platformAdmin.createOrg.nameLabel")} <span className="text-[var(--red)]">*</span>
           </label>
           <input
             className={inputCls}
@@ -346,7 +352,7 @@ function CreateOrgModal({ onClose }: { onClose: () => void }) {
         </div>
         <div>
           <label className="block text-xs text-[var(--text-muted)] mb-1">
-            Slug <span className="text-[var(--red)]">*</span>
+            {t("platformAdmin.createOrg.slugLabel")} <span className="text-[var(--red)]">*</span>
           </label>
           <input
             className={inputCls}
@@ -356,7 +362,7 @@ function CreateOrgModal({ onClose }: { onClose: () => void }) {
           />
         </div>
         <div>
-          <label className="block text-xs text-[var(--text-muted)] mb-1">Display name</label>
+          <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.createOrg.displayNameLabel")}</label>
           <input
             className={inputCls}
             value={displayName}
@@ -366,16 +372,16 @@ function CreateOrgModal({ onClose }: { onClose: () => void }) {
         </div>
         <div>
           <label className="block text-xs text-[var(--text-muted)] mb-1">
-            Tipo <span className="text-[var(--red)]">*</span>
+            {t("platformAdmin.createOrg.typeLabel")} <span className="text-[var(--red)]">*</span>
           </label>
           <select
             className={inputCls}
             value={orgKind}
             onChange={(e) => setOrgKind(e.target.value as Organization["org_kind"])}
           >
-            <option value="client">Cliente</option>
-            <option value="msp">MSP / Integrador</option>
-            <option value="platform_operator">Operador da Plataforma</option>
+            <option value="client">{t("platformAdmin.createOrg.typeClient")}</option>
+            <option value="msp">{t("platformAdmin.createOrg.typeMsp")}</option>
+            <option value="platform_operator">{t("platformAdmin.createOrg.typePlatform")}</option>
           </select>
         </div>
         {error && <p className="text-xs text-[var(--red)]">{error}</p>}
@@ -385,10 +391,10 @@ function CreateOrgModal({ onClose }: { onClose: () => void }) {
             disabled={!name.trim() || !slug.trim() || create.isPending}
             className="flex-1"
           >
-            {create.isPending ? <Spinner className="w-3 h-3" /> : "Criar"}
+            {create.isPending ? <Spinner className="w-3 h-3" /> : t("platformAdmin.createOrg.createBtn")}
           </Button>
           <Button variant="ghost" onClick={onClose} className="flex-1">
-            Cancelar
+            {t("platformAdmin.createOrg.cancelBtn")}
           </Button>
         </div>
       </div>
@@ -397,6 +403,7 @@ function CreateOrgModal({ onClose }: { onClose: () => void }) {
 }
 
 function OrgsTab() {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const { toast } = useToast();
   const [showCreate, setShowCreate] = useState(false);
@@ -415,7 +422,7 @@ function OrgsTab() {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["platform-organizations"] });
       setConfirmSuspend(null);
-      toast(vars.state === "suspended" ? "Organização suspensa" : "Organização ativada", "success");
+      toast(vars.state === "suspended" ? t("platformAdmin.orgs.suspendedToast") : t("platformAdmin.orgs.activatedToast"), "success");
     },
     onError: (e: Error) => {
       setConfirmSuspend(null);
@@ -429,15 +436,15 @@ function OrgsTab() {
     <Card className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <CardHeader>
-          <span className="text-sm font-semibold">Organizações</span>
+          <span className="text-sm font-semibold">{t("platformAdmin.orgs.header")}</span>
           <span className="text-xs text-[var(--text-muted)]">
-            {orgs.length} org{orgs.length !== 1 ? "s" : ""}
+            {t("platformAdmin.orgs.count", { count: orgs.length })}
           </span>
         </CardHeader>
         <div className="flex items-center gap-2">
           {q.isFetching && <Spinner className="w-3 h-3" />}
           <Button size="sm" onClick={() => setShowCreate(true)}>
-            <Plus size={13} /> Criar organização
+            <Plus size={13} /> {t("platformAdmin.orgs.createBtn")}
           </Button>
         </div>
       </div>
@@ -448,10 +455,10 @@ function OrgsTab() {
         </div>
       ) : q.isError ? (
         <p className="text-xs text-[var(--red)]">
-          Não foi possível carregar as organizações. Verifique suas permissões.
+          {t("platformAdmin.orgs.loadError")}
         </p>
       ) : orgs.length === 0 ? (
-        <p className="text-xs text-[var(--text-muted)]">Nenhuma organização cadastrada.</p>
+        <p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.orgs.empty")}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs min-w-[520px]">
@@ -459,29 +466,29 @@ function OrgsTab() {
               <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
                 <th className="text-left px-2 py-1.5 font-medium">
                   <span className="inline-flex items-center">
-                    Nome
-                    <InfoIcon text="Nome da organização. Abaixo aparecem os workspaces (tenants) que pertencem a ela — são os ambientes que os usuários acessam ao fazer login." position="bottom" align="left" />
+                    {t("platformAdmin.orgs.colName")}
+                    <InfoIcon text={t("platformAdmin.orgs.colNameTip")} position="bottom" align="left" />
                   </span>
                 </th>
                 <th className="text-left px-2 py-1.5 font-medium">
                   <span className="inline-flex items-center">
-                    Tipo
-                    <InfoIcon text="Cliente: empresa que contrata o serviço de monitoramento. MSP: parceiro que gerencia clientes em nome da plataforma. Plataforma: o próprio operador do JLMirror." position="bottom" />
+                    {t("platformAdmin.orgs.colType")}
+                    <InfoIcon text={t("platformAdmin.orgs.colTypeTip")} position="bottom" />
                   </span>
                 </th>
                 <th className="text-left px-2 py-1.5 font-medium">
                   <span className="inline-flex items-center">
-                    ID
-                    <InfoIcon text="Identificador único e imutável da organização no sistema. Usado em integrações e APIs." position="bottom" />
+                    {t("platformAdmin.orgs.colId")}
+                    <InfoIcon text={t("platformAdmin.orgs.colIdTip")} position="bottom" />
                   </span>
                 </th>
                 <th className="text-left px-2 py-1.5 font-medium">
                   <span className="inline-flex items-center">
-                    Estado
-                    <InfoIcon text="active: organização operacional, usuários podem acessar. suspended: acesso bloqueado para todos os tenants desta organização." position="bottom" align="right" />
+                    {t("platformAdmin.orgs.colState")}
+                    <InfoIcon text={t("platformAdmin.orgs.colStateTip")} position="bottom" align="right" />
                   </span>
                 </th>
-                <th className="text-left px-2 py-1.5 font-medium">Criado</th>
+                <th className="text-left px-2 py-1.5 font-medium">{t("platformAdmin.orgs.colCreated")}</th>
                 <th className="px-2 py-1.5" />
               </tr>
             </thead>
@@ -504,12 +511,12 @@ function OrgsTab() {
                             {t.display_name || t.tenant_id}
                           </span>
                         ))}
-                        <InfoIcon text="Workspaces (tenants) desta organização. São os ambientes que aparecem na tela de login para os usuários desta org." />
+                        <InfoIcon text={t("platformAdmin.orgs.workspacesTip")} />
                       </div>
                     )}
                   </td>
                   <td className="px-2 py-2">
-                    {(() => { const k = orgKindBadge(org.org_kind); return <Badge variant={k.variant}>{k.label}</Badge>; })()}
+                    {(() => { const k = orgKindBadge(org.org_kind, t); return <Badge variant={k.variant}>{k.label}</Badge>; })()}
                   </td>
                   <td className="px-2 py-2 font-mono text-[var(--text-muted)]">{org.organization_id}</td>
                   <td className="px-2 py-2">
@@ -525,7 +532,7 @@ function OrgsTab() {
                           disabled={patchState.isPending}
                           onClick={() => patchState.mutate({ orgId: org.organization_id, state: "active" })}
                         >
-                          Ativar
+                          {t("platformAdmin.orgs.activate")}
                         </Button>
                       ) : (
                         <Button
@@ -533,7 +540,7 @@ function OrgsTab() {
                           variant="ghost"
                           onClick={() => setConfirmSuspend(org)}
                         >
-                          Suspender
+                          {t("platformAdmin.orgs.suspend")}
                         </Button>
                       )}
                     </div>
@@ -560,9 +567,9 @@ function OrgsTab() {
 
       {confirmSuspend && (
         <ConfirmModal
-          title="Suspender organização"
-          description={`Isso vai suspender "${confirmSuspend.display_name || confirmSuspend.organization_id}" e bloquear o acesso de todos os tenants associados.`}
-          confirmLabel="Suspender"
+          title={t("platformAdmin.orgs.suspendTitle")}
+          description={t("platformAdmin.orgs.suspendDesc", { name: confirmSuspend.display_name || confirmSuspend.organization_id })}
+          confirmLabel={t("platformAdmin.orgs.suspendConfirm")}
           destructive
           isPending={patchState.isPending}
           onConfirm={() =>
@@ -584,6 +591,7 @@ function CreateTenantModal({
   orgs: Organization[];
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [orgId, setOrgId] = useState(orgs[0]?.organization_id ?? "");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -600,19 +608,19 @@ function CreateTenantModal({
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-tenants"] });
-      toast("Tenant criado", "success");
+      toast(t("platformAdmin.createTenant.createdToast"), "success");
       onClose();
     },
-    onError: (e: Error) => setError(e.message || "Erro ao criar tenant"),
+    onError: (e: Error) => setError(e.message),
   });
 
   return (
     <Modal onClose={onClose}>
-      <h3 className="text-sm font-semibold mb-4">Criar tenant</h3>
+      <h3 className="text-sm font-semibold mb-4">{t("platformAdmin.createTenant.title")}</h3>
       <div className="space-y-3">
         <div>
           <label className="block text-xs text-[var(--text-muted)] mb-1">
-            Organização <span className="text-[var(--red)]">*</span>
+            {t("platformAdmin.createTenant.orgLabel")} <span className="text-[var(--red)]">*</span>
           </label>
           <select
             className={inputCls + " cursor-pointer"}
@@ -628,7 +636,7 @@ function CreateTenantModal({
         </div>
         <div>
           <label className="block text-xs text-[var(--text-muted)] mb-1">
-            Nome <span className="text-[var(--red)]">*</span>
+            {t("platformAdmin.createTenant.nameLabel")} <span className="text-[var(--red)]">*</span>
           </label>
           <input
             className={inputCls}
@@ -639,7 +647,7 @@ function CreateTenantModal({
         </div>
         <div>
           <label className="block text-xs text-[var(--text-muted)] mb-1">
-            Slug <span className="text-[var(--red)]">*</span>
+            {t("platformAdmin.createTenant.slugLabel")} <span className="text-[var(--red)]">*</span>
           </label>
           <input
             className={inputCls}
@@ -655,10 +663,10 @@ function CreateTenantModal({
             disabled={!orgId || !name.trim() || !slug.trim() || create.isPending}
             className="flex-1"
           >
-            {create.isPending ? <Spinner className="w-3 h-3" /> : "Criar"}
+            {create.isPending ? <Spinner className="w-3 h-3" /> : t("platformAdmin.createTenant.createBtn")}
           </Button>
           <Button variant="ghost" onClick={onClose} className="flex-1">
-            Cancelar
+            {t("platformAdmin.createTenant.cancelBtn")}
           </Button>
         </div>
       </div>
@@ -667,6 +675,7 @@ function CreateTenantModal({
 }
 
 function TenantsTab() {
+  const { t } = useTranslation();
   const [showCreate, setShowCreate] = useState(false);
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
 
@@ -693,21 +702,21 @@ function TenantsTab() {
 
   const tenants = tenantsQ.data ?? [];
   const orgs = orgsQ.data ?? [];
-  const selectedTenant = tenants.find((t) => t.tenant_id === selectedTenantId);
+  const selectedTenant = tenants.find((tenant) => tenant.tenant_id === selectedTenantId);
 
   return (
     <Card className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <CardHeader>
-          <span className="text-sm font-semibold">Tenants</span>
+          <span className="text-sm font-semibold">{t("platformAdmin.tenants.header")}</span>
           <span className="text-xs text-[var(--text-muted)]">
-            {tenants.length} tenant{tenants.length !== 1 ? "s" : ""}
+            {t("platformAdmin.tenants.count", { count: tenants.length })}
           </span>
         </CardHeader>
         <div className="flex items-center gap-2">
           {tenantsQ.isFetching && <Spinner className="w-3 h-3" />}
           <Button size="sm" onClick={() => setShowCreate(true)}>
-            <Plus size={13} /> Criar tenant
+            <Plus size={13} /> {t("platformAdmin.tenants.createBtn")}
           </Button>
         </div>
       </div>
@@ -718,50 +727,50 @@ function TenantsTab() {
         </div>
       ) : tenantsQ.isError ? (
         <p className="text-xs text-[var(--red)]">
-          Não foi possível carregar os tenants. Verifique suas permissões.
+          {t("platformAdmin.tenants.loadError")}
         </p>
       ) : tenants.length === 0 ? (
-        <p className="text-xs text-[var(--text-muted)]">Nenhum tenant cadastrado.</p>
+        <p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.tenants.empty")}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs min-w-[580px]">
             <thead>
               <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
-                <th className="text-left px-2 py-1.5 font-medium">ID</th>
-                <th className="text-left px-2 py-1.5 font-medium">Nome</th>
-                <th className="text-left px-2 py-1.5 font-medium">Organização</th>
-                <th className="text-left px-2 py-1.5 font-medium">Estado</th>
-                <th className="text-left px-2 py-1.5 font-medium">Criado</th>
+                <th className="text-left px-2 py-1.5 font-medium">{t("platformAdmin.tenants.colId")}</th>
+                <th className="text-left px-2 py-1.5 font-medium">{t("platformAdmin.tenants.colName")}</th>
+                <th className="text-left px-2 py-1.5 font-medium">{t("platformAdmin.tenants.colOrg")}</th>
+                <th className="text-left px-2 py-1.5 font-medium">{t("platformAdmin.tenants.colState")}</th>
+                <th className="text-left px-2 py-1.5 font-medium">{t("platformAdmin.tenants.colCreated")}</th>
               </tr>
             </thead>
             <tbody>
-              {tenants.map((t) => (
+              {tenants.map((tenant) => (
                 <tr
-                  key={t.tenant_id}
+                  key={tenant.tenant_id}
                   className="border-b border-[var(--border)] hover:bg-[var(--surface-2)] cursor-pointer"
                   onClick={() =>
                     setSelectedTenantId((prev) =>
-                      prev === t.tenant_id ? null : t.tenant_id
+                      prev === tenant.tenant_id ? null : tenant.tenant_id
                     )
                   }
                 >
                   <td
                     className="px-2 py-2 font-mono text-[var(--text-muted)]"
-                    title={t.tenant_id}
+                    title={tenant.tenant_id}
                   >
-                    {truncate(t.tenant_id, 8)}
+                    {truncate(tenant.tenant_id, 8)}
                   </td>
                   <td className="px-2 py-2 font-medium" style={{ color: "var(--text)" }}>
-                    {t.display_name}
+                    {tenant.display_name}
                   </td>
                   <td className="px-2 py-2 text-[var(--text-muted)]">
-                    {orgs.find((o) => o.organization_id === t.organization_id)?.display_name ||
-                      (t.organization_id ? truncate(t.organization_id) : "—")}
+                    {orgs.find((o) => o.organization_id === tenant.organization_id)?.display_name ||
+                      (tenant.organization_id ? truncate(tenant.organization_id) : "—")}
                   </td>
                   <td className="px-2 py-2">
-                    <Badge variant={stateVariant(t.state)}>{t.state}</Badge>
+                    <Badge variant={stateVariant(tenant.state)}>{tenant.state}</Badge>
                   </td>
-                  <td className="px-2 py-2 text-[var(--text-muted)]">{fmt(t.created_at)}</td>
+                  <td className="px-2 py-2 text-[var(--text-muted)]">{fmt(tenant.created_at)}</td>
                 </tr>
               ))}
             </tbody>
@@ -788,17 +797,17 @@ function TenantsTab() {
           {tenantUsersQ.isLoading ? (
             <Spinner className="w-4 h-4" />
           ) : tenantUsersQ.isError ? (
-            <p className="text-xs text-[var(--red)]">Erro ao carregar usuários.</p>
+            <p className="text-xs text-[var(--red)]">{t("platformAdmin.tenants.usersLoadError")}</p>
           ) : (tenantUsersQ.data ?? []).length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)]">Nenhum usuário neste tenant.</p>
+            <p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.tenants.noUsers")}</p>
           ) : (
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
-                  <th className="text-left py-1 font-medium">Usuário</th>
-                  <th className="text-left py-1 font-medium">Email</th>
-                  <th className="text-left py-1 font-medium">Papel</th>
-                  <th className="text-left py-1 font-medium">Tipo</th>
+                  <th className="text-left py-1 font-medium">{t("platformAdmin.tenants.colUser")}</th>
+                  <th className="text-left py-1 font-medium">{t("platformAdmin.tenants.colEmail")}</th>
+                  <th className="text-left py-1 font-medium">{t("platformAdmin.tenants.colRole")}</th>
+                  <th className="text-left py-1 font-medium">{t("platformAdmin.tenants.colKind")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -832,7 +841,7 @@ function TenantsTab() {
       {showCreate && orgs.length === 0 && (
         <Modal onClose={() => setShowCreate(false)}>
           <p className="text-sm text-[var(--text-muted)] text-center py-4">
-            Crie uma organização antes de criar um tenant.
+            {t("platformAdmin.tenants.noOrgWarning")}
           </p>
         </Modal>
       )}
@@ -849,6 +858,7 @@ function CreateContractModal({
   accounts: CommercialAccount[];
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [accountId, setAccountId] = useState(accounts[0]?.commercial_account_id ?? "");
   const [planRef, setPlanRef] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -864,19 +874,19 @@ function CreateContractModal({
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-commercial-accounts"] });
-      toast("Contrato criado", "success");
+      toast(t("platformAdmin.createContract.createdToast"), "success");
       onClose();
     },
-    onError: (e: Error) => setError(e.message || "Erro ao criar contrato"),
+    onError: (e: Error) => setError(e.message),
   });
 
   return (
     <Modal onClose={onClose}>
-      <h3 className="text-sm font-semibold mb-4">Novo contrato</h3>
+      <h3 className="text-sm font-semibold mb-4">{t("platformAdmin.createContract.title")}</h3>
       <div className="space-y-3">
         <div>
           <label className="block text-xs text-[var(--text-muted)] mb-1">
-            Conta comercial <span className="text-[var(--red)]">*</span>
+            {t("platformAdmin.createContract.accountLabel")} <span className="text-[var(--red)]">*</span>
           </label>
           <select
             className={inputCls + " cursor-pointer"}
@@ -891,7 +901,7 @@ function CreateContractModal({
           </select>
         </div>
         <div>
-          <label className="block text-xs text-[var(--text-muted)] mb-1">Plan ref</label>
+          <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.createContract.planRefLabel")}</label>
           <input
             className={inputCls}
             value={planRef}
@@ -906,10 +916,10 @@ function CreateContractModal({
             disabled={!accountId || create.isPending}
             className="flex-1"
           >
-            {create.isPending ? <Spinner className="w-3 h-3" /> : "Criar contrato"}
+            {create.isPending ? <Spinner className="w-3 h-3" /> : t("platformAdmin.createContract.createBtn")}
           </Button>
           <Button variant="ghost" onClick={onClose} className="flex-1">
-            Cancelar
+            {t("platformAdmin.createContract.cancelBtn")}
           </Button>
         </div>
       </div>
@@ -924,6 +934,7 @@ function CreateEntitlementModal({
   contracts: Contract[];
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [contractId, setContractId] = useState(contracts[0]?.contract_id ?? "");
   const [capability, setCapability] = useState<(typeof CAPABILITIES)[number]>("monitoring");
   const [entState, setEntState] = useState<(typeof ENTITLEMENT_STATES)[number]>("active");
@@ -940,19 +951,19 @@ function CreateEntitlementModal({
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-commercial-accounts"] });
-      toast("Entitlement criado", "success");
+      toast(t("platformAdmin.createEntitlement.createdToast"), "success");
       onClose();
     },
-    onError: (e: Error) => setError(e.message || "Erro ao criar entitlement"),
+    onError: (e: Error) => setError(e.message),
   });
 
   return (
     <Modal onClose={onClose}>
-      <h3 className="text-sm font-semibold mb-4">Novo entitlement</h3>
+      <h3 className="text-sm font-semibold mb-4">{t("platformAdmin.createEntitlement.title")}</h3>
       <div className="space-y-3">
         <div>
           <label className="block text-xs text-[var(--text-muted)] mb-1">
-            Contrato <span className="text-[var(--red)]">*</span>
+            {t("platformAdmin.createEntitlement.contractLabel")} <span className="text-[var(--red)]">*</span>
           </label>
           <select
             className={inputCls + " cursor-pointer"}
@@ -968,7 +979,7 @@ function CreateEntitlementModal({
         </div>
         <div>
           <label className="block text-xs text-[var(--text-muted)] mb-1">
-            Capability <span className="text-[var(--red)]">*</span>
+            {t("platformAdmin.createEntitlement.capabilityLabel")} <span className="text-[var(--red)]">*</span>
           </label>
           <select
             className={inputCls + " cursor-pointer"}
@@ -983,7 +994,7 @@ function CreateEntitlementModal({
           </select>
         </div>
         <div>
-          <label className="block text-xs text-[var(--text-muted)] mb-1">Estado</label>
+          <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.createEntitlement.stateLabel")}</label>
           <select
             className={inputCls + " cursor-pointer"}
             value={entState}
@@ -1005,10 +1016,10 @@ function CreateEntitlementModal({
             disabled={!contractId || create.isPending}
             className="flex-1"
           >
-            {create.isPending ? <Spinner className="w-3 h-3" /> : "Criar entitlement"}
+            {create.isPending ? <Spinner className="w-3 h-3" /> : t("platformAdmin.createEntitlement.createBtn")}
           </Button>
           <Button variant="ghost" onClick={onClose} className="flex-1">
-            Cancelar
+            {t("platformAdmin.createEntitlement.cancelBtn")}
           </Button>
         </div>
       </div>
@@ -1017,6 +1028,7 @@ function CreateEntitlementModal({
 }
 
 function ContractsTab() {
+  const { t } = useTranslation();
   const [showCreateContract, setShowCreateContract] = useState(false);
   const [showCreateEntitlement, setShowCreateEntitlement] = useState(false);
 
@@ -1034,15 +1046,15 @@ function ContractsTab() {
       <Card>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold">Contas Comerciais</span>
+            <span className="text-sm font-semibold">{t("platformAdmin.contracts.accountsHeader")}</span>
             {q.isFetching && <Spinner className="w-3 h-3" />}
           </div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="secondary" onClick={() => setShowCreateEntitlement(true)}>
-              <Plus size={13} /> Novo entitlement
+              <Plus size={13} /> {t("platformAdmin.contracts.newEntitlement")}
             </Button>
             <Button size="sm" onClick={() => setShowCreateContract(true)}>
-              <Plus size={13} /> Novo contrato
+              <Plus size={13} /> {t("platformAdmin.contracts.newContract")}
             </Button>
           </div>
         </div>
@@ -1053,10 +1065,10 @@ function ContractsTab() {
           </div>
         ) : q.isError ? (
           <p className="text-xs text-[var(--red)]">
-            Não foi possível carregar as contas comerciais. Verifique suas permissões.
+            {t("platformAdmin.contracts.loadError")}
           </p>
         ) : accounts.length === 0 ? (
-          <p className="text-xs text-[var(--text-muted)]">Nenhuma conta comercial cadastrada.</p>
+          <p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.contracts.noAccounts")}</p>
         ) : (
           <div className="space-y-4">
             {accounts.map((account) => (
@@ -1075,10 +1087,10 @@ function ContractsTab() {
 
                 <div>
                   <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium mb-1.5">
-                    Contratos
+                    {t("platformAdmin.contracts.contractsSection")}
                   </p>
                   {!account.contracts || account.contracts.length === 0 ? (
-                    <p className="text-xs text-[var(--text-muted)]">Sem contratos.</p>
+                    <p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.contracts.noContracts")}</p>
                   ) : (
                     <div className="space-y-1">
                       {account.contracts.map((c) => (
@@ -1107,10 +1119,10 @@ function ContractsTab() {
 
                 <div>
                   <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium mb-1.5">
-                    Entitlements
+                    {t("platformAdmin.contracts.entitlementsSection")}
                   </p>
                   {!account.entitlements || account.entitlements.length === 0 ? (
-                    <p className="text-xs text-[var(--text-muted)]">Sem entitlements.</p>
+                    <p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.contracts.noEntitlements")}</p>
                   ) : (
                     <div className="flex flex-wrap gap-1.5">
                       {account.entitlements.map((e) => (
@@ -1133,7 +1145,7 @@ function ContractsTab() {
       {showCreateContract && accounts.length === 0 && (
         <Modal onClose={() => setShowCreateContract(false)}>
           <p className="text-sm text-[var(--text-muted)] text-center py-4">
-            Nenhuma conta comercial disponível.
+            {t("platformAdmin.contracts.noAccountsAvailable")}
           </p>
         </Modal>
       )}
@@ -1147,7 +1159,7 @@ function ContractsTab() {
       {showCreateEntitlement && allContracts.length === 0 && (
         <Modal onClose={() => setShowCreateEntitlement(false)}>
           <p className="text-sm text-[var(--text-muted)] text-center py-4">
-            Crie um contrato antes de adicionar entitlements.
+            {t("platformAdmin.contracts.noContractsYet")}
           </p>
         </Modal>
       )}
@@ -1177,6 +1189,7 @@ function StatCard({
 }
 
 function HealthTab() {
+  const { t } = useTranslation();
   const orgsQ = useQuery({
     queryKey: ["platform-organizations"],
     queryFn: () => api.get<Organization[]>("/api/v1/platform/organizations"),
@@ -1203,8 +1216,8 @@ function HealthTab() {
 
   const orgs = orgsQ.data ?? [];
   const tenants = tenantsQ.data ?? [];
-  const activeTenants = tenants.filter((t) => t.state === "active").length;
-  const suspendedTenants = tenants.filter((t) => t.state === "suspended").length;
+  const activeTenants = tenants.filter((tenant) => tenant.state === "active").length;
+  const suspendedTenants = tenants.filter((tenant) => tenant.state === "suspended").length;
 
   const isLoading = orgsQ.isLoading || tenantsQ.isLoading;
 
@@ -1216,23 +1229,23 @@ function HealthTab() {
         </div>
       ) : (
         <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
-          <StatCard label="Organizações" value={orgs.length} />
-          <StatCard label="Tenants" value={tenants.length} />
-          <StatCard label="Tenants ativos" value={activeTenants} />
-          <StatCard label="Tenants suspensos" value={suspendedTenants} />
+          <StatCard label={t("platformAdmin.health.statOrgs")} value={orgs.length} />
+          <StatCard label={t("platformAdmin.health.statTenants")} value={tenants.length} />
+          <StatCard label={t("platformAdmin.health.statActiveTenants")} value={activeTenants} />
+          <StatCard label={t("platformAdmin.health.statSuspendedTenants")} value={suspendedTenants} />
         </div>
       )}
 
       <Card className="flex flex-col gap-3">
         <CardHeader>
-          <span className="text-sm font-semibold">Status da plataforma</span>
+          <span className="text-sm font-semibold">{t("platformAdmin.health.platformStatusHeader")}</span>
           {healthQ.isFetching && <Spinner className="w-3 h-3" />}
         </CardHeader>
         {healthQ.isLoading ? (
           <Spinner className="w-4 h-4" />
         ) : healthQ.isError ? (
           <p className="text-xs text-[var(--text-muted)]">
-            Endpoint de health não disponível.
+            {t("platformAdmin.health.healthUnavailable")}
           </p>
         ) : healthQ.data ? (
           <div className="space-y-2">
@@ -1272,44 +1285,44 @@ function HealthTab() {
 
       <Card className="flex flex-col gap-3">
         <CardHeader>
-          <span className="text-sm font-semibold">Usage consolidado</span>
+          <span className="text-sm font-semibold">{t("platformAdmin.health.usageHeader")}</span>
           {usageQ.isFetching && <Spinner className="w-3 h-3" />}
           {!usageQ.isLoading && (usageQ.data ?? []).length > 0 && (
             <span className="text-xs text-[var(--text-muted)] ml-auto">
-              {(usageQ.data ?? []).length} registro{(usageQ.data ?? []).length !== 1 ? "s" : ""}
+              {t("platformAdmin.health.usageCount", { count: (usageQ.data ?? []).length })}
             </span>
           )}
           <button
             onClick={() => usageQ.refetch()}
             className="text-xs text-[var(--brand)] hover:underline ml-auto"
           >
-            Atualizar
+            {t("platformAdmin.health.refresh")}
           </button>
         </CardHeader>
         {usageQ.isLoading ? (
           <div className="flex justify-center py-4"><Spinner /></div>
         ) : usageQ.isError ? (
-          <p className="text-xs text-[var(--text-muted)] py-2">Endpoint de usage não disponível.</p>
+          <p className="text-xs text-[var(--text-muted)] py-2">{t("platformAdmin.health.usageUnavailable")}</p>
         ) : (usageQ.data ?? []).length === 0 ? (
-          <p className="text-xs text-[var(--text-muted)] py-2">Nenhum registro de uso encontrado para este período.</p>
+          <p className="text-xs text-[var(--text-muted)] py-2">{t("platformAdmin.health.noUsage")}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs min-w-[600px]">
               <thead>
                 <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
-                  <th className="text-left px-2 py-1.5 font-medium">Organização</th>
-                  <th className="text-left px-2 py-1.5 font-medium">Tenant</th>
-                  <th className="text-left px-2 py-1.5 font-medium">Métrica</th>
-                  <th className="text-right px-2 py-1.5 font-medium">Quantidade</th>
-                  <th className="text-left px-2 py-1.5 font-medium">Início</th>
-                  <th className="text-left px-2 py-1.5 font-medium">Fim</th>
+                  <th className="text-left px-2 py-1.5 font-medium">{t("platformAdmin.health.colOrg")}</th>
+                  <th className="text-left px-2 py-1.5 font-medium">{t("platformAdmin.health.colTenant")}</th>
+                  <th className="text-left px-2 py-1.5 font-medium">{t("platformAdmin.health.colMeter")}</th>
+                  <th className="text-right px-2 py-1.5 font-medium">{t("platformAdmin.health.colQty")}</th>
+                  <th className="text-left px-2 py-1.5 font-medium">{t("platformAdmin.health.colStart")}</th>
+                  <th className="text-left px-2 py-1.5 font-medium">{t("platformAdmin.health.colEnd")}</th>
                 </tr>
               </thead>
               <tbody>
                 {(usageQ.data ?? []).map((m) => {
-                  const tenant = tenants.find(t => t.tenant_id === m.tenant_id);
-                  const org = tenant ? orgs.find(o => o.organization_id === tenant.organization_id) : null;
-                  const { label: kindLabel, variant: kindVariant } = org ? orgKindBadge(org.org_kind) : { label: "—", variant: "muted" as const };
+                  const tenantRow = tenants.find(ten => ten.tenant_id === m.tenant_id);
+                  const org = tenantRow ? orgs.find(o => o.organization_id === tenantRow.organization_id) : null;
+                  const { label: kindLabel, variant: kindVariant } = org ? orgKindBadge(org.org_kind, t) : { label: "—", variant: "muted" as const };
                   return (
                     <tr key={m.usage_id} className="border-b border-[var(--border)]">
                       <td className="px-2 py-1.5">
@@ -1321,7 +1334,7 @@ function HealthTab() {
                         ) : <span className="text-[var(--text-muted)]">—</span>}
                       </td>
                       <td className="px-2 py-1.5">
-                        <span className="font-medium">{tenant?.display_name || ""}</span>
+                        <span className="font-medium">{tenantRow?.display_name || ""}</span>
                         <span className="text-[var(--text-muted)] font-mono ml-1">{truncate(m.tenant_id, 8)}</span>
                       </td>
                       <td className="px-2 py-1.5">{m.meter}</td>
@@ -1368,6 +1381,7 @@ interface WizardResult {
 }
 
 function MSPOnboardingWizard({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const { data: session } = useSession();
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -1397,7 +1411,7 @@ function MSPOnboardingWizard({ onClose }: { onClose: () => void }) {
   const togglePerm = (p: string) =>
     setGrantPerms((prev) => prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]);
 
-  const STEPS = ["Empresa", "Admin", "Acesso MSP", "Concluído"];
+  const STEPS = [t("platformAdmin.wizard.stepCompany"), t("platformAdmin.wizard.stepAdmin"), t("platformAdmin.wizard.stepMsp"), t("platformAdmin.wizard.stepDone")];
 
   async function runWizard() {
     setRunning(true);
@@ -1470,68 +1484,68 @@ function MSPOnboardingWizard({ onClose }: { onClose: () => void }) {
 
       {step === 0 && (
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold">Dados da empresa cliente</h3>
+          <h3 className="text-sm font-semibold">{t("platformAdmin.wizard.step0Title")}</h3>
           <div>
-            <label className="block text-xs text-[var(--text-muted)] mb-1">Nome da empresa *</label>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.wizard.companyNameLabel")}</label>
             <input className={inputCls} value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="Acme Corp" />
           </div>
           <div>
-            <label className="block text-xs text-[var(--text-muted)] mb-1">ID da organização *</label>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.wizard.orgIdLabel")}</label>
             <input className={inputCls} value={orgSlug} onChange={(e) => setOrgSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))} placeholder="acme-corp" />
           </div>
           <div>
-            <label className="block text-xs text-[var(--text-muted)] mb-1">Nome do workspace *</label>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.wizard.workspaceNameLabel")}</label>
             <input className={inputCls} value={tenantName} onChange={(e) => setTenantName(e.target.value)} placeholder="Produção" />
           </div>
           <div>
-            <label className="block text-xs text-[var(--text-muted)] mb-1">ID do tenant *</label>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.wizard.tenantIdLabel")}</label>
             <input className={inputCls} value={tenantSlug} onChange={(e) => setTenantSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))} placeholder="acme-prod" />
           </div>
           <div className="flex gap-2 pt-1">
             <Button className="flex-1" onClick={() => setStep(1)} disabled={!orgName || !orgSlug || !tenantName || !tenantSlug}>
-              Próximo →
+              {t("platformAdmin.wizard.nextBtn")}
             </Button>
-            <Button variant="ghost" className="flex-1" onClick={onClose}>Cancelar</Button>
+            <Button variant="ghost" className="flex-1" onClick={onClose}>{t("platformAdmin.wizard.cancelBtn")}</Button>
           </div>
         </div>
       )}
 
       {step === 1 && (
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold">Conta do administrador</h3>
+          <h3 className="text-sm font-semibold">{t("platformAdmin.wizard.step1Title")}</h3>
           <div>
-            <label className="block text-xs text-[var(--text-muted)] mb-1">E-mail *</label>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.wizard.emailLabel")}</label>
             <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@acme.com" />
           </div>
           <div>
-            <label className="block text-xs text-[var(--text-muted)] mb-1">Nome</label>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.wizard.firstNameLabel")}</label>
             <input className={inputCls} value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="João" />
           </div>
           <div>
-            <label className="block text-xs text-[var(--text-muted)] mb-1">Sobrenome</label>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.wizard.lastNameLabel")}</label>
             <input className={inputCls} value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Silva" />
           </div>
           <div className="flex gap-2 pt-1">
-            <Button variant="ghost" onClick={() => setStep(0)}>← Voltar</Button>
-            <Button className="flex-1" onClick={() => setStep(2)} disabled={!email}>Próximo →</Button>
+            <Button variant="ghost" onClick={() => setStep(0)}>{t("platformAdmin.wizard.backBtn")}</Button>
+            <Button className="flex-1" onClick={() => setStep(2)} disabled={!email}>{t("platformAdmin.wizard.nextBtn")}</Button>
           </div>
         </div>
       )}
 
       {step === 2 && (
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold">Vínculo MSP</h3>
-          <p className="text-xs text-[var(--text-muted)]">Cria o relacionamento MSP e concede acesso de monitoramento ao seu principal.</p>
+          <h3 className="text-sm font-semibold">{t("platformAdmin.wizard.step2Title")}</h3>
+          <p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.wizard.step2Desc")}</p>
           <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
             <input type="checkbox" checked={skipGrant} onChange={(e) => setSkipGrant(e.target.checked)} />
-            Pular — configurar acesso MSP depois
+            {t("platformAdmin.wizard.skipGrant")}
           </label>
           {!skipGrant && (
             <>
               <div>
-                <label className="block text-xs text-[var(--text-muted)] mb-1">Sua organização MSP *</label>
+                <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.wizard.mspOrgLabel")}</label>
                 <select className={inputCls + " cursor-pointer"} value={sourceOrgId} onChange={(e) => setSourceOrgId(e.target.value)}>
-                  <option value="">Selecione sua org…</option>
+                  <option value="">{t("platformAdmin.wizard.selectOrgPlaceholder")}</option>
                   {(orgsQ.data ?? []).filter(o => o.organization_id !== orgSlug).map((o) => (
                     <option key={o.organization_id} value={o.organization_id}>
                       {o.display_name || o.organization_id}
@@ -1540,7 +1554,7 @@ function MSPOnboardingWizard({ onClose }: { onClose: () => void }) {
                 </select>
               </div>
               <div>
-                <label className="block text-xs text-[var(--text-muted)] mb-2">Permissões concedidas ao seu principal</label>
+                <label className="block text-xs text-[var(--text-muted)] mb-2">{t("platformAdmin.wizard.grantPermsLabel")}</label>
                 <div className="grid grid-cols-2 gap-1">
                   {MSP_PERMISSIONS.map((p) => (
                     <label key={p} className="flex items-center gap-1.5 text-[10px] cursor-pointer select-none">
@@ -1554,9 +1568,9 @@ function MSPOnboardingWizard({ onClose }: { onClose: () => void }) {
           )}
           {wizardError && <p className="text-xs text-[var(--red)]">{wizardError}</p>}
           <div className="flex gap-2 pt-1">
-            <Button variant="ghost" onClick={() => { setWizardError(null); setStep(1); }}>← Voltar</Button>
+            <Button variant="ghost" onClick={() => { setWizardError(null); setStep(1); }}>{t("platformAdmin.wizard.backBtn")}</Button>
             <Button className="flex-1" onClick={runWizard} disabled={running || (!skipGrant && !sourceOrgId)}>
-              {running ? <Spinner className="w-3 h-3" /> : "Criar cliente"}
+              {running ? <Spinner className="w-3 h-3" /> : t("platformAdmin.wizard.createClientBtn")}
             </Button>
           </div>
         </div>
@@ -1566,29 +1580,29 @@ function MSPOnboardingWizard({ onClose }: { onClose: () => void }) {
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <span style={{ color: "var(--green,#22c55e)", fontSize: 20 }}>✓</span>
-            <h3 className="text-sm font-semibold">Cliente criado com sucesso!</h3>
+            <h3 className="text-sm font-semibold">{t("platformAdmin.wizard.step3Title")}</h3>
           </div>
           <div className="space-y-1.5 text-xs">
-            <div className="flex justify-between"><span className="text-[var(--text-muted)]">Organização</span><code className="font-mono">{result.org_id}</code></div>
-            <div className="flex justify-between"><span className="text-[var(--text-muted)]">Tenant</span><code className="font-mono">{result.tenant_id}</code></div>
-            <div className="flex justify-between"><span className="text-[var(--text-muted)]">Admin</span><span>{result.user_email}</span></div>
+            <div className="flex justify-between"><span className="text-[var(--text-muted)]">{t("platformAdmin.wizard.labelOrg")}</span><code className="font-mono">{result.org_id}</code></div>
+            <div className="flex justify-between"><span className="text-[var(--text-muted)]">{t("platformAdmin.wizard.labelTenant")}</span><code className="font-mono">{result.tenant_id}</code></div>
+            <div className="flex justify-between"><span className="text-[var(--text-muted)]">{t("platformAdmin.wizard.labelAdmin")}</span><span>{result.user_email}</span></div>
             {result.grant_id && (
-              <div className="flex justify-between"><span className="text-[var(--text-muted)]">Grant MSP</span><Badge variant="success">ativo</Badge></div>
+              <div className="flex justify-between"><span className="text-[var(--text-muted)]">{t("platformAdmin.wizard.labelGrantMsp")}</span><Badge variant="success">{t("platformAdmin.wizard.grantActive")}</Badge></div>
             )}
           </div>
           <div className="p-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
-            <p className="text-[10px] text-[var(--text-muted)] mb-1.5">Senha temporária — única exibição</p>
+            <p className="text-[10px] text-[var(--text-muted)] mb-1.5">{t("platformAdmin.wizard.tempPasswordLabel")}</p>
             <div className="flex items-center gap-2">
               <code className="text-sm font-mono flex-1 break-all select-all">{result.temp_password}</code>
               <button
-                onClick={() => { navigator.clipboard.writeText(result.temp_password).catch(() => null); toast("Copiada", "success"); }}
+                onClick={() => { navigator.clipboard.writeText(result.temp_password).catch(() => null); toast(t("platformAdmin.wizard.copiedToast"), "success"); }}
                 className="p-1.5 rounded border border-[var(--border)] hover:bg-[var(--surface)] shrink-0"
               >
                 <Copy size={12} />
               </button>
             </div>
           </div>
-          <Button className="w-full" onClick={onClose}>Fechar</Button>
+          <Button className="w-full" onClick={onClose}>{t("platformAdmin.wizard.closeBtn")}</Button>
         </div>
       )}
     </Modal>
@@ -1619,6 +1633,7 @@ interface Grant {
 }
 
 function RelationshipsTab() {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [showCreateRel, setShowCreateRel] = useState(false);
@@ -1655,7 +1670,7 @@ function RelationshipsTab() {
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-relationships"] });
-      toast("Relacionamento criado", "success");
+      toast(t("platformAdmin.relationships.createdToast"), "success");
       setShowCreateRel(false);
       setRelSrc(""); setRelTgt(""); setRelFamily("msp");
     },
@@ -1666,7 +1681,7 @@ function RelationshipsTab() {
     mutationFn: (id: string) => api.post(`/api/v1/platform/relationships/${id}/end`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-relationships"] });
-      toast("Relacionamento encerrado", "success");
+      toast(t("platformAdmin.relationships.endedToast"), "success");
       setConfirmEndRel(null);
     },
     onError: (e: Error) => toast(e.message || "Erro ao encerrar", "error"),
@@ -1676,7 +1691,7 @@ function RelationshipsTab() {
     mutationFn: (id: string) => api.post(`/api/v1/platform/delegated-grants/${id}/revoke`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-grants"] });
-      toast("Grant revogado", "success");
+      toast(t("platformAdmin.relationships.grantRevokedToast"), "success");
       setConfirmRevoke(null);
     },
     onError: (e: Error) => toast(e.message || "Erro", "error"),
@@ -1685,7 +1700,7 @@ function RelationshipsTab() {
   const orgs = orgsQ.data ?? [];
   const orgName = (id: string) => orgs.find(o => o.organization_id === id)?.display_name || id;
   const tenants = tenantsQ.data ?? [];
-  const tenantName = (id: string) => tenants.find(t => t.tenant_id === id)?.display_name || id;
+  const tenantName = (id: string) => tenants.find(ten => ten.tenant_id === id)?.display_name || id;
 
   const activeGrants = (grantsQ.data ?? []).filter(g => g.state === "active");
 
@@ -1694,58 +1709,58 @@ function RelationshipsTab() {
       {/* Relationships */}
       <Card>
         <div className="flex items-center justify-between mb-4">
-          <span className="text-sm font-semibold">Relacionamentos MSP</span>
+          <span className="text-sm font-semibold">{t("platformAdmin.relationships.header")}</span>
           <div className="flex gap-2">
             <Button size="sm" variant="secondary" onClick={() => setShowTransfer(true)}>
-              <GitMerge size={13} /> Transferir prestador
+              <GitMerge size={13} /> {t("platformAdmin.relationships.transferBtn")}
             </Button>
             <Button size="sm" onClick={() => setShowCreateRel(true)}>
-              <Plus size={13} /> Novo relacionamento
+              <Plus size={13} /> {t("platformAdmin.relationships.newRelBtn")}
             </Button>
           </div>
         </div>
 
         {showCreateRel && (
           <div className="mb-4 p-4 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] space-y-3">
-            <p className="text-xs font-semibold">Criar relacionamento</p>
+            <p className="text-xs font-semibold">{t("platformAdmin.relationships.createRelTitle")}</p>
             <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">Tipo</label>
+              <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.relationships.typeLabel")}</label>
               <select className={inputCls} value={relFamily} onChange={(e) => setRelFamily(e.target.value)}>
-                <option value="msp">MSP (prestador de serviços)</option>
-                <option value="reseller">Reseller</option>
-                <option value="partner">Partner</option>
+                <option value="msp">{t("platformAdmin.relationships.typeMsp")}</option>
+                <option value="reseller">{t("platformAdmin.relationships.typeReseller")}</option>
+                <option value="partner">{t("platformAdmin.relationships.typePartner")}</option>
               </select>
             </div>
             <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">Organização fonte (sua) *</label>
+              <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.relationships.srcOrgLabel")}</label>
               <select className={inputCls} value={relSrc} onChange={(e) => setRelSrc(e.target.value)}>
-                <option value="">Selecione…</option>
+                <option value="">{t("platformAdmin.relationships.selectPlaceholder")}</option>
                 {orgs.map(o => <option key={o.organization_id} value={o.organization_id}>{o.display_name || o.organization_id}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">Organização alvo (cliente) *</label>
+              <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.relationships.tgtOrgLabel")}</label>
               <select className={inputCls} value={relTgt} onChange={(e) => setRelTgt(e.target.value)}>
-                <option value="">Selecione…</option>
+                <option value="">{t("platformAdmin.relationships.selectPlaceholder")}</option>
                 {orgs.filter(o => o.organization_id !== relSrc).map(o => <option key={o.organization_id} value={o.organization_id}>{o.display_name || o.organization_id}</option>)}
               </select>
             </div>
             <div className="flex gap-2">
               <Button size="sm" onClick={() => createRel.mutate()} disabled={!relSrc || !relTgt || createRel.isPending}>
-                {createRel.isPending ? <Spinner className="w-3 h-3" /> : null} Criar
+                {createRel.isPending ? <Spinner className="w-3 h-3" /> : null} {t("platformAdmin.relationships.createBtn")}
               </Button>
-              <Button size="sm" variant="secondary" onClick={() => setShowCreateRel(false)}>Cancelar</Button>
+              <Button size="sm" variant="secondary" onClick={() => setShowCreateRel(false)}>{t("platformAdmin.relationships.cancelBtn")}</Button>
             </div>
           </div>
         )}
 
         {relsQ.isLoading ? <Spinner /> : (relsQ.data ?? []).length === 0 ? (
-          <p className="text-xs text-[var(--text-muted)]">Nenhum relacionamento cadastrado.</p>
+          <p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.relationships.noRelationships")}</p>
         ) : (
           <div className="space-y-1">
             {(relsQ.data ?? []).map(r => (
               <div key={r.relationship_id} className="flex items-center gap-3 text-xs bg-[var(--surface-2)] rounded-lg px-3 py-2.5">
-                <Badge variant="muted">{familyLabel(r.family)}</Badge>
+                <Badge variant="muted">{familyLabel(r.family, t)}</Badge>
                 <span className="font-medium">{orgName(r.source_organization_id)}</span>
                 <span className="text-[var(--text-muted)]">→</span>
                 <span className="font-medium">{orgName(r.target_organization_id)}</span>
@@ -1754,7 +1769,7 @@ function RelationshipsTab() {
                   <button
                     onClick={() => setConfirmEndRel(r.relationship_id)}
                     className="p-1 rounded hover:bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--red,#ef4444)] shrink-0"
-                    title="Encerrar relacionamento"
+                    title={t("platformAdmin.relationships.endRelButtonTitle")}
                   >
                     <X size={13} />
                   </button>
@@ -1768,12 +1783,12 @@ function RelationshipsTab() {
       {/* Delegated grants */}
       <Card>
         <div className="flex items-center justify-between mb-4">
-          <span className="text-sm font-semibold">Delegated Grants</span>
-          <span className="text-xs text-[var(--text-muted)]">{activeGrants.length} ativo{activeGrants.length !== 1 ? "s" : ""}</span>
+          <span className="text-sm font-semibold">{t("platformAdmin.relationships.grantsHeader")}</span>
+          <span className="text-xs text-[var(--text-muted)]">{t("platformAdmin.relationships.grantsCount", { count: activeGrants.length })}</span>
         </div>
 
         {grantsQ.isLoading ? <Spinner /> : activeGrants.length === 0 ? (
-          <p className="text-xs text-[var(--text-muted)]">Nenhum grant ativo.</p>
+          <p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.relationships.noGrants")}</p>
         ) : (
           <div className="space-y-1">
             {activeGrants.map(g => (
@@ -1791,7 +1806,7 @@ function RelationshipsTab() {
                 <button
                   onClick={() => setConfirmRevoke(g.grant_id)}
                   className="p-1 rounded hover:bg-[var(--surface)] text-[var(--red,#ef4444)] shrink-0"
-                  title="Revogar grant"
+                  title={t("platformAdmin.relationships.revokeGrantButtonTitle")}
                 >
                   <Trash2 size={13} />
                 </button>
@@ -1803,9 +1818,9 @@ function RelationshipsTab() {
 
       {confirmRevoke && (
         <ConfirmModal
-          title="Revogar delegated grant"
-          description="O acesso MSP ao tenant será removido imediatamente."
-          confirmLabel="Revogar"
+          title={t("platformAdmin.relationships.revokeGrantTitle")}
+          description={t("platformAdmin.relationships.revokeGrantDesc")}
+          confirmLabel={t("platformAdmin.relationships.revokeLabel")}
           destructive
           onConfirm={() => revokeGrant.mutate(confirmRevoke)}
           onCancel={() => setConfirmRevoke(null)}
@@ -1814,9 +1829,9 @@ function RelationshipsTab() {
 
       {confirmEndRel && (
         <ConfirmModal
-          title="Encerrar relacionamento"
-          description="O relacionamento será encerrado. Grants vinculados permanecem até serem revogados manualmente."
-          confirmLabel="Encerrar"
+          title={t("platformAdmin.relationships.endRelTitle")}
+          description={t("platformAdmin.relationships.endRelDesc")}
+          confirmLabel={t("platformAdmin.relationships.endRelLabel")}
           destructive
           onConfirm={() => endRel.mutate(confirmEndRel)}
           onCancel={() => setConfirmEndRel(null)}
@@ -1849,6 +1864,7 @@ function ServiceProviderTransferModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [targetOrgId, setTargetOrgId] = useState("");
   const [fromOrgId, setFromOrgId] = useState("");
@@ -1872,7 +1888,7 @@ function ServiceProviderTransferModal({
       }),
     onSuccess: (data) => {
       setResult(data);
-      toast("Transferência concluída", "success");
+      toast(t("platformAdmin.transfer.completedToast"), "success");
       onSuccess();
     },
     onError: (e: Error) => toast(e.message || "Erro na transferência", "error"),
@@ -1889,28 +1905,28 @@ function ServiceProviderTransferModal({
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <span style={{ color: "var(--green,#22c55e)", fontSize: 20 }}>✓</span>
-            <h3 className="text-sm font-semibold">Transferência concluída</h3>
+            <h3 className="text-sm font-semibold">{t("platformAdmin.transfer.resultTitle")}</h3>
           </div>
           <div className="space-y-1.5 text-xs">
             <div className="flex justify-between">
-              <span className="text-[var(--text-muted)]">Cliente transferido</span>
+              <span className="text-[var(--text-muted)]">{t("platformAdmin.transfer.clientTransferred")}</span>
               <span className="font-medium">{orgName(targetOrgId)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-[var(--text-muted)]">Prestador anterior</span>
+              <span className="text-[var(--text-muted)]">{t("platformAdmin.transfer.previousProvider")}</span>
               <span>{orgName(fromOrgId)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-[var(--text-muted)]">Novo prestador</span>
+              <span className="text-[var(--text-muted)]">{t("platformAdmin.transfer.newProvider")}</span>
               <span>{orgName(toOrgId)}</span>
             </div>
           </div>
           <div className="rounded-lg bg-[var(--surface-2)] border border-[var(--border)] p-3 space-y-1.5 text-[11px] text-[var(--text-muted)]">
-            <p>Grants revogados: <span className="font-mono text-[var(--text)]">{result.fenced_grants.length}</span></p>
-            <p>Relacionamentos encerrados: <span className="font-mono text-[var(--text)]">{result.ended_relationships.length}</span></p>
-            <p>Novos relacionamentos: <span className="font-mono text-[var(--text)]">{result.successor_relationships.length}</span></p>
+            <p>{t("platformAdmin.transfer.fencedGrants")} <span className="font-mono text-[var(--text)]">{result.fenced_grants.length}</span></p>
+            <p>{t("platformAdmin.transfer.endedRelationships")} <span className="font-mono text-[var(--text)]">{result.ended_relationships.length}</span></p>
+            <p>{t("platformAdmin.transfer.successorRelationships")} <span className="font-mono text-[var(--text)]">{result.successor_relationships.length}</span></p>
           </div>
-          <Button className="w-full" onClick={onClose}>Fechar</Button>
+          <Button className="w-full" onClick={onClose}>{t("platformAdmin.transfer.closeBtn")}</Button>
         </div>
       </Modal>
     );
@@ -1920,18 +1936,17 @@ function ServiceProviderTransferModal({
     <Modal onClose={onClose}>
       <div className="space-y-4">
         <div>
-          <h3 className="text-sm font-semibold">Transferir prestador de serviço</h3>
+          <h3 className="text-sm font-semibold">{t("platformAdmin.transfer.title")}</h3>
           <p className="text-xs text-[var(--text-muted)] mt-1">
-            Move um cliente de um MSP para outro. O prestador antigo perde todos os grants e
-            relacionamentos; o novo assume as mesmas famílias.
+            {t("platformAdmin.transfer.desc")}
           </p>
         </div>
 
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-[var(--text-muted)] mb-1">Cliente a transferir *</label>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.transfer.clientLabel")}</label>
             <select className={inputCls} value={targetOrgId} onChange={(e) => setTargetOrgId(e.target.value)}>
-              <option value="">Selecione o cliente…</option>
+              <option value="">{t("platformAdmin.transfer.clientPlaceholder")}</option>
               {clientOrgs.map(o => (
                 <option key={o.organization_id} value={o.organization_id}>
                   {o.display_name || o.organization_id}
@@ -1940,9 +1955,9 @@ function ServiceProviderTransferModal({
             </select>
           </div>
           <div>
-            <label className="block text-xs text-[var(--text-muted)] mb-1">Prestador atual (saindo) *</label>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.transfer.fromLabel")}</label>
             <select className={inputCls} value={fromOrgId} onChange={(e) => setFromOrgId(e.target.value)}>
-              <option value="">Selecione o MSP atual…</option>
+              <option value="">{t("platformAdmin.transfer.fromPlaceholder")}</option>
               {mspOrgs.filter(o => o.organization_id !== toOrgId).map(o => (
                 <option key={o.organization_id} value={o.organization_id}>
                   {o.display_name || o.organization_id}
@@ -1951,9 +1966,9 @@ function ServiceProviderTransferModal({
             </select>
           </div>
           <div>
-            <label className="block text-xs text-[var(--text-muted)] mb-1">Novo prestador (entrando) *</label>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">{t("platformAdmin.transfer.toLabel")}</label>
             <select className={inputCls} value={toOrgId} onChange={(e) => setToOrgId(e.target.value)}>
-              <option value="">Selecione o novo MSP…</option>
+              <option value="">{t("platformAdmin.transfer.toPlaceholder")}</option>
               {mspOrgs.filter(o => o.organization_id !== fromOrgId).map(o => (
                 <option key={o.organization_id} value={o.organization_id}>
                   {o.display_name || o.organization_id}
@@ -1965,11 +1980,9 @@ function ServiceProviderTransferModal({
 
         {targetOrgId && fromOrgId && toOrgId && (
           <div className="rounded-lg bg-[color-mix(in_srgb,var(--yellow,#f59e0b)_8%,transparent)] border border-[color-mix(in_srgb,var(--yellow,#f59e0b)_30%,transparent)] p-3 text-[11px] space-y-0.5">
-            <p className="font-semibold" style={{ color: "var(--yellow,#f59e0b)" }}>Atenção — operação irreversível</p>
+            <p className="font-semibold" style={{ color: "var(--yellow,#f59e0b)" }}>{t("platformAdmin.transfer.warningTitle")}</p>
             <p className="text-[var(--text-muted)]">
-              Todos os grants do <strong>{orgName(fromOrgId)}</strong> sobre{" "}
-              <strong>{orgName(targetOrgId)}</strong> serão revogados e os relacionamentos
-              encerrados. O <strong>{orgName(toOrgId)}</strong> assume como novo prestador.
+              {t("platformAdmin.transfer.warningBody", { from: orgName(fromOrgId), target: orgName(targetOrgId), to: orgName(toOrgId) })}
             </p>
           </div>
         )}
@@ -1980,9 +1993,9 @@ function ServiceProviderTransferModal({
             onClick={() => transfer.mutate()}
             disabled={!targetOrgId || !fromOrgId || !toOrgId || fromOrgId === toOrgId || transfer.isPending}
           >
-            {transfer.isPending ? <Spinner className="w-3 h-3" /> : "Executar transferência"}
+            {transfer.isPending ? <Spinner className="w-3 h-3" /> : t("platformAdmin.transfer.executeBtn")}
           </Button>
-          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button variant="ghost" onClick={onClose}>{t("platformAdmin.transfer.cancelBtn")}</Button>
         </div>
       </div>
     </Modal>
@@ -2010,6 +2023,7 @@ interface KcUser {
 }
 
 function UsersTab() {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [q, setQ] = useState("");
   const [searched, setSearched] = useState(false);
@@ -2026,20 +2040,20 @@ function UsersTab() {
       api.post<{ temp_password: string }>(`/api/v1/platform/users/${u.user_id}/reset-password`, {}),
     onSuccess: (data, u) => {
       setResetResult({ email: u.email, pwd: data.temp_password });
-      toast("Senha redefinida", "success");
+      toast(t("platformAdmin.users.pwdResetToast"), "success");
     },
     onError: (e: Error) => toast(e.message || "Erro ao redefinir senha", "error"),
   });
 
   const disableUser = useMutation({
     mutationFn: (id: string) => api.post(`/api/v1/platform/users/${id}/disable`, {}),
-    onSuccess: () => { toast("Conta desativada", "success"); searchQ.refetch(); },
+    onSuccess: () => { toast(t("platformAdmin.users.disabledToast"), "success"); searchQ.refetch(); },
     onError: (e: Error) => toast(e.message || "Erro", "error"),
   });
 
   const enableUser = useMutation({
     mutationFn: (id: string) => api.post(`/api/v1/platform/users/${id}/enable`, {}),
-    onSuccess: () => { toast("Conta reativada", "success"); searchQ.refetch(); },
+    onSuccess: () => { toast(t("platformAdmin.users.enabledToast"), "success"); searchQ.refetch(); },
     onError: (e: Error) => toast(e.message || "Erro", "error"),
   });
 
@@ -2048,20 +2062,20 @@ function UsersTab() {
       {resetResult && (
         <div className="p-4 rounded-xl border border-[var(--green,#22c55e)] bg-[color-mix(in_srgb,var(--green,#22c55e)_8%,transparent)] space-y-3">
           <p className="text-sm font-semibold" style={{ color: "var(--green,#22c55e)" }}>
-            Senha redefinida para {resetResult.email}
+            {t("platformAdmin.users.pwdResetBanner", { email: resetResult.email })}
           </p>
           <div className="flex items-center gap-2">
             <code className="text-sm font-mono flex-1 break-all select-all bg-[var(--surface-2)] px-2 py-1.5 rounded border border-[var(--border)]">
               {resetResult.pwd}
             </code>
             <button
-              onClick={() => { navigator.clipboard.writeText(resetResult.pwd).catch(() => null); toast("Copiada", "success"); }}
+              onClick={() => { navigator.clipboard.writeText(resetResult.pwd).catch(() => null); toast(t("platformAdmin.users.copiedToast"), "success"); }}
               className="p-1.5 rounded border border-[var(--border)] hover:bg-[var(--surface-2)]"
             >
               <Copy size={13} />
             </button>
           </div>
-          <Button size="sm" variant="secondary" onClick={() => setResetResult(null)}>Fechar</Button>
+          <Button size="sm" variant="secondary" onClick={() => setResetResult(null)}>{t("platformAdmin.users.closeBtn")}</Button>
         </div>
       )}
 
@@ -2071,25 +2085,25 @@ function UsersTab() {
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
             <input
               className={inputCls + " pl-8"}
-              placeholder="Buscar por email ou nome…"
+              placeholder={t("platformAdmin.users.searchPlaceholder")}
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { setSearched(true); searchQ.refetch(); } }}
             />
           </div>
           <Button size="sm" onClick={() => { setSearched(true); searchQ.refetch(); }}>
-            Buscar
+            {t("platformAdmin.users.searchBtn")}
           </Button>
         </div>
 
         {!searched && (
-          <p className="text-xs text-[var(--text-muted)]">Digite um email ou nome e clique em Buscar.</p>
+          <p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.users.searchHint")}</p>
         )}
 
         {searched && searchQ.isLoading && <Spinner />}
 
         {searched && !searchQ.isLoading && (searchQ.data ?? []).length === 0 && (
-          <p className="text-xs text-[var(--text-muted)]">Nenhum usuário encontrado.</p>
+          <p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.users.noResults")}</p>
         )}
 
         {(searchQ.data ?? []).length > 0 && (
@@ -2101,26 +2115,26 @@ function UsersTab() {
                   <p className="text-[var(--text-muted)] text-[10px] truncate">{u.email}</p>
                   {(u.tenants ?? []).length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
-                      {(u.tenants ?? []).map((t) => (
-                        <span key={t.tenant_id} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]">
-                          <span className="font-medium text-[var(--text)]">{t.tenant_name || t.tenant_id}</span>
+                      {(u.tenants ?? []).map((ut) => (
+                        <span key={ut.tenant_id} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]">
+                          <span className="font-medium text-[var(--text)]">{ut.tenant_name || ut.tenant_id}</span>
                           <span className="opacity-60">·</span>
-                          <span>{t.role === "tenant_admin" ? "admin" : "membro"}</span>
+                          <span>{ut.role === "tenant_admin" ? "admin" : t("platformAdmin.users.roleMember")}</span>
                         </span>
                       ))}
                     </div>
                   )}
                   {(u.tenants ?? []).length === 0 && searched && (
-                    <p className="text-[10px] text-[var(--text-muted)] opacity-60 mt-0.5">sem tenant</p>
+                    <p className="text-[10px] text-[var(--text-muted)] opacity-60 mt-0.5">{t("platformAdmin.users.noTenant")}</p>
                   )}
                 </div>
-                <Badge variant={u.enabled ? "success" : "muted"}>{u.enabled ? "ativo" : "inativo"}</Badge>
+                <Badge variant={u.enabled ? "success" : "muted"}>{u.enabled ? t("platformAdmin.users.userActive") : t("platformAdmin.users.userInactive")}</Badge>
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     onClick={() => resetPwd.mutate(u)}
                     disabled={resetPwd.isPending}
                     className="p-1 rounded hover:bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--brand)]"
-                    title="Redefinir senha"
+                    title={t("platformAdmin.users.resetPwdTitle")}
                   >
                     <KeyRound size={13} />
                   </button>
@@ -2128,7 +2142,7 @@ function UsersTab() {
                     <button
                       onClick={() => disableUser.mutate(u.user_id)}
                       className="p-1 rounded hover:bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--yellow,#f59e0b)]"
-                      title="Desativar"
+                      title={t("platformAdmin.users.disableTitle")}
                     >
                       <ShieldOff size={13} />
                     </button>
@@ -2136,7 +2150,7 @@ function UsersTab() {
                     <button
                       onClick={() => enableUser.mutate(u.user_id)}
                       className="p-1 rounded hover:bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--green,#22c55e)]"
-                      title="Reativar"
+                      title={t("platformAdmin.users.enableTitle")}
                     >
                       <ShieldCheck size={13} />
                     </button>
@@ -2163,6 +2177,7 @@ interface DisplayToken {
 }
 
 function TVModeTab() {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
@@ -2203,101 +2218,101 @@ function TVModeTab() {
     mutationFn: (principalId: string) =>
       api.post(`/api/v1/platform/display-tokens/${principalId}/revoke`, {}),
     onSuccess: () => {
-      toast("Token revogado", "success");
+      toast(t("platformAdmin.tv.revokedToast"), "success");
       qc.invalidateQueries({ queryKey: ["platform-display-tokens"] });
       setConfirmRevoke(null);
     },
     onError: (e: Error) => toast(e.message || "Erro ao revogar", "error"),
   });
 
-  const activeTokens = (tokensQ.data ?? []).filter((t) => !t.retired);
+  const activeTokens = (tokensQ.data ?? []).filter((tok) => !tok.retired);
 
   return (
     <div className="space-y-4">
       {createdToken && (
         <div className="p-4 rounded-xl border border-[var(--green,#22c55e)] bg-[color-mix(in_srgb,var(--green,#22c55e)_8%,transparent)] space-y-3">
           <p className="text-sm font-semibold" style={{ color: "var(--green,#22c55e)" }}>
-            Token criado! Copie a URL abaixo — ela não será exibida novamente.
+            {t("platformAdmin.tv.tokenCreatedMsg")}
           </p>
           <div className="flex items-center gap-2">
             <code className="text-xs flex-1 truncate font-mono bg-[var(--surface-2)] px-2 py-1.5 rounded border border-[var(--border)]">
               {createdToken.tv_url}
             </code>
             <button
-              onClick={() => { navigator.clipboard.writeText(createdToken.tv_url).catch(() => null); toast("URL copiada", "success"); }}
+              onClick={() => { navigator.clipboard.writeText(createdToken.tv_url).catch(() => null); toast(t("platformAdmin.tv.urlCopiedToast"), "success"); }}
               className="p-1.5 rounded border border-[var(--border)] hover:bg-[var(--surface-2)]"
-              title="Copiar URL"
+              title={t("platformAdmin.tv.copyUrlTitle")}
             >
               <Copy size={13} />
             </button>
           </div>
-          <Button size="sm" variant="secondary" onClick={() => setCreatedToken(null)}>Fechar</Button>
+          <Button size="sm" variant="secondary" onClick={() => setCreatedToken(null)}>{t("platformAdmin.tv.closeBtn")}</Button>
         </div>
       )}
 
       <Card>
         <div className="flex items-center justify-between mb-4">
-          <span className="text-sm font-semibold">Tokens de Modo TV</span>
+          <span className="text-sm font-semibold">{t("platformAdmin.tv.header")}</span>
           <Button size="sm" onClick={() => setShowCreate(true)}>
-            <Plus size={13} /> Novo token
+            <Plus size={13} /> {t("platformAdmin.tv.newTokenBtn")}
           </Button>
         </div>
 
         {showCreate && (
           <div className="mb-4 p-4 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] space-y-3">
-            <p className="text-xs font-semibold">Criar token de TV</p>
+            <p className="text-xs font-semibold">{t("platformAdmin.tv.createFormTitle")}</p>
             <div className="space-y-2">
               <div>
-                <label className="text-xs text-[var(--text-muted)] block mb-1">Tenant *</label>
+                <label className="text-xs text-[var(--text-muted)] block mb-1">{t("platformAdmin.tv.tenantLabel")}</label>
                 <select
                   className={inputCls}
                   value={newTenantId}
                   onChange={(e) => setNewTenantId(e.target.value)}
                 >
-                  <option value="">Selecione…</option>
-                  {(tenantsQ.data ?? []).map((t) => (
-                    <option key={t.tenant_id} value={t.tenant_id}>
-                      {t.display_name || t.tenant_id}
+                  <option value="">{t("platformAdmin.tv.selectPlaceholder")}</option>
+                  {(tenantsQ.data ?? []).map((ten) => (
+                    <option key={ten.tenant_id} value={ten.tenant_id}>
+                      {ten.display_name || ten.tenant_id}
                     </option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="text-xs text-[var(--text-muted)] block mb-1">Label</label>
-                <input className={inputCls} placeholder="TV Sala de Operações" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} />
+                <label className="text-xs text-[var(--text-muted)] block mb-1">{t("platformAdmin.tv.labelField")}</label>
+                <input className={inputCls} placeholder={t("platformAdmin.tv.labelPlaceholder")} value={newLabel} onChange={(e) => setNewLabel(e.target.value)} />
               </div>
               <div>
-                <label className="text-xs text-[var(--text-muted)] block mb-1">Validade (dias)</label>
+                <label className="text-xs text-[var(--text-muted)] block mb-1">{t("platformAdmin.tv.expiryLabel")}</label>
                 <input className={inputCls} type="number" min="1" value={newExpireDays} onChange={(e) => setNewExpireDays(e.target.value)} />
               </div>
             </div>
             <div className="flex gap-2">
               <Button size="sm" onClick={() => createMut.mutate()} disabled={!newTenantId || createMut.isPending}>
                 {createMut.isPending ? <Spinner className="w-3 h-3" /> : null}
-                Gerar token
+                {t("platformAdmin.tv.generateBtn")}
               </Button>
-              <Button size="sm" variant="secondary" onClick={() => setShowCreate(false)}>Cancelar</Button>
+              <Button size="sm" variant="secondary" onClick={() => setShowCreate(false)}>{t("platformAdmin.tv.cancelBtn")}</Button>
             </div>
           </div>
         )}
 
         {tokensQ.isLoading ? <Spinner /> : activeTokens.length === 0 ? (
-          <p className="text-xs text-[var(--text-muted)]">Nenhum token ativo.</p>
+          <p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.tv.noTokens")}</p>
         ) : (
           <div className="space-y-2">
-            {activeTokens.map((t) => (
-              <div key={t.principal_id} className="flex items-center gap-3 text-xs bg-[var(--surface-2)] rounded-lg px-3 py-2.5">
+            {activeTokens.map((tok) => (
+              <div key={tok.principal_id} className="flex items-center gap-3 text-xs bg-[var(--surface-2)] rounded-lg px-3 py-2.5">
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{t.label || "TV Display"}</p>
-                  <p className="text-[var(--text-muted)] text-[10px] font-mono truncate">{t.tenant_id}</p>
+                  <p className="font-medium truncate">{tok.label || "TV Display"}</p>
+                  <p className="text-[var(--text-muted)] text-[10px] font-mono truncate">{tok.tenant_id}</p>
                 </div>
                 <span className="text-[var(--text-muted)] whitespace-nowrap">
-                  exp: {t.expires_at ? new Date(t.expires_at).toLocaleDateString("pt-BR") : "nunca"}
+                  {t("platformAdmin.tv.expiryPrefix")}{tok.expires_at ? new Date(tok.expires_at).toLocaleDateString(i18n.language) : t("platformAdmin.tv.neverExpires")}
                 </span>
                 <button
-                  onClick={() => setConfirmRevoke(t.principal_id)}
+                  onClick={() => setConfirmRevoke(tok.principal_id)}
                   className="p-1 rounded hover:bg-[var(--surface)] text-[var(--red,#ef4444)]"
-                  title="Revogar"
+                  title={t("platformAdmin.tv.revokeTitle")}
                 >
                   <Trash2 size={13} />
                 </button>
@@ -2309,9 +2324,9 @@ function TVModeTab() {
 
       {confirmRevoke && (
         <ConfirmModal
-          title="Revogar token de TV"
-          description="O dispositivo perderá acesso imediatamente. Esta ação não pode ser desfeita."
-          confirmLabel="Revogar"
+          title={t("platformAdmin.tv.revokeTokenTitle")}
+          description={t("platformAdmin.tv.revokeTokenDesc")}
+          confirmLabel={t("platformAdmin.tv.revokeLabel")}
           destructive={true}
           onConfirm={() => revokeMut.mutate(confirmRevoke)}
           onCancel={() => setConfirmRevoke(null)}
@@ -2338,6 +2353,7 @@ interface TreeTenant {
 }
 
 function TeiaTab() {
+  const { t } = useTranslation();
   const orgsQ = useQuery({
     queryKey: ["teia-orgs"],
     queryFn: () => api.get<TreeOrg[]>("/api/v1/platform/organizations"),
@@ -2365,10 +2381,10 @@ function TeiaTab() {
 
   // Group tenants by org, users by tenant
   const tenantsByOrg: Record<string, TreeTenant[]> = {};
-  for (const t of tenants) {
-    const orgKey = t.organization_id ?? "__no_org__";
+  for (const ten of tenants) {
+    const orgKey = ten.organization_id ?? "__no_org__";
     if (!tenantsByOrg[orgKey]) tenantsByOrg[orgKey] = [];
-    tenantsByOrg[orgKey].push(t);
+    tenantsByOrg[orgKey].push(ten);
   }
   const usersByTenant: Record<string, Principal[]> = {};
   for (const u of users) {
@@ -2389,11 +2405,11 @@ function TeiaTab() {
   return (
     <div className="space-y-2">
       <p className="text-xs text-[var(--text-muted)]">
-        {orgs.length} org{orgs.length !== 1 ? "s" : ""} · {tenants.length} tenant{tenants.length !== 1 ? "s" : ""} · {users.length} usuário{users.length !== 1 ? "s" : ""}
+        {t("platformAdmin.teia.orgCount", { count: orgs.length })} · {t("platformAdmin.teia.tenantCount", { count: tenants.length })} · {t("platformAdmin.teia.userCount", { count: users.length })}
       </p>
 
       {orgs.length === 0 ? (
-        <Card><p className="text-xs text-[var(--text-muted)]">Nenhuma organização encontrada.</p></Card>
+        <Card><p className="text-xs text-[var(--text-muted)]">{t("platformAdmin.teia.noOrgs")}</p></Card>
       ) : (
         <div className="space-y-2">
           {orgs.map((org) => {
@@ -2412,12 +2428,12 @@ function TeiaTab() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-sm font-semibold truncate">{org.display_name || org.organization_id}</span>
-                      {org.org_kind && (() => { const k = orgKindBadge(org.org_kind!); return <Badge variant={k.variant}>{k.label}</Badge>; })()}
+                      {org.org_kind && (() => { const k = orgKindBadge(org.org_kind!, t); return <Badge variant={k.variant}>{k.label}</Badge>; })()}
                     </div>
                     <span className="text-[10px] font-mono text-[var(--text-muted)]">{org.organization_id}</span>
                   </div>
                   <span style={{ color: stateColor(org.state) }} className="text-xs">{org.state}</span>
-                  <span className="text-xs text-[var(--text-muted)]">{orgTenants.length} tenant{orgTenants.length !== 1 ? "s" : ""}</span>
+                  <span className="text-xs text-[var(--text-muted)]">{t("platformAdmin.teia.tenantCount", { count: orgTenants.length })}</span>
                   <span className="text-[var(--text-muted)]">{orgExpanded ? "▲" : "▼"}</span>
                 </button>
 
@@ -2425,7 +2441,7 @@ function TeiaTab() {
                 {orgExpanded && (
                   <div className="border-t border-[var(--border)] divide-y divide-[var(--border)]">
                     {orgTenants.length === 0 ? (
-                      <p className="text-xs text-[var(--text-muted)] px-8 py-2">Sem tenants</p>
+                      <p className="text-xs text-[var(--text-muted)] px-8 py-2">{t("platformAdmin.teia.noTenants")}</p>
                     ) : orgTenants.map((tenant) => {
                       const tenantUsers = usersByTenant[tenant.tenant_id] ?? [];
                       const tenantExpanded = expanded.has(tenant.tenant_id);
@@ -2441,7 +2457,7 @@ function TeiaTab() {
                               <span className="text-[10px] font-mono text-[var(--text-muted)]">{tenant.tenant_id}</span>
                             </div>
                             <span style={{ color: stateColor(tenant.state) }} className="text-xs">{tenant.state}</span>
-                            <span className="text-xs text-[var(--text-muted)]">{tenantUsers.length} user{tenantUsers.length !== 1 ? "s" : ""}</span>
+                            <span className="text-xs text-[var(--text-muted)]">{t("platformAdmin.teia.userCount", { count: tenantUsers.length })}</span>
                             <span className="text-[var(--text-muted)]">{tenantExpanded ? "▲" : "▼"}</span>
                           </button>
 
@@ -2449,7 +2465,7 @@ function TeiaTab() {
                           {tenantExpanded && (
                             <div className="px-14 py-2 space-y-1 bg-[var(--surface-2)]">
                               {tenantUsers.length === 0 ? (
-                                <p className="text-[10px] text-[var(--text-muted)]">Sem usuários</p>
+                                <p className="text-[10px] text-[var(--text-muted)]">{t("platformAdmin.teia.noUsers")}</p>
                               ) : tenantUsers.map((u) => (
                                 <div key={u.principal_id + (u.membership_id ?? "")} className="flex items-center gap-2 text-xs py-1">
                                   <span>{kindIcon(u.kind)}</span>
@@ -2482,20 +2498,21 @@ function TeiaTab() {
 
 type Tab = "orgs" | "tenants" | "contracts" | "health" | "tv" | "teia" | "relationships" | "users";
 
-const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: "orgs", label: "Organizações", icon: <Building2 size={14} /> },
-  { id: "tenants", label: "Tenants", icon: <Server size={14} /> },
-  { id: "relationships", label: "MSP / Grants", icon: <GitMerge size={14} /> },
-  { id: "users", label: "Usuários", icon: <Users size={14} /> },
-  { id: "contracts", label: "Contratos", icon: <FileText size={14} /> },
-  { id: "health", label: "Saúde", icon: <Activity size={14} /> },
-  { id: "tv", label: "Modo TV", icon: <Tv2 size={14} /> },
-  { id: "teia", label: "Teia", icon: <Network size={14} /> },
-];
-
 export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<Tab>("orgs");
   const [showMSPWizard, setShowMSPWizard] = useState(false);
+
+  const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: "orgs", label: t("platformAdmin.tabs.orgs"), icon: <Building2 size={14} /> },
+    { id: "tenants", label: t("platformAdmin.tabs.tenants"), icon: <Server size={14} /> },
+    { id: "relationships", label: t("platformAdmin.tabs.relationships"), icon: <GitMerge size={14} /> },
+    { id: "users", label: t("platformAdmin.tabs.users"), icon: <Users size={14} /> },
+    { id: "contracts", label: t("platformAdmin.tabs.contracts"), icon: <FileText size={14} /> },
+    { id: "health", label: t("platformAdmin.tabs.health"), icon: <Activity size={14} /> },
+    { id: "tv", label: t("platformAdmin.tabs.tv"), icon: <Tv2 size={14} /> },
+    { id: "teia", label: t("platformAdmin.tabs.teia"), icon: <Network size={14} /> },
+  ];
 
   return (
     <div className="space-y-5">
@@ -2503,29 +2520,29 @@ export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string })
         <div>
           <h2 className="text-base font-semibold">Platform Admin</h2>
           <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-            Administração global da plataforma JLMirror · requer platform:admin
+            {t("platformAdmin.subtitle")}
           </p>
         </div>
         <Button size="sm" onClick={() => setShowMSPWizard(true)}>
-          <Plus size={13} /> Novo cliente MSP
+          <Plus size={13} /> {t("platformAdmin.newMspClient")}
         </Button>
       </div>
 
       <div className="flex items-center gap-1 border-b border-[var(--border)] overflow-x-auto">
-        {TABS.map((t) => (
+        {TABS.map((tab) => (
           <button
-            key={t.id}
-            onClick={() => setActiveTab(t.id)}
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
             className={[
               "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap",
               "border-b-2 -mb-px transition-colors cursor-pointer",
-              activeTab === t.id
+              activeTab === tab.id
                 ? "border-[var(--brand)] text-[var(--brand)]"
                 : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]",
             ].join(" ")}
           >
-            {t.icon}
-            {t.label}
+            {tab.icon}
+            {tab.label}
           </button>
         ))}
       </div>
