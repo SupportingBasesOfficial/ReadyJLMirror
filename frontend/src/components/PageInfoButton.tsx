@@ -151,9 +151,25 @@ const PAGE_INFO: Record<string, PageInfo> = {
   },
   "platform-admin": {
     title: "Administração da Plataforma",
-    description: "Painel exclusivo para platform_admin. Gerencia organizações, tenants, contratos, entitlements, usuários cross-tenant e saúde global da plataforma.",
-    permissions: ["platform_admin (is_platform_admin = true)"],
-    actions: ["Criar organização/tenant", "Gerenciar contratos", "Ver todos usuários", "Saúde da plataforma"],
+    description: "Painel exclusivo para platform_admin. Gerencia organizações (Plataforma / MSP / Cliente), tenants, relacionamentos MSP, delegated grants, contratos, usuários cross-tenant e saúde global da plataforma.",
+    permissions: ["platform_admin (kind = platform_admin_principal)"],
+    actions: [
+      "Criar organização com tipo (Plataforma / MSP / Cliente)",
+      "Criar tenant e vincular a organização",
+      "Ver org 360: workspaces, relacionamentos, grants ativos, membros",
+      "Encerrar relacionamento MSP ativo",
+      "Transferir cliente de um prestador de serviço para outro (service-provider-transfer)",
+      "Criar e revogar delegated grants",
+      "Wizard de onboarding de cliente MSP",
+      "Buscar usuários cross-tenant com contexto de tenant/papel",
+      "Saúde da plataforma com uso agrupado por organização",
+      "Gerenciar contratos e entitlements",
+      "Criar tokens de TV Mode por tenant",
+    ],
+    notes: [
+      "org_kind distingue o papel de cada organização no modelo: platform_operator, msp ou client.",
+      "Delegated grants exigem um relacionamento MSP ativo como pré-requisito (fail-closed).",
+    ],
   },
   alertmanager: {
     title: "Alertmanager",

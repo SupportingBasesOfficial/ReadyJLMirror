@@ -8,6 +8,13 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/).
 ## [Não lançado] — feat/g11-incident-response
 
 ### Adicionado
+- **Platform Admin — Gestão de Relacionamentos** — endpoint `POST /api/v1/platform/relationships/{id}/end` para encerrar relacionamentos MSP ativos; botão de encerramento na aba Relacionamentos do `PlatformAdminPage`
+- **Platform Admin — Transferência de Prestador** — endpoint `POST /api/v1/platform/service-provider-transfer`; modal `ServiceProviderTransferModal` com seleção de organização alvo, prestador atual e substituto, sumário de impacto e resultado da operação
+- **Platform Admin — Contexto de Tenant em Usuários** — `GET /api/v1/platform/users` enriquecido com join `g1.principals → g1.tenant_memberships → g1.tenants → g1.organizations`; cada usuário retorna campo `tenants: [{tenant_id, tenant_name, role}]`; chips de tenant/papel exibidos na UsersTab
+- **Platform Admin — Coluna Organização no Health** — tabela de uso na HealthTab cruzada com `orgsQ`/`tenantsQ` para exibir nome e tipo da organização por tenant
+- **Platform Admin — Tooltips InfoIcon** — ícone de informação com tooltip i18n em todos os 4 cabeçalhos do painel Org360 (Workspaces, Relacionamentos, Grants Ativos, Membros)
+- **i18n PlatformAdminPage** — 296 chaves em `src/locales/en.json` e `src/locales/pt-BR.json`; todos os 14+ sub-componentes usando `useTranslation()` e `t()`; tooltips e strings dinâmicas incluídas
+- **PageInfoButton** — entrada `platform-admin` expandida com 11 ações, 2 notas e descrição completa do painel
 - **G11 Incident Response** — canais de notificação, scripts de remediação, políticas de escalonamento e execução controlada de playbooks
 - **G12 AIOps** — parâmetro `include_dismissed` no endpoint de findings; campo `recommended_action` exibido na UI
 - **G23** — coluna `escalation_policy_id` em `alert_policy_version`; migração `sql/alerting/006_g23_link_alert_policy.sql`
