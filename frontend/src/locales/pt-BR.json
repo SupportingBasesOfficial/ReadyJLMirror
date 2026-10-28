@@ -687,7 +687,50 @@
     "typeAnomaly": "Anomalia",
     "typeCorrelation": "Correlação",
     "typeRootCause": "Causa raiz",
-    "typePrediction": "Previsão"
+    "typePrediction": "Previsão",
+    "tabs": {
+      "findings": "Findings Consultivos",
+      "anomalies": "Detecção de Anomalias",
+      "predictions": "Predições de Falha",
+      "capacity": "Planejamento de Capacidade"
+    },
+    "anomalies": {
+      "window": "Janela",
+      "threshold": "Sensibilidade",
+      "detected": "anomalias detectadas",
+      "loadError": "Falha ao carregar anomalias.",
+      "none": "Nenhuma anomalia detectada na janela selecionada. Ou tudo está estável ou ainda não há histórico de métricas.",
+      "resource": "Recurso",
+      "metric": "Métrica",
+      "value": "Valor",
+      "mean": "Média",
+      "zscore": "Z-score",
+      "detectedAt": "Detectada em"
+    },
+    "predictions": {
+      "horizon": "Horizonte",
+      "atRisk": "métricas com tendência crítica",
+      "hint": "Baseado em regressão linear dos últimos 7 dias (R² > 0,5). Apenas métricas com inclinação positiva são exibidas.",
+      "loadError": "Falha ao carregar predições.",
+      "none": "Nenhuma métrica com tendência crítica no horizonte selecionado.",
+      "critical": "Crítico em",
+      "trending": "Em crescimento",
+      "current": "Atual:",
+      "slopeHour": "Δ/h:",
+      "atRiskLabel": "em risco"
+    },
+    "capacity": {
+      "filterMetric": "Filtrar métrica",
+      "atRisk30d": "recursos em risco (30d)",
+      "tracked": "rastreados",
+      "hint": "Médias diárias de 30 dias com previsão de tendência linear. Recursos projetados acima de 80 % em 30 dias são destacados.",
+      "loadError": "Falha ao carregar dados de capacidade.",
+      "none": "Sem dados de capacidade. São necessárias observações de métricas para calcular tendências.",
+      "resource": "Recurso",
+      "metric": "Métrica",
+      "current": "Média atual",
+      "risk": "Risco"
+    }
   },
   "maintenance": {
     "title": "Janelas de Manutenção",

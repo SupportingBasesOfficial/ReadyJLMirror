@@ -687,7 +687,50 @@
     "typeAnomaly": "Anomaly",
     "typeCorrelation": "Correlation",
     "typeRootCause": "Root cause",
-    "typePrediction": "Prediction"
+    "typePrediction": "Prediction",
+    "tabs": {
+      "findings": "Advisory Findings",
+      "anomalies": "Anomaly Detection",
+      "predictions": "Failure Predictions",
+      "capacity": "Capacity Planning"
+    },
+    "anomalies": {
+      "window": "Window",
+      "threshold": "Sensitivity",
+      "detected": "anomalies detected",
+      "loadError": "Failed to load anomalies.",
+      "none": "No anomalies detected in the selected window. Either everything is stable or there is no metric history yet.",
+      "resource": "Resource",
+      "metric": "Metric",
+      "value": "Value",
+      "mean": "Mean",
+      "zscore": "Z-score",
+      "detectedAt": "Detected at"
+    },
+    "predictions": {
+      "horizon": "Horizon",
+      "atRisk": "metrics trending critical",
+      "hint": "Based on linear regression over the last 7 days (R² > 0.5). Only metrics with a positive slope are shown.",
+      "loadError": "Failed to load predictions.",
+      "none": "No metrics trending toward critical in the selected horizon. Good.",
+      "critical": "Critical at",
+      "trending": "Trending",
+      "current": "Current:",
+      "slopeHour": "Δ/h:",
+      "atRiskLabel": "at risk"
+    },
+    "capacity": {
+      "filterMetric": "Filter metric",
+      "atRisk30d": "resources at risk (30d)",
+      "tracked": "tracked",
+      "hint": "30-day daily averages with linear trend forecast. Resources projected above 80 % in 30 days are highlighted.",
+      "loadError": "Failed to load capacity data.",
+      "none": "No capacity data available. Metric observations are needed to compute trends.",
+      "resource": "Resource",
+      "metric": "Metric",
+      "current": "Current avg",
+      "risk": "Risk"
+    }
   },
   "maintenance": {
     "title": "Maintenance Windows",
