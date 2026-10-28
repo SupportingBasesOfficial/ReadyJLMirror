@@ -156,7 +156,7 @@ services:
       BAO_ADDR: ${BAO_ADDR:-}
       BAO_TOKEN: ${BAO_TOKEN:-}
       # Keycloak Admin API — used for user provisioning (platform.py)
-      KEYCLOAK_INTERNAL_URL: http://keycloak:8180
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-jlmirror}
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
