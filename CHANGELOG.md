@@ -26,6 +26,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/).
 ## [Não lançado] — feat/g11-incident-response
 
 ### Adicionado
+- **Client Portal** — rota `/portal` e 5 endpoints `GET /api/v1/portal/{overview,alerts,incidents,sla,status}`; visão read-only para clientes finais de MSP com status badge, 3 KPI tiles, tabelas de alertas e incidentes, conformidade SLA por política; atualização automática a cada 2 minutos; nav item no grupo MSP
 - **Platform Admin — Gestão de Relacionamentos** — endpoint `POST /api/v1/platform/relationships/{id}/end` para encerrar relacionamentos MSP ativos; botão de encerramento na aba Relacionamentos do `PlatformAdminPage`
 - **Platform Admin — Transferência de Prestador** — endpoint `POST /api/v1/platform/service-provider-transfer`; modal `ServiceProviderTransferModal` com seleção de organização alvo, prestador atual e substituto, sumário de impacto e resultado da operação
 - **Platform Admin — Contexto de Tenant em Usuários** — `GET /api/v1/platform/users` enriquecido com join `g1.principals → g1.tenant_memberships → g1.tenants → g1.organizations`; cada usuário retorna campo `tenants: [{tenant_id, tenant_name, role}]`; chips de tenant/papel exibidos na UsersTab
