@@ -233,7 +233,8 @@ function toChartData(points: HistoryPoint[]): { t: number; v: number }[] {
     .map(p => ({
       t: new Date(p.observed_at).getTime(),
       v: Number((p.value as { n: number }).n),
-    }));
+    }))
+    .sort((a, b) => a.t - b.t);
 }
 
 function availVariant(a?: string): "success" | "warning" | "danger" | "muted" {
