@@ -93,8 +93,8 @@ async def create_baseline(request: Request, body: CreateBaseline) -> dict:
     return {"baseline_id": baseline_id, "status": "ok"}
 
 
-@router.delete("/baselines/{baseline_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_baseline(request: Request, baseline_id: str) -> None:
+@router.delete("/baselines/{baseline_id}")
+async def delete_baseline(request: Request, baseline_id: str) -> dict:
     tenant_id = _require_tenant(request)
     actor = _principal(request)
     async with db_tenant_connection(tenant_id) as conn:
@@ -112,6 +112,7 @@ async def delete_baseline(request: Request, baseline_id: str) -> None:
             subject_type="config_baseline", subject_id=baseline_id,
         )
         await conn.commit()
+    return {"baseline_id": baseline_id, "deleted": True}
 
 
 # ── Scan ───────────────────────────────────────────────────────────────────

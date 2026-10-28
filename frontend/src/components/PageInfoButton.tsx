@@ -288,6 +288,22 @@ const PAGE_INFO: Record<string, PageInfo> = {
       "Flags beta estão em desenvolvimento ativo e podem ser instáveis. Ative com cautela em produção.",
     ],
   },
+  "config-drift": {
+    title: "Detecção de Desvio de Configuração",
+    description: "Compare configurações atuais dos dispositivos contra valores esperados (baselines). Gera eventos de desvio auditáveis com fluxo de reconhecimento e resolução.",
+    permissions: ["tenant:read (leitura)", "monitoring:operate (scan, criar baselines)"],
+    actions: [
+      "Executar scan manual de desvios",
+      "Criar e remover baselines de configuração",
+      "Reconhecer eventos de desvio abertos",
+      "Marcar eventos como resolvidos",
+      "Filtrar eventos por estado (aberto / reconhecido / resolvido)",
+    ],
+    notes: [
+      "Baselines são comparados contra metric_observation (item_key = config_key). Sem dados observados, o baseline é ignorado no scan.",
+      "O scan é idempotente: não cria evento duplicado se já existe um 'open' para o mesmo baseline.",
+    ],
+  },
 };
 
 interface Props {
