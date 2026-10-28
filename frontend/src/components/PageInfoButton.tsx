@@ -100,6 +100,22 @@ const PAGE_INFO: Record<string, PageInfo> = {
     permissions: ["tenant:read"],
     actions: ["Ver custos por período", "Comparar tenants", "Exportar"],
   },
+  "client-portal": {
+    title: "Portal do Cliente",
+    description: "Visão read-only simplificada para o cliente final de um MSP. Exibe status operacional, alertas ativos, incidentes em aberto e conformidade com SLA do próprio tenant. Atualização automática a cada 2 minutos.",
+    permissions: ["tenant:read"],
+    actions: [
+      "Ver status operacional (Operacional / Degradado / Interrupção)",
+      "Ver alertas ativos com severidade",
+      "Ver incidentes em aberto",
+      "Ver conformidade com SLAs dos últimos 30 dias",
+      "Atualizar manualmente com o botão de refresh",
+    ],
+    notes: [
+      "Acesso direto via URL /portal.",
+      "Sem acesso a configurações operacionais ou dados sensíveis.",
+    ],
+  },
   apm: {
     title: "APM — Performance de API",
     description: "Monitor de performance de API. Exibe latência p50/p95/p99, taxa de erro e volume de requisições por endpoint nas últimas 24 h. Dados coletados pelo APMMiddleware a cada chamada à API.",

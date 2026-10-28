@@ -55,6 +55,7 @@ import { ConfigDriftPage } from "@/pages/ConfigDriftPage";
 import { FeatureFlagsPage } from "@/pages/FeatureFlagsPage";
 import { TenantSettingsPage } from "@/pages/TenantSettingsPage";
 import { APMPage } from "@/pages/APMPage";
+import { ClientPortalPage } from "@/pages/ClientPortalPage";
 import { useBranding } from "@/hooks/useBranding";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useRef } from "react";
@@ -103,6 +104,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   "feature-flags": "/feature-flags",
   "tenant-settings": "/settings/tenant",
   apm: "/apm",
+  "client-portal": "/portal",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -432,6 +434,7 @@ export function Shell() {
       items: [
         { id: "companies" as View, label: t("nav.companies"), icon: Building2, description: "Empresas e carteira de clientes" },
         ...(hasMSPClients ? [{ id: "msp" as View, label: t("nav.msp"), icon: Building2, description: "Clientes MSP" }] : []),
+        { id: "client-portal" as View, label: t("nav.client_portal", "Portal do Cliente"), icon: Globe, description: "Visão simplificada para clientes finais" },
       ],
     }] : []),
     ...((has("platform_admin") || has("tenant:admin")) ? [{
@@ -855,6 +858,7 @@ export function Shell() {
           {view === "feature-flags" && <FeatureFlagsPage tenantId={s.tenant_id!} />}
           {view === "tenant-settings" && <TenantSettingsPage tenantId={s.tenant_id!} />}
           {view === "apm" && <APMPage tenantId={s.tenant_id!} />}
+          {view === "client-portal" && <ClientPortalPage />}
           </div>
         </main>
       </div>

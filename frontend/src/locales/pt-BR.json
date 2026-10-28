@@ -37,6 +37,7 @@
     "feature_flags": "Feature Flags",
     "tenant_settings": "Configurações do Tenant",
     "apm": "APM",
+    "client_portal": "Portal do Cliente",
     "kb": "Base de Conhecimento",
     "groups": {
       "Operações": "Operações",

@@ -34,6 +34,7 @@ from api.routers import (
     account_security,
     aiops,
     apm,
+    client_portal,
     config_drift,
     tenant_settings,
     feature_flags,
@@ -572,6 +573,7 @@ app.include_router(config_drift.router)
 app.include_router(feature_flags.router)
 app.include_router(tenant_settings.router)
 app.include_router(apm.router)
+app.include_router(client_portal.router)
 
 
 @app.get("/metrics", tags=["health"])
