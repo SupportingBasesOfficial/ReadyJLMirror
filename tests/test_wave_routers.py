@@ -5,6 +5,10 @@ Covers: feature_flags, config_drift, tenant_settings, apm, push,
 
 Requires PostgreSQL with G1 schema applied.
 Tests skip gracefully when DB is unreachable.
+
+Uses httpx.AsyncClient + ASGITransport so that setup, execution and teardown
+all run in the same event loop — avoiding the psycopg_pool close error that
+occurs when TestClient's anyio portal exits before the pool is collected.
 """
 
 from __future__ import annotations
@@ -13,12 +17,14 @@ import asyncio
 import os
 import sys
 import uuid
-from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import psycopg
 import pytest
-from fastapi.testclient import TestClient
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 
+# psycopg3 async requires SelectorEventLoop on Windows; set before any loop is created
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -28,7 +34,7 @@ os.environ.setdefault("VAPID_PRIVATE_KEY", "test-vapid-private-key")
 os.environ.setdefault("VAPID_PUBLIC_KEY", "test-vapid-public-key")
 os.environ.setdefault("VAPID_CLAIMS_SUB", "mailto:test@test.com")
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="module")]
 
 _TENANT_CTX = {
     "principal_id": "principal.e2e-dev-admin",
@@ -51,13 +57,23 @@ _PLATFORM_CTX = {
 
 
 # ---------------------------------------------------------------------------
-# Module-level skip when DB is unreachable
+# Single module-scoped event loop — pool init/close run in the same loop
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(scope="module")
+def event_loop_policy():
+    """Use SelectorEventLoop on Windows — required by psycopg3 async."""
+    if sys.platform == "win32":
+        return asyncio.WindowsSelectorEventLoopPolicy()
+    return asyncio.DefaultEventLoopPolicy()
+
+
+# ---------------------------------------------------------------------------
+# DB reachability guard (sync, module-scoped)
+# ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
 def db_available():
-    import psycopg
     from shared.config import settings
 
     try:
@@ -68,51 +84,64 @@ def db_available():
     return True
 
 
-@pytest.fixture(scope="module")
-def api_client(db_available):
+# ---------------------------------------------------------------------------
+# Pool: init once at module start, close at module end — same loop
+# ---------------------------------------------------------------------------
+
+@pytest_asyncio.fixture(scope="module")
+async def pool(db_available):
+    from shared.db import close_pool, init_pool
+
+    await init_pool()
+    yield
+    await close_pool()
+
+
+# ---------------------------------------------------------------------------
+# HTTP clients (module-scoped, depend on pool being ready)
+# ---------------------------------------------------------------------------
+
+@pytest_asyncio.fixture(scope="module")
+async def api_client(pool):
     import api.main
 
-    with ExitStack() as stack:
-        stack.enter_context(
-            patch("api.main._verify_bff_context", return_value=_TENANT_CTX)
-        )
-        stack.enter_context(
-            patch(
-                "api.main._session_current",
-                new=AsyncMock(return_value=True),
-            )
-        )
-        with TestClient(api.main.app) as client:
+    with patch("api.main._verify_bff_context", return_value=_TENANT_CTX), \
+         patch("api.main._session_current", new=AsyncMock(return_value=True)):
+        async with AsyncClient(
+            transport=ASGITransport(app=api.main.app),
+            base_url="http://test",
+        ) as client:
             yield client
 
 
-@pytest.fixture(scope="module")
-def admin_client(db_available):
+@pytest_asyncio.fixture(scope="module")
+async def admin_client(pool):
     """Platform-admin context for executive endpoints."""
     import api.main
 
-    with ExitStack() as stack:
-        stack.enter_context(
-            patch("api.main._verify_bff_context", return_value=_PLATFORM_CTX)
-        )
-        stack.enter_context(
-            patch(
-                "api.main._session_current",
-                new=AsyncMock(return_value=True),
-            )
-        )
-        with TestClient(api.main.app) as client:
+    with patch("api.main._verify_bff_context", return_value=_PLATFORM_CTX), \
+         patch("api.main._session_current", new=AsyncMock(return_value=True)):
+        async with AsyncClient(
+            transport=ASGITransport(app=api.main.app),
+            base_url="http://test",
+        ) as client:
             yield client
 
 
-@pytest.fixture
-def db_sync(db_available):
-    import psycopg
+# ---------------------------------------------------------------------------
+# Per-test async DB connection for direct SQL cleanup
+# ---------------------------------------------------------------------------
+
+@pytest_asyncio.fixture
+async def db_conn(db_available):
     from shared.config import settings
 
-    with psycopg.connect(settings.db_dsn) as conn:
-        conn.autocommit = False
+    conn = await psycopg.AsyncConnection.connect(settings.db_dsn)
+    await conn.set_autocommit(False)
+    try:
         yield conn
+    finally:
+        await conn.close()
 
 
 # ===========================================================================
@@ -120,17 +149,17 @@ def db_sync(db_available):
 # ===========================================================================
 
 
-def test_feature_flags_list(api_client):
+async def test_feature_flags_list(api_client):
     """GET /api/v1/feature-flags returns a list of flags."""
-    r = api_client.get("/api/v1/feature-flags")
+    r = await api_client.get("/api/v1/feature-flags")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
 
-def test_feature_flags_put_upserts(api_client):
+async def test_feature_flags_put_upserts(api_client):
     """PUT /api/v1/feature-flags/{key} creates or updates a flag."""
     flag_key = f"test_flag_{uuid.uuid4().hex[:8]}"
-    r = api_client.put(
+    r = await api_client.put(
         f"/api/v1/feature-flags/{flag_key}",
         json={"enabled": False},
     )
@@ -139,10 +168,9 @@ def test_feature_flags_put_upserts(api_client):
     assert r.json()["flag_key"] == flag_key
 
 
-def test_feature_flags_check(api_client):
+async def test_feature_flags_check(api_client):
     """GET /api/v1/feature-flags/check/{key} returns enabled status."""
-    r = api_client.get("/api/v1/feature-flags/check/module_aiops")
-    # 200 if flag exists, 404 if not seeded — both are valid
+    r = await api_client.get("/api/v1/feature-flags/check/module_aiops")
     assert r.status_code in (200, 404)
     if r.status_code == 200:
         assert "enabled" in r.json()
@@ -153,10 +181,10 @@ def test_feature_flags_check(api_client):
 # ===========================================================================
 
 
-@pytest.fixture
-def baseline_id(api_client):
-    """Create a config baseline via the API, clean up after."""
-    r = api_client.post(
+@pytest_asyncio.fixture
+async def baseline_id(api_client):
+    """Create a config baseline via the API, clean up after the test."""
+    r = await api_client.post(
         "/api/v1/drift/baselines",
         json={
             "source_id": "src-test-001",
@@ -168,12 +196,12 @@ def baseline_id(api_client):
     assert r.status_code == 201
     bid = r.json()["baseline_id"]
     yield bid
-    api_client.delete(f"/api/v1/drift/baselines/{bid}")
+    await api_client.delete(f"/api/v1/drift/baselines/{bid}")
 
 
-def test_drift_create_and_delete_baseline(api_client):
+async def test_drift_create_and_delete_baseline(api_client):
     """Round-trip: create a baseline then delete it."""
-    r = api_client.post(
+    r = await api_client.post(
         "/api/v1/drift/baselines",
         json={
             "source_id": "src-tmp",
@@ -185,22 +213,22 @@ def test_drift_create_and_delete_baseline(api_client):
     assert r.status_code == 201
     bid = r.json()["baseline_id"]
 
-    dr = api_client.delete(f"/api/v1/drift/baselines/{bid}")
+    dr = await api_client.delete(f"/api/v1/drift/baselines/{bid}")
     assert dr.status_code == 200
     assert dr.json()["deleted"] is True
 
 
-def test_drift_list_baselines(api_client, baseline_id):
+async def test_drift_list_baselines(api_client, baseline_id):
     """GET /api/v1/drift/baselines lists existing baselines."""
-    r = api_client.get("/api/v1/drift/baselines")
+    r = await api_client.get("/api/v1/drift/baselines")
     assert r.status_code == 200
     ids = [b["baseline_id"] for b in r.json()]
     assert baseline_id in ids
 
 
-def test_drift_scan_no_crash(api_client, baseline_id):
+async def test_drift_scan_no_crash(api_client, baseline_id):
     """POST /api/v1/drift/scan returns valid response (0 drifts, no 500)."""
-    r = api_client.post("/api/v1/drift/scan")
+    r = await api_client.post("/api/v1/drift/scan")
     assert r.status_code == 200
     body = r.json()
     assert "scanned" in body
@@ -208,25 +236,27 @@ def test_drift_scan_no_crash(api_client, baseline_id):
     assert body["drifts_found"] == 0
 
 
-def test_drift_events_list(api_client):
+async def test_drift_events_list(api_client):
     """GET /api/v1/drift/events returns a list."""
-    r = api_client.get("/api/v1/drift/events")
+    r = await api_client.get("/api/v1/drift/events")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
 
-def test_drift_summary(api_client):
+async def test_drift_summary(api_client):
     """GET /api/v1/drift/summary returns total_baselines and open_drifts."""
-    r = api_client.get("/api/v1/drift/summary")
+    r = await api_client.get("/api/v1/drift/summary")
     assert r.status_code == 200
     body = r.json()
     assert "total_baselines" in body
     assert "open_drifts" in body
 
 
-def test_drift_delete_nonexistent(api_client):
+async def test_drift_delete_nonexistent(api_client):
     """DELETE on a non-existent baseline returns 404."""
-    r = api_client.delete("/api/v1/drift/baselines/00000000-0000-0000-0000-000000000000")
+    r = await api_client.delete(
+        "/api/v1/drift/baselines/00000000-0000-0000-0000-000000000000"
+    )
     assert r.status_code == 404
 
 
@@ -235,15 +265,15 @@ def test_drift_delete_nonexistent(api_client):
 # ===========================================================================
 
 
-def test_tenant_settings_get(api_client):
+async def test_tenant_settings_get(api_client):
     """GET /api/v1/tenant-settings returns current settings."""
-    r = api_client.get("/api/v1/tenant-settings")
+    r = await api_client.get("/api/v1/tenant-settings")
     assert r.status_code == 200
 
 
-def test_tenant_settings_put(api_client):
+async def test_tenant_settings_put(api_client):
     """PUT /api/v1/tenant-settings persists fields."""
-    r = api_client.put(
+    r = await api_client.put(
         "/api/v1/tenant-settings",
         json={"timezone": "America/Sao_Paulo"},
     )
@@ -251,14 +281,13 @@ def test_tenant_settings_put(api_client):
     assert r.json().get("timezone") == "America/Sao_Paulo"
 
 
-def test_tenant_settings_smtp_test_no_host(api_client):
+async def test_tenant_settings_smtp_test_no_host(api_client):
     """POST /api/v1/tenant-settings/smtp/test with no SMTP configured
     returns an error response (not a 5xx crash)."""
-    r = api_client.post(
+    r = await api_client.post(
         "/api/v1/tenant-settings/smtp/test",
         json={"to": "nobody@example.com"},
     )
-    # 400 = no SMTP configured, 422 = validation, 503 = service unavailable
     assert r.status_code in (400, 422, 503)
 
 
@@ -267,12 +296,11 @@ def test_tenant_settings_smtp_test_no_host(api_client):
 # ===========================================================================
 
 
-def test_apm_overview(api_client):
+async def test_apm_overview(api_client):
     """GET /api/v1/apm/overview returns APM statistics."""
-    r = api_client.get("/api/v1/apm/overview")
+    r = await api_client.get("/api/v1/apm/overview")
     assert r.status_code == 200
     body = r.json()
-    # Response has summary stats
     assert any(k in body for k in ("p50_ms", "total_requests", "endpoints", "summary"))
 
 
@@ -281,17 +309,17 @@ def test_apm_overview(api_client):
 # ===========================================================================
 
 
-def test_push_vapid_key(api_client):
+async def test_push_vapid_key(api_client):
     """GET /api/v1/push/vapid-public-key returns the public key."""
-    r = api_client.get("/api/v1/push/vapid-public-key")
+    r = await api_client.get("/api/v1/push/vapid-public-key")
     assert r.status_code == 200
     assert "public_key" in r.json()
 
 
-def test_push_subscribe_and_list(api_client, db_sync):
+async def test_push_subscribe_and_list(api_client, db_conn):
     """POST /subscribe stores a subscription; GET /subscriptions lists it."""
     endpoint = f"https://fcm.test/endpoint/{uuid.uuid4().hex}"
-    r = api_client.post(
+    r = await api_client.post(
         "/api/v1/push/subscribe",
         json={
             "endpoint": endpoint,
@@ -301,18 +329,17 @@ def test_push_subscribe_and_list(api_client, db_sync):
     assert r.status_code == 201
     assert r.json()["ok"] is True
 
-    lr = api_client.get("/api/v1/push/subscriptions")
+    lr = await api_client.get("/api/v1/push/subscriptions")
     assert lr.status_code == 200
     subs = lr.json().get("subscriptions", [])
     assert isinstance(subs, list)
     assert len(subs) >= 1
 
-    # Cleanup
-    db_sync.execute(
+    await db_conn.execute(
         "DELETE FROM g1.push_subscription WHERE endpoint = %s",
         (endpoint,),
     )
-    db_sync.commit()
+    await db_conn.commit()
 
 
 # ===========================================================================
@@ -320,7 +347,7 @@ def test_push_subscribe_and_list(api_client, db_sync):
 # ===========================================================================
 
 
-def test_lgpd_export(api_client):
+async def test_lgpd_export(api_client):
     """POST /api/v1/account/lgpd/export returns principal data."""
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -336,7 +363,7 @@ def test_lgpd_export(api_client):
         mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_response)
 
-        r = api_client.post("/api/v1/account/lgpd/export")
+        r = await api_client.post("/api/v1/account/lgpd/export")
 
     assert r.status_code == 200
     body = r.json()
@@ -344,26 +371,25 @@ def test_lgpd_export(api_client):
     assert "principal_id" in body["data"]
 
 
-def test_lgpd_deletion_request_no_confirm(api_client):
+async def test_lgpd_deletion_request_no_confirm(api_client):
     """POST lgpd/deletion-request without confirm=true returns 400."""
-    r = api_client.post(
+    r = await api_client.post(
         "/api/v1/account/lgpd/deletion-request",
         json={"confirm": False},
     )
     assert r.status_code == 400
 
 
-def test_lgpd_deletion_request_confirmed(api_client, db_sync):
+async def test_lgpd_deletion_request_confirmed(api_client, db_conn):
     """POST lgpd/deletion-request with confirm=true creates a pending row."""
     _pid = "principal.e2e-dev-admin"
-    # Ensure no existing pending request from a prior test run
-    db_sync.execute(
+    await db_conn.execute(
         "DELETE FROM g1.lgpd_deletion_requests WHERE principal_id = %s",
         (_pid,),
     )
-    db_sync.commit()
+    await db_conn.commit()
 
-    r = api_client.post(
+    r = await api_client.post(
         "/api/v1/account/lgpd/deletion-request",
         json={"confirm": True},
     )
@@ -372,36 +398,35 @@ def test_lgpd_deletion_request_confirmed(api_client, db_sync):
     assert body["ok"] is True
     assert body["status"] in ("pending", "processing")
 
-    # Cleanup
-    db_sync.execute(
+    await db_conn.execute(
         "DELETE FROM g1.lgpd_deletion_requests WHERE principal_id = %s",
         (_pid,),
     )
-    db_sync.commit()
+    await db_conn.commit()
 
 
-def test_lgpd_deletion_request_idempotent(api_client, db_sync):
+async def test_lgpd_deletion_request_idempotent(api_client, db_conn):
     """Second deletion request returns already_exists=True."""
     _pid = "principal.e2e-dev-admin"
-    db_sync.execute(
+    await db_conn.execute(
         "INSERT INTO g1.lgpd_deletion_requests (principal_id, status) "
         "VALUES (%s, 'pending')",
         (_pid,),
     )
-    db_sync.commit()
+    await db_conn.commit()
 
-    r = api_client.post(
+    r = await api_client.post(
         "/api/v1/account/lgpd/deletion-request",
         json={"confirm": True},
     )
     assert r.status_code == 200
     assert r.json()["already_exists"] is True
 
-    db_sync.execute(
+    await db_conn.execute(
         "DELETE FROM g1.lgpd_deletion_requests WHERE principal_id = %s",
         (_pid,),
     )
-    db_sync.commit()
+    await db_conn.commit()
 
 
 # ===========================================================================
@@ -409,7 +434,7 @@ def test_lgpd_deletion_request_idempotent(api_client, db_sync):
 # ===========================================================================
 
 
-def test_mfa_status(api_client):
+async def test_mfa_status(api_client):
     """GET /api/v1/account/mfa/status returns totp_enabled bool."""
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -422,7 +447,7 @@ def test_mfa_status(api_client):
         mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_response)
 
-        r = api_client.get("/api/v1/account/mfa/status")
+        r = await api_client.get("/api/v1/account/mfa/status")
 
     assert r.status_code == 200
     assert "totp_enabled" in r.json()
@@ -433,9 +458,9 @@ def test_mfa_status(api_client):
 # ===========================================================================
 
 
-def test_executive_overview(admin_client):
-    """GET /api/v1/executive/overview returns platform KPIs (or 403 if seed not present)."""
-    r = admin_client.get("/api/v1/executive/overview")
+async def test_executive_overview(admin_client):
+    """GET /api/v1/executive/overview returns platform KPIs."""
+    r = await admin_client.get("/api/v1/executive/overview")
     assert r.status_code in (200, 403)
     if r.status_code == 200:
         body = r.json()
@@ -447,17 +472,17 @@ def test_executive_overview(admin_client):
 # ===========================================================================
 
 
-def test_client_portal_overview(api_client):
+async def test_client_portal_overview(api_client):
     """GET /api/v1/portal/overview returns 200, 403, or 404."""
-    r = api_client.get("/api/v1/portal/overview")
+    r = await api_client.get("/api/v1/portal/overview")
     assert r.status_code in (200, 403, 404)
     if r.status_code == 200:
         assert isinstance(r.json(), dict)
 
 
-def test_client_portal_alerts(api_client):
+async def test_client_portal_alerts(api_client):
     """GET /api/v1/portal/alerts returns a list or 403."""
-    r = api_client.get("/api/v1/portal/alerts")
+    r = await api_client.get("/api/v1/portal/alerts")
     assert r.status_code in (200, 403, 404)
     if r.status_code == 200:
         assert isinstance(r.json(), list)
