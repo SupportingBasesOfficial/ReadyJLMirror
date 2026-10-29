@@ -104,7 +104,7 @@ async def update_settings(request: Request, body: SettingsUpdate) -> dict:
         )
         await record_audit_event(conn, "platform",
             action="tenant.settings.updated",
-            actor_kind="human_browser_session", actor_id=actor,
+            actor_kind="principal", actor_id=actor,
             subject_type="tenant_settings", subject_id=tenant,
             detail={"fields": list(data.keys())})
         await conn.commit()

@@ -86,7 +86,7 @@ async def create_baseline(request: Request, body: CreateBaseline) -> dict:
         await record_audit_event(
             conn, tenant_id,
             action="drift.baseline.created",
-            actor_kind="human_browser_session", actor_id=actor,
+            actor_kind="principal", actor_id=actor,
             subject_type="config_baseline", subject_id=baseline_id,
         )
         await conn.commit()
@@ -108,7 +108,7 @@ async def delete_baseline(request: Request, baseline_id: str) -> dict:
         await record_audit_event(
             conn, tenant_id,
             action="drift.baseline.deleted",
-            actor_kind="human_browser_session", actor_id=actor,
+            actor_kind="principal", actor_id=actor,
             subject_type="config_baseline", subject_id=baseline_id,
         )
         await conn.commit()
@@ -187,7 +187,7 @@ async def run_scan(request: Request) -> dict:
         await record_audit_event(
             conn, tenant_id,
             action="drift.scan.completed",
-            actor_kind="human_browser_session", actor_id=actor,
+            actor_kind="principal", actor_id=actor,
             subject_type="tenant", subject_id=tenant_id,
         )
         await conn.commit()
@@ -256,7 +256,7 @@ async def acknowledge_event(request: Request, drift_id: str) -> dict:
         await record_audit_event(
             conn, tenant_id,
             action="drift.event.acknowledged",
-            actor_kind="human_browser_session", actor_id=actor,
+            actor_kind="principal", actor_id=actor,
             subject_type="config_drift_event", subject_id=drift_id,
         )
         await conn.commit()
@@ -283,7 +283,7 @@ async def resolve_event(request: Request, drift_id: str) -> dict:
         await record_audit_event(
             conn, tenant_id,
             action="drift.event.resolved",
-            actor_kind="human_browser_session", actor_id=actor,
+            actor_kind="principal", actor_id=actor,
             subject_type="config_drift_event", subject_id=drift_id,
         )
         await conn.commit()

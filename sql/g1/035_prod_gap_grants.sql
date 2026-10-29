@@ -42,4 +42,13 @@ ALTER TABLE monitoring.synthetic_check
 GRANT SELECT ON g1.oncall_shift     TO jlmirror_worker;
 GRANT SELECT ON g1.oncall_schedule  TO jlmirror_worker;
 
+-- config_baseline and config_drift_event were created with tenant_id/source_id
+-- as UUID by mistake — all other monitoring tables use TEXT
+ALTER TABLE monitoring.config_baseline
+    ALTER COLUMN tenant_id TYPE TEXT,
+    ALTER COLUMN source_id TYPE TEXT;
+ALTER TABLE monitoring.config_drift_event
+    ALTER COLUMN tenant_id TYPE TEXT,
+    ALTER COLUMN source_id TYPE TEXT;
+
 COMMIT;
