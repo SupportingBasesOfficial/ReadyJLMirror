@@ -27,7 +27,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON monitoring.config_drift_event   TO jlmir
 -- Tenant settings: workers need SMTP config for per-tenant email delivery
 GRANT SELECT ON g1.tenant_settings TO jlmirror_worker;
 
--- LGPD: worker processes pending deletion requests
+-- LGPD: API creates requests; worker processes them
+GRANT SELECT, INSERT ON g1.lgpd_deletion_requests TO jlmirror_app;
 GRANT SELECT, UPDATE ON g1.lgpd_deletion_requests TO jlmirror_worker;
 GRANT SELECT, UPDATE ON g1.principals TO jlmirror_worker;
 GRANT DELETE         ON g1.tenant_memberships TO jlmirror_worker;

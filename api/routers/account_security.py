@@ -253,7 +253,7 @@ async def mfa_disable(request: Request) -> dict:
 
 # ── LGPD ──────────────────────────────────────────────────────────────────────
 
-@router.get("/lgpd/export")
+@router.post("/lgpd/export")
 async def lgpd_export(request: Request) -> dict:
     ctx = _ctx(request)
     principal_id = ctx["principal_id"]
