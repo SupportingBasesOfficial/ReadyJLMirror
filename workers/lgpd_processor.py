@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import urllib.parse
 import urllib.request
 import json
 
@@ -91,9 +92,9 @@ def _process_request(conn: psycopg.Connection,
         conn.execute(
             """
             UPDATE g1.principals
-               SET first_name = 'Usuário',
-                   last_name  = 'Removido',
-                   email      = 'removed-' || LEFT(principal_id, 8) || '@jlmirror.invalid'
+               SET display_name = 'Usuário Removido',
+                   email        = 'removed-' || LEFT(principal_id, 8) || '@jlmirror.invalid',
+                   active       = false
              WHERE principal_id = %s
             """,
             (principal_id,),
@@ -101,7 +102,7 @@ def _process_request(conn: psycopg.Connection,
 
         # 2. Remove all tenant memberships
         conn.execute(
-            "DELETE FROM g1.tenant_membership WHERE principal_id = %s",
+            "DELETE FROM g1.tenant_memberships WHERE principal_id = %s",
             (principal_id,),
         )
 
@@ -134,8 +135,6 @@ def _process_request(conn: psycopg.Connection,
 
 
 def _process_pending(conn: psycopg.Connection) -> int:
-    import urllib.parse  # noqa: PLC0415
-
     cur = conn.execute(
         """
         SELECT request_id, principal_id

@@ -116,10 +116,10 @@ def _admin_emails(conn: psycopg.Connection, tenant_id: str) -> list[str]:
             """
             SELECT DISTINCT p.email
               FROM g1.principals p
-              JOIN g1.tenant_membership tm
+              JOIN g1.tenant_memberships tm
                 ON tm.principal_id = p.principal_id
              WHERE tm.tenant_id = %s
-               AND tm.role = 'admin'
+               AND tm.role IN ('admin', 'tenant_admin')
                AND p.email IS NOT NULL
             """,
             (tenant_id,),
