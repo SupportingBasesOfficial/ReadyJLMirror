@@ -191,8 +191,16 @@ def main() -> None:
         "BFF_CLIENT_CERT_FILE": "", "BFF_CLIENT_KEY_FILE": "",
         "WORKER_CLIENT_CERT_FILE": "", "WORKER_CLIENT_KEY_FILE": "",
 
+        "#smtp":           "SMTP (email de alertas e relatórios — obrigatório para notificações por email)",
+        "SMTP_HOST":     "smtp.REQUIRED_CHANGE_ME",
+        "SMTP_PORT":     "587",
+        "SMTP_USER":     "REQUIRED_CHANGE_ME",
+        "SMTP_PASSWORD": "REQUIRED_CHANGE_ME",
+        "SMTP_FROM":     f"noreply@{args.domain.split('.', 1)[-1]}",
+        "SMTP_TLS":      "starttls",
+
         "#notif":          "Alerting / notifications",
-        "ALERTING_WEBHOOK_URL":  "http://api:8000/dev/outbox-sink",
+        "ALERTING_WEBHOOK_URL":  "",
         "WHATSAPP_API_URL":      "",
         "WHATSAPP_ACCESS_TOKEN": "",
         "ITSM_PROVIDER_URL":     "",

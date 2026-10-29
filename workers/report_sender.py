@@ -138,22 +138,63 @@ def _build_email(report_type: str, name: str, tenant_id: str,
 
 
 # ---------------------------------------------------------------------------
-# SMTP send (reuses email provider env vars)
+# SMTP config: prefer tenant settings, fall back to env vars
 # ---------------------------------------------------------------------------
 
-def _send_email(recipient: str, subject: str, text: str, html: str) -> None:
-    import os, smtplib
-    host = os.environ.get("SMTP_HOST", "")
+def _smtp_config(conn: psycopg.Connection, tenant_id: str) -> dict:
+    import os
+    try:
+        cur = conn.execute(
+            """
+            SELECT smtp_host, smtp_port, smtp_user, smtp_password,
+                   smtp_from_email, smtp_tls
+              FROM g1.tenant_settings
+             WHERE tenant_id = %s
+            """,
+            (tenant_id,),
+        )
+        row = cur.fetchone()
+        conn.rollback()
+        if row and row[0]:
+            host, port, user, pwd, from_email, use_tls = row
+            return {
+                "host":      host or "",
+                "port":      int(port or 587),
+                "user":      user or "",
+                "password":  pwd or "",
+                "from_addr": from_email or user or "noreply@jlmirror.com",
+                "tls_mode":  "starttls" if use_tls else "plain",
+            }
+    except Exception:
+        pass
+    return {
+        "host":      os.environ.get("SMTP_HOST", ""),
+        "port":      int(os.environ.get("SMTP_PORT", "587")),
+        "user":      os.environ.get("SMTP_USER", ""),
+        "password":  os.environ.get("SMTP_PASSWORD", ""),
+        "from_addr": os.environ.get("SMTP_FROM",
+                                    os.environ.get("SMTP_USER", "noreply@jlmirror.com")),
+        "tls_mode":  os.environ.get("SMTP_TLS", "starttls"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# SMTP send
+# ---------------------------------------------------------------------------
+
+def _send_email(smtp: dict, recipient: str, subject: str,
+                text: str, html: str) -> None:
+    host = smtp["host"]
     if not host:
         logger.info("DEV report → %s  subject=%s  (SMTP not configured)",
                     recipient, subject)
         return
 
-    port = int(os.environ.get("SMTP_PORT", "587"))
-    user = os.environ.get("SMTP_USER", "")
-    password = os.environ.get("SMTP_PASSWORD", "")
-    from_addr = os.environ.get("SMTP_FROM", user or "noreply@jlmirror.com")
-    tls_mode = os.environ.get("SMTP_TLS", "starttls")
+    port      = smtp["port"]
+    user      = smtp["user"]
+    password  = smtp["password"]
+    from_addr = smtp["from_addr"]
+    tls_mode  = smtp["tls_mode"]
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -251,7 +292,8 @@ def _process_pending(conn: psycopg.Connection) -> int:
 
             subject, text, html = _build_email(
                 report_type, name, tenant_id, period_start, period_end, rows, total)
-            _send_email(recipient, subject, text, html)
+            smtp = _smtp_config(conn, tenant_id)
+            _send_email(smtp, recipient, subject, text, html)
 
             conn.execute(
                 "UPDATE g1.report_delivery "

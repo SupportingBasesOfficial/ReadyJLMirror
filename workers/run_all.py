@@ -45,6 +45,8 @@ from workers.automation_runner import _process_pending as automation_runner
 from workers.report_sender import _process_pending as report_sender
 from workers.cert_checker import _process_pending as cert_checker
 from workers.synthetic_checker import _process_pending as synthetic_checker
+from workers.config_drift import _process_pending as config_drift
+from workers.lgpd_processor import _process_pending as lgpd_processor
 
 logger = logging.getLogger("workers.run_all")
 
@@ -71,6 +73,8 @@ _PROCESSORS = (
     ("report_sender", report_sender),
     ("cert_checker", cert_checker),
     ("synthetic_checker", synthetic_checker),
+    ("config_drift", config_drift),
+    ("lgpd_processor", lgpd_processor),
 )
 
 # One persistent connection per processor, keyed by name.

@@ -65,6 +65,66 @@ def _due_escalations(conn: psycopg.Connection,
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+def _smtp_config_for_tenant(conn: psycopg.Connection, tenant_id: str) -> dict:
+    """Return SMTP config: tenant settings > env vars."""
+    try:
+        cur = conn.execute(
+            """
+            SELECT smtp_host, smtp_port, smtp_user, smtp_password,
+                   smtp_from_email, smtp_tls
+              FROM g1.tenant_settings
+             WHERE tenant_id = %s
+            """,
+            (tenant_id,),
+        )
+        row = cur.fetchone()
+        conn.rollback()
+        if row and row[0]:
+            host, port, user, pwd, from_email, use_tls = row
+            return {
+                "smtp_host":    host or "",
+                "smtp_port":    int(port or 587),
+                "smtp_user":    user or "",
+                "smtp_password": pwd or "",
+                "from_address": from_email or user or "",
+                "tls_mode":     "starttls" if use_tls else "plain",
+            }
+    except Exception:
+        pass
+    return {
+        "smtp_host":    os.environ.get("SMTP_HOST", ""),
+        "smtp_port":    int(os.environ.get("SMTP_PORT", "587")),
+        "smtp_user":    os.environ.get("SMTP_USER", ""),
+        "smtp_password": os.environ.get("SMTP_PASSWORD", ""),
+        "from_address": os.environ.get("SMTP_FROM",
+                                       os.environ.get("SMTP_USER", "")),
+        "tls_mode":     os.environ.get("SMTP_TLS", "starttls"),
+    }
+
+
+def _get_oncall_email(conn: psycopg.Connection, tenant_id: str) -> str | None:
+    """Return email of the principal currently on-call for this tenant, if any."""
+    try:
+        cur = conn.execute(
+            """
+            SELECT p.email
+              FROM g1.oncall_shift os
+              JOIN g1.principals p ON p.principal_id = os.principal_id
+             WHERE os.tenant_id = %s
+               AND os.starts_at <= now() AND os.ends_at > now()
+             ORDER BY os.starts_at DESC
+             LIMIT 1
+            """,
+            (tenant_id,),
+        )
+        row = cur.fetchone()
+        conn.rollback()
+        return row[0] if row else None
+    except Exception:
+        conn.rollback()
+        return None
+
+
 def _dispatch_email(channel_config: dict, payload: dict) -> None:
     host = channel_config.get("smtp_host", "")
     port = int(channel_config.get("smtp_port", 587))
@@ -72,21 +132,31 @@ def _dispatch_email(channel_config: dict, payload: dict) -> None:
     password = channel_config.get("smtp_password", "")
     from_addr = channel_config.get("from_address", user)
     to_addr = channel_config.get("to_address", "")
+    tls_mode = channel_config.get("tls_mode", "starttls")
 
     subject = payload.get("subject") or payload.get("title") or "Alerta JLMirror"
     body = payload.get("body") or payload.get("message") or str(payload)
 
+    recipients = [r for r in [to_addr, channel_config.get("cc_address")] if r]
+
     msg = MIMEMultipart()
     msg["From"] = from_addr
     msg["To"] = to_addr
+    if channel_config.get("cc_address"):
+        msg["Cc"] = channel_config["cc_address"]
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
-    with smtplib.SMTP(host, port, timeout=10) as smtp:
-        smtp.starttls()
+    if tls_mode == "ssl":
+        ctx = smtplib.SMTP_SSL(host, port, timeout=10)
+    else:
+        ctx = smtplib.SMTP(host, port, timeout=10)
+        if tls_mode == "starttls":
+            ctx.starttls()
+    with ctx as smtp:
         if user and password:
             smtp.login(user, password)
-        smtp.sendmail(from_addr, [to_addr], msg.as_string())
+        smtp.sendmail(from_addr, recipients, msg.as_string())
 
 
 def _dispatch_slack(channel_config: dict, payload: dict) -> None:
@@ -152,15 +222,14 @@ def _fire_step(conn: psycopg.Connection,
         ),
     }
     if channel == "email_smtp@1":
+        smtp = _smtp_config_for_tenant(conn, tenant_id)
+        oncall_email = _get_oncall_email(conn, tenant_id)
         _channel_config = {
-            "smtp_host": os.environ.get("SMTP_HOST", ""),
-            "smtp_port": os.environ.get("SMTP_PORT", "587"),
-            "smtp_user": os.environ.get("SMTP_USER", ""),
-            "smtp_password": os.environ.get("SMTP_PASSWORD", ""),
-            "from_address": os.environ.get(
-                "SMTP_FROM", os.environ.get("SMTP_USER", "")),
+            **smtp,
             "to_address": dest,
         }
+        if oncall_email and oncall_email != dest:
+            _channel_config["cc_address"] = oncall_email
     elif channel == "slack@1":
         _channel_config = {"webhook_url": dest}
 

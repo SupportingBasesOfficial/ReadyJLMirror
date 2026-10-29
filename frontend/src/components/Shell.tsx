@@ -244,6 +244,18 @@ export function Shell() {
     select: (d) => (Array.isArray(d) ? d.length : 0),
   });
 
+  const { data: featureFlags } = useQuery<{ flag_key: string; enabled: boolean }[]>({
+    queryKey: ["feature-flags", session?.tenant_id],
+    queryFn: () => api.get<{ flag_key: string; enabled: boolean }[]>("/api/v1/feature-flags"),
+    enabled: session?.state === "ready",
+    staleTime: 300_000,
+  });
+  const flagEnabled = (key: string): boolean => {
+    if (!featureFlags) return true; // optimistic: show while loading
+    const flag = featureFlags.find((f) => f.flag_key === key);
+    return flag === undefined ? true : flag.enabled; // missing flag = enabled
+  };
+
   // Restore last visited path per tenant on first load
   useEffect(() => {
     if (session?.state !== "ready") return;
@@ -365,7 +377,7 @@ export function Shell() {
         { id: "alerts", label: t("nav.alerts"), icon: Bell, description: "Alertas ativos" },
         { id: "incidents", label: t("nav.incidents"), icon: Siren, description: "Gestão de incidentes" },
         { id: "policies", label: t("nav.policies"), icon: Shield, description: "Regras de alerta" },
-        ...((has("tenant:admin") || s.is_platform_admin) ? [
+        ...((has("tenant:admin") || s.is_platform_admin) && flagEnabled("module_executive") ? [
           { id: "executive" as View, label: t("nav.executive"), icon: TrendingUp, description: "KPIs executivos da plataforma" },
         ] : []),
       ],
@@ -374,16 +386,16 @@ export function Shell() {
       label: "ITSM",
       items: [
         { id: "changes" as View, label: t("nav.changes"), icon: GitMerge, description: "Controle de mudanças" },
-        { id: "sla" as View, label: t("nav.sla"), icon: Clock, description: "Níveis de serviço" },
-        { id: "automation" as View, label: t("nav.automation"), icon: Zap, description: "Scripts e tarefas" },
-        { id: "reports" as View, label: t("nav.reports"), icon: BarChart2, description: "Relatórios periódicos" },
+        ...(flagEnabled("module_sla") ? [{ id: "sla" as View, label: t("nav.sla"), icon: Clock, description: "Níveis de serviço" }] : []),
+        ...(flagEnabled("module_automation") ? [{ id: "automation" as View, label: t("nav.automation"), icon: Zap, description: "Scripts e tarefas" }] : []),
+        ...(flagEnabled("module_reports") ? [{ id: "reports" as View, label: t("nav.reports"), icon: BarChart2, description: "Relatórios periódicos" }] : []),
       ],
     }] : []),
     {
       label: "Inteligência",
       items: [
-        { id: "aiops" as View, label: t("nav.aiops"), icon: Brain, description: "Correlação por IA" },
-        { id: "finops" as View, label: t("nav.finops"), icon: DollarSign, description: "Custos de infra" },
+        ...(flagEnabled("module_aiops") ? [{ id: "aiops" as View, label: t("nav.aiops"), icon: Brain, description: "Correlação por IA" }] : []),
+        ...(flagEnabled("module_finops") ? [{ id: "finops" as View, label: t("nav.finops"), icon: DollarSign, description: "Custos de infra" }] : []),
         { id: "apm" as View, label: t("nav.apm"), icon: Gauge, description: "Latência e erros de API" },
       ],
     },
@@ -393,7 +405,7 @@ export function Shell() {
         { id: "monitoring" as View, label: t("nav.monitoring"), icon: Activity, description: "Fontes e integrações" },
         { id: "inventory" as View, label: t("nav.inventory"), icon: Package, description: "Hosts e ativos" },
         { id: "teia" as View, label: t("nav.teia"), icon: Network, description: "Mapa relacional do tenant" },
-        { id: "synthetic" as View, label: t("nav.synthetic"), icon: Radio, description: "Checks HTTP periódicos" },
+        ...(flagEnabled("module_synthetic") ? [{ id: "synthetic" as View, label: t("nav.synthetic"), icon: Radio, description: "Checks HTTP periódicos" }] : []),
         ...(has("monitoring:operate") ? [{ id: "alertmanager" as View, label: t("nav.alertmanager"), icon: Webhook, description: "Regras Prometheus" }] : []),
       ],
     },
@@ -402,10 +414,10 @@ export function Shell() {
       items: [
         ...(has("monitoring:operate") ? [
           { id: "infra" as View, label: t("nav.infra"), icon: Server, description: "Servidores e redes" },
-          { id: "maintenance" as View, label: t("nav.maintenance"), icon: Wrench, description: "Janelas de manutenção" },
+          ...(flagEnabled("module_maintenance") ? [{ id: "maintenance" as View, label: t("nav.maintenance"), icon: Wrench, description: "Janelas de manutenção" }] : []),
         ] : []),
         { id: "platform" as View, label: t("nav.platform"), icon: Settings2, description: "Configurações gerais" },
-        { id: "config-drift" as View, label: t("nav.config_drift"), icon: GitCompare, description: "Desvio de configuração" },
+        ...(flagEnabled("module_drift") ? [{ id: "config-drift" as View, label: t("nav.config_drift"), icon: GitCompare, description: "Desvio de configuração" }] : []),
         { id: "status_page" as View, label: t("nav.status_page"), icon: Globe, description: "Status público do tenant" },
       ],
     },
@@ -414,7 +426,7 @@ export function Shell() {
       items: [
         { id: "channels" as View, label: t("nav.channels"), icon: MessageSquare, description: "Canais de notificação" },
         { id: "escalation" as View, label: t("nav.escalation"), icon: PhoneCall, description: "Políticas de escalonamento" },
-        { id: "oncall" as View, label: t("nav.oncall"), icon: CalendarClock, description: "Escalas de on-call" },
+        ...(flagEnabled("module_oncall") ? [{ id: "oncall" as View, label: t("nav.oncall"), icon: CalendarClock, description: "Escalas de on-call" }] : []),
       ],
     }] : []),
     ...((has("tenant:admin") || has("audit:read")) ? [{
@@ -434,7 +446,7 @@ export function Shell() {
       items: [
         { id: "companies" as View, label: t("nav.companies"), icon: Building2, description: "Empresas e carteira de clientes" },
         ...(hasMSPClients ? [{ id: "msp" as View, label: t("nav.msp"), icon: Building2, description: "Clientes MSP" }] : []),
-        { id: "client-portal" as View, label: t("nav.client_portal", "Portal do Cliente"), icon: Globe, description: "Visão simplificada para clientes finais" },
+        ...(flagEnabled("module_client_portal") ? [{ id: "client-portal" as View, label: t("nav.client_portal", "Portal do Cliente"), icon: Globe, description: "Visão simplificada para clientes finais" }] : []),
       ],
     }] : []),
     ...((has("platform_admin") || has("tenant:admin")) ? [{
@@ -620,7 +632,8 @@ export function Shell() {
         </nav>
 
         {/* Knowledge base — fixed utility link */}
-        <div className="flex-shrink-0 border-t border-[var(--border)] px-2 py-1.5">
+        <div className="flex-shrink-0 border-t border-[var(--border)] px-2 py-1.5"
+          style={flagEnabled("module_kb") ? undefined : { display: "none" }}>
           <button
             onClick={() => goTo("kb")}
             title={collapsed ? t("nav.kb") : "Documentação e runbooks"}
