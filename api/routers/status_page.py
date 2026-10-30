@@ -78,7 +78,7 @@ async def public_status_page(slug: str) -> dict:
             src_cur = await conn.execute(
                 """
                 SELECT COUNT(*) FROM monitoring.monitoring_source
-                 WHERE tenant_id = %s AND enabled = true
+                 WHERE tenant_id = %s AND operational_evidence_state = 'current'
                 """,
                 (tenant_id,),
             )
