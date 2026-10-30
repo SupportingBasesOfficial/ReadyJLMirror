@@ -440,8 +440,8 @@ async def _apm_write(
             await conn.execute(
                 "INSERT INTO g1.apm_request_log"
                 " (method, path, status_code, duration_ms, tenant_id, principal_id)"
-                " VALUES ($1, $2, $3, $4, $5, $6)",
-                method, path, status_code, duration_ms, tenant_id, principal_id,
+                " VALUES (%s, %s, %s, %s, %s, %s)",
+                (method, path, status_code, duration_ms, tenant_id, principal_id),
             )
     except Exception:
         pass

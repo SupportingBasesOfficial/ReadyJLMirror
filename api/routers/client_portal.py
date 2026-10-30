@@ -22,17 +22,33 @@ def _require_tenant(request: Request) -> str:
     return tid
 
 
+async def _fetchrow(conn, query: str, params: tuple = ()) -> dict:
+    cur = await conn.execute(query, params)
+    cols = [d[0] for d in cur.description]
+    row = await cur.fetchone()
+    return dict(zip(cols, row)) if row else {}
+
+
+async def _fetchall(conn, query: str, params: tuple = ()) -> list[dict]:
+    cur = await conn.execute(query, params)
+    cols = [d[0] for d in cur.description]
+    rows = await cur.fetchall()
+    return [dict(zip(cols, r)) for r in rows]
+
+
 @router.get("/overview")
 async def get_overview(request: Request) -> dict:
     tenant_id = _require_tenant(request)
     async with db_connection() as conn:
-        tenant_row = await conn.fetchrow(
-            "SELECT display_name FROM g1.tenants WHERE tenant_id = $1",
-            tenant_id,
+        tenant_row = await _fetchrow(
+            conn,
+            "SELECT display_name FROM g1.tenants WHERE tenant_id = %s",
+            (tenant_id,),
         )
-        tenant_name = (tenant_row["display_name"] if tenant_row else None) or tenant_id
+        tenant_name = tenant_row.get("display_name") or tenant_id
 
-        alerts_row = await conn.fetchrow(
+        alerts_row = await _fetchrow(
+            conn,
             """
             SELECT
                 COUNT(*) FILTER (WHERE lifecycle_state = 'active')   AS active,
@@ -41,63 +57,55 @@ async def get_overview(request: Request) -> dict:
                 COUNT(*) FILTER (WHERE lifecycle_state = 'resolved'
                     AND resolved_at >= now() - interval '24 hours')  AS resolved_24h
             FROM alerting.alert
-            WHERE tenant_id = $1
+            WHERE tenant_id = %s
             """,
-            tenant_id,
+            (tenant_id,),
         )
 
         open_incidents = 0
         try:
             async with conn.transaction():
                 await conn.execute(f"SET LOCAL ROLE {_INVOKER_ROLE}")
-                row = await conn.fetchrow(
+                row = await _fetchrow(
+                    conn,
                     """
                     SELECT COUNT(*) AS cnt FROM itsm.incident
-                    WHERE tenant_id = $1
+                    WHERE tenant_id = %s
                       AND lifecycle_state NOT IN ('resolved', 'closed')
                     """,
-                    tenant_id,
+                    (tenant_id,),
                 )
-                open_incidents = int(row["cnt"] or 0) if row else 0
+                open_incidents = int(row.get("cnt") or 0)
         except Exception:
             pass
 
-        sla_row = await conn.fetchrow(
-            """
-            SELECT
-                COUNT(*)                                  AS total,
-                COUNT(*) FILTER (WHERE met = true)        AS met
-            FROM g1.sla_breach
-            WHERE tenant_id = $1
-              AND checked_at >= now() - interval '30 days'
-            """,
-            tenant_id,
-        ) if False else None  # graceful: may not exist yet
+        sla_row: dict = {}
         try:
-            sla_row = await conn.fetchrow(
+            sla_row = await _fetchrow(
+                conn,
                 """
                 SELECT
                     COUNT(*)                                  AS total,
                     COUNT(*) FILTER (WHERE met = true)        AS met
                 FROM g1.sla_breach
-                WHERE tenant_id = $1
+                WHERE tenant_id = %s
                   AND checked_at >= now() - interval '30 days'
                 """,
-                tenant_id,
+                (tenant_id,),
             )
         except Exception:
-            sla_row = None
+            pass
 
-        total_sla = int(sla_row["total"] or 0) if sla_row else 0
-        met_sla = int(sla_row["met"] or 0) if sla_row else 0
+        total_sla = int(sla_row.get("total") or 0)
+        met_sla = int(sla_row.get("met") or 0)
         sla_pct = round(met_sla / total_sla * 100, 1) if total_sla > 0 else None
 
     return {
         "tenant_name": tenant_name,
         "alerts": {
-            "active": int(alerts_row["active"] or 0),
-            "critical": int(alerts_row["critical"] or 0),
-            "resolved_24h": int(alerts_row["resolved_24h"] or 0),
+            "active": int(alerts_row.get("active") or 0),
+            "critical": int(alerts_row.get("critical") or 0),
+            "resolved_24h": int(alerts_row.get("resolved_24h") or 0),
         },
         "open_incidents": open_incidents,
         "sla_compliance_pct": sla_pct,
@@ -108,7 +116,8 @@ async def get_overview(request: Request) -> dict:
 async def list_alerts(request: Request, state: str = "active") -> list:
     tenant_id = _require_tenant(request)
     async with db_connection() as conn:
-        rows = await conn.fetch(
+        rows = await _fetchall(
+            conn,
             """
             SELECT
                 alert_id,
@@ -118,13 +127,12 @@ async def list_alerts(request: Request, state: str = "active") -> list:
                 fired_at,
                 resolved_at
             FROM alerting.alert
-            WHERE tenant_id = $1
-              AND lifecycle_state = $2
+            WHERE tenant_id = %s
+              AND lifecycle_state = %s
             ORDER BY fired_at DESC
             LIMIT 100
             """,
-            tenant_id,
-            state,
+            (tenant_id, state),
         )
     return [
         {
@@ -142,7 +150,7 @@ async def list_alerts(request: Request, state: str = "active") -> list:
 @router.get("/incidents")
 async def list_incidents(request: Request, state: str = "open") -> list:
     tenant_id = _require_tenant(request)
-    rows: list = []
+    rows: list[dict] = []
     async with db_connection() as conn:
         try:
             async with conn.transaction():
@@ -150,19 +158,21 @@ async def list_incidents(request: Request, state: str = "open") -> list:
                 filter_clause = (
                     "AND lifecycle_state NOT IN ('resolved', 'closed')"
                     if state == "open"
-                    else f"AND lifecycle_state = '{state}'"
+                    else "AND lifecycle_state = %s"
                 )
-                rows = await conn.fetch(
+                params = (tenant_id, state) if state != "open" else (tenant_id,)
+                rows = await _fetchall(
+                    conn,
                     f"""
                     SELECT incident_id, title, severity, lifecycle_state,
                            detected_at, resolved_at
                     FROM itsm.incident
-                    WHERE tenant_id = $1
+                    WHERE tenant_id = %s
                       {filter_clause}
                     ORDER BY detected_at DESC
                     LIMIT 50
                     """,
-                    tenant_id,
+                    params,
                 )
         except Exception:
             pass
@@ -182,11 +192,11 @@ async def list_incidents(request: Request, state: str = "open") -> list:
 @router.get("/sla")
 async def list_sla(request: Request) -> list:
     tenant_id = _require_tenant(request)
-    rows: list = []
+    rows: list[dict] = []
     async with db_connection() as conn:
-        # Try SLA policies + breach stats
         try:
-            rows = await conn.fetch(
+            rows = await _fetchall(
+                conn,
                 """
                 SELECT
                     p.sla_id,
@@ -199,14 +209,14 @@ async def list_sla(request: Request) -> list:
                 FROM g1.sla_policy p
                 LEFT JOIN g1.sla_breach b
                     ON b.sla_id = p.sla_id
-                   AND b.tenant_id = $1
+                   AND b.tenant_id = %s
                    AND b.checked_at >= now() - interval '30 days'
-                WHERE p.tenant_id = $1
+                WHERE p.tenant_id = %s
                   AND p.enabled = true
                 GROUP BY p.sla_id, p.name, p.severity_match, p.response_secs, p.resolve_secs
                 ORDER BY p.name
                 """,
-                tenant_id,
+                (tenant_id, tenant_id),
             )
         except Exception:
             pass
@@ -217,11 +227,11 @@ async def list_sla(request: Request) -> list:
             "severity_match": r["severity_match"],
             "response_secs": r["response_secs"],
             "resolve_secs": r["resolve_secs"],
-            "total_checks": int(r["total_checks"] or 0),
-            "met_count": int(r["met_count"] or 0),
+            "total_checks": int(r.get("total_checks") or 0),
+            "met_count": int(r.get("met_count") or 0),
             "compliance_pct": (
-                round(int(r["met_count"] or 0) / int(r["total_checks"]) * 100, 1)
-                if int(r["total_checks"] or 0) > 0 else None
+                round(int(r.get("met_count") or 0) / int(r["total_checks"]) * 100, 1)
+                if int(r.get("total_checks") or 0) > 0 else None
             ),
         }
         for r in rows
@@ -232,23 +242,25 @@ async def list_sla(request: Request) -> list:
 async def get_status(request: Request) -> dict:
     tenant_id = _require_tenant(request)
     async with db_connection() as conn:
-        critical_row = await conn.fetchrow(
+        critical_row = await _fetchrow(
+            conn,
             """
             SELECT COUNT(*) AS cnt FROM alerting.alert
-            WHERE tenant_id = $1 AND lifecycle_state = 'active' AND severity = 'critical'
+            WHERE tenant_id = %s AND lifecycle_state = 'active' AND severity = 'critical'
             """,
-            tenant_id,
+            (tenant_id,),
         )
-        high_row = await conn.fetchrow(
+        high_row = await _fetchrow(
+            conn,
             """
             SELECT COUNT(*) AS cnt FROM alerting.alert
-            WHERE tenant_id = $1 AND lifecycle_state = 'active' AND severity = 'high'
+            WHERE tenant_id = %s AND lifecycle_state = 'active' AND severity = 'high'
             """,
-            tenant_id,
+            (tenant_id,),
         )
 
-    critical = int(critical_row["cnt"] or 0) if critical_row else 0
-    high = int(high_row["cnt"] or 0) if high_row else 0
+    critical = int(critical_row.get("cnt") or 0)
+    high = int(high_row.get("cnt") or 0)
 
     if critical > 0:
         overall = "outage"
