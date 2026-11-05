@@ -1,11 +1,13 @@
-"""G37 Synthetic monitoring — HTTP health checks."""
+"""G37 Synthetic monitoring — HTTP and TCP health checks."""
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import secrets
 import socket
 import time
+from typing import Literal
 from urllib.parse import urlparse
 
 import httpx
@@ -21,21 +23,25 @@ _METHODS = ("GET", "HEAD", "POST")
 _MAX_INTERVAL = 86400  # 24 h
 _MIN_INTERVAL = 30     # 30 s
 _MAX_TIMEOUT = 30
+_MAX_PORT = 65535
 
 
 class CheckCreate(BaseModel):
     name: str
-    url: str
+    check_type: Literal["http", "tcp"] = "http"
+    url: str                        # HTTP: full URL; TCP: host (port in port field or host:port)
     method: str = "GET"
     expected_status: int = 200
     timeout_seconds: int = 10
     interval_seconds: int = 300
     headers: dict[str, str] | None = None
+    port: int | None = None         # TCP only
     enabled: bool = True
 
 
 class CheckUpdate(BaseModel):
     name: str | None = None
+    check_type: Literal["http", "tcp"] | None = None
     url: str | None = None
     method: str | None = None
     expected_status: int | None = None
@@ -107,10 +113,21 @@ def _assert_external_url(url: str) -> None:
             pass
 
 
-def _validate_check(name: str, url: str, method: str,
-                    expected_status: int, timeout: int, interval: int) -> None:
+def _validate_common(name: str, timeout: int, interval: int) -> None:
     if not name.strip():
         raise HTTPException(status_code=422, detail="name required")
+    if not (1 <= timeout <= _MAX_TIMEOUT):
+        raise HTTPException(status_code=422,
+                            detail=f"timeout_seconds must be 1-{_MAX_TIMEOUT}")
+    if not (_MIN_INTERVAL <= interval <= _MAX_INTERVAL):
+        raise HTTPException(
+            status_code=422,
+            detail=f"interval_seconds must be {_MIN_INTERVAL}-{_MAX_INTERVAL}")
+
+
+def _validate_check(name: str, url: str, method: str,
+                    expected_status: int, timeout: int, interval: int) -> None:
+    _validate_common(name, timeout, interval)
     if not url.strip().startswith(("http://", "https://")):
         raise HTTPException(status_code=422,
                             detail="url must start with http:// or https://")
@@ -121,13 +138,40 @@ def _validate_check(name: str, url: str, method: str,
     if not (100 <= expected_status <= 599):
         raise HTTPException(status_code=422,
                             detail="expected_status must be 100-599")
-    if not (1 <= timeout <= _MAX_TIMEOUT):
+
+
+def _assert_external_host(host: str) -> None:
+    """Raise 422 if *host* resolves to a private/loopback address."""
+    if "." not in host and ":" not in host:
         raise HTTPException(status_code=422,
-                            detail=f"timeout_seconds must be 1-{_MAX_TIMEOUT}")
-    if not (_MIN_INTERVAL <= interval <= _MAX_INTERVAL):
-        raise HTTPException(
-            status_code=422,
-            detail=f"interval_seconds must be {_MIN_INTERVAL}-{_MAX_INTERVAL}")
+                            detail="host must be a resolvable hostname or public IP")
+    try:
+        addr = ipaddress.ip_address(host)
+        if addr.is_private or addr.is_loopback or addr.is_link_local:
+            raise HTTPException(status_code=422,
+                                detail="host must point to a publicly reachable address")
+        return
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except Exception:
+        raise HTTPException(status_code=422, detail="host could not be resolved")
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0])
+            if addr.is_private or addr.is_loopback or addr.is_link_local:
+                raise HTTPException(status_code=422,
+                                    detail="host must point to a publicly reachable address")
+        except ValueError:
+            pass
+
+
+def _validate_tcp_check(name: str, host: str, port: int, timeout: int, interval: int) -> None:
+    _validate_common(name, timeout, interval)
+    _assert_external_host(host)
+    if not (1 <= port <= _MAX_PORT):
+        raise HTTPException(status_code=422, detail="port must be 1-65535")
 
 
 @router.get("/checks")
@@ -161,24 +205,47 @@ async def list_checks(request: Request,
 async def create_check(request: Request, body: CheckCreate,
                        tenant_id: str | None = None) -> dict:
     tenant = _authoritative_tenant(request, tenant_id)
-    _validate_check(body.name, body.url, body.method, body.expected_status,
-                    body.timeout_seconds, body.interval_seconds)
-    check_id = f"synchk_{secrets.token_urlsafe(10)}"
     import json
-    headers_json = json.dumps(body.headers) if body.headers else None
+
+    if body.check_type == "tcp":
+        # For TCP, url field stores "host" and port is in body.port
+        host = body.url.strip()
+        port = body.port
+        if port is None:
+            # Try parsing host:port syntax
+            if ":" in host and not host.startswith("["):
+                parts = host.rsplit(":", 1)
+                try:
+                    host, port = parts[0], int(parts[1])
+                except ValueError:
+                    raise HTTPException(status_code=422, detail="port must be a number")
+            else:
+                raise HTTPException(status_code=422, detail="port required for TCP check")
+        _validate_tcp_check(body.name, host, port, body.timeout_seconds, body.interval_seconds)
+        url_stored = f"{host}:{port}"
+        method_stored, exp_status = "TCP", 0
+        headers_json = None
+    else:
+        _validate_check(body.name, body.url, body.method, body.expected_status,
+                        body.timeout_seconds, body.interval_seconds)
+        url_stored = body.url.strip()
+        method_stored, exp_status = body.method, body.expected_status
+        headers_json = json.dumps(body.headers) if body.headers else None
+
+    check_id = f"synchk_{secrets.token_urlsafe(10)}"
     async with db_tenant_connection(tenant) as conn:
         try:
             cur = await conn.execute(
                 """
                 INSERT INTO monitoring.synthetic_check
-                    (check_id, tenant_id, name, url, method,
+                    (check_id, tenant_id, name, check_type, url, method,
                      expected_status, timeout_seconds, interval_seconds,
                      headers, enabled)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)
-                RETURNING check_id, name, url, method, enabled, created_at
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)
+                RETURNING check_id, name, check_type, url, method, enabled, created_at
                 """,
-                (check_id, tenant, body.name.strip(), body.url.strip(),
-                 body.method, body.expected_status, body.timeout_seconds,
+                (check_id, tenant, body.name.strip(), body.check_type, url_stored,
+                 method_stored, exp_status, body.timeout_seconds,
                  body.interval_seconds, headers_json, body.enabled))
             row = await cur.fetchone()
             await conn.commit()
@@ -187,9 +254,9 @@ async def create_check(request: Request, body: CheckCreate,
                 raise HTTPException(status_code=409,
                                     detail="check name already exists")
             raise
-    return {"check_id": row[0], "name": row[1], "url": row[2],
-            "method": row[3], "enabled": row[4],
-            "created_at": row[5].isoformat()}
+    return {"check_id": row[0], "name": row[1], "check_type": row[2], "url": row[3],
+            "method": row[4], "enabled": row[5],
+            "created_at": row[6].isoformat()}
 
 
 @router.patch("/checks/{check_id}")
@@ -278,33 +345,12 @@ async def get_results(check_id: str, request: Request,
         return rows
 
 
-@router.post("/checks/{check_id}/run")
-async def run_check_now(check_id: str, request: Request,
-                        tenant_id: str | None = None) -> dict:
-    """Trigger a check immediately, outside the scheduled cadence."""
-    tenant = _authoritative_tenant(request, tenant_id)
-    async with db_tenant_connection(tenant) as conn:
-        cur = await conn.execute(
-            """
-            SELECT url, method, expected_status, timeout_seconds, headers
-              FROM monitoring.synthetic_check
-             WHERE tenant_id = %s AND check_id = %s
-            """, (tenant, check_id))
-        row = await cur.fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="check not found")
-        url, method, exp_status, timeout, headers_obj = row
-
-    headers: dict[str, str] = headers_obj or {}
-    # Defense-in-depth: re-validate URL before execution (catches rows that
-    # pre-date the SSRF fix). Redirects disabled — a redirect to a private
-    # host would bypass the up-front DNS check done at creation time.
+async def _execute_http_check(url: str, method: str, exp_status: int,
+                              timeout: int, headers: dict) -> tuple[bool, int | None, str | None]:
     try:
         _assert_external_url(url)
     except HTTPException:
-        return {"ok": False, "status_code": None, "response_ms": 0,
-                "error": "check url blocked by security policy"}
-    t0 = time.monotonic()
+        return False, None, "check url blocked by security policy"
     ok = False
     status_code: int | None = None
     error: str | None = None
@@ -315,6 +361,61 @@ async def run_check_now(check_id: str, request: Request,
         ok = (status_code == exp_status)
     except Exception as exc:
         error = str(exc)[:500]
+    return ok, status_code, error
+
+
+async def _execute_tcp_check(host_port: str, timeout: int) -> tuple[bool, str | None]:
+    """TCP connect check; host_port is 'host:port'."""
+    try:
+        host, port_str = host_port.rsplit(":", 1)
+        port = int(port_str)
+    except (ValueError, AttributeError):
+        return False, "malformed host:port"
+    try:
+        _assert_external_host(host)
+    except HTTPException:
+        return False, "host blocked by security policy"
+    ok = False
+    error: str | None = None
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout)
+        writer.close()
+        await writer.wait_closed()
+        ok = True
+    except asyncio.TimeoutError:
+        error = f"TCP connect timed out after {timeout}s"
+    except OSError as exc:
+        error = str(exc)[:300]
+    return ok, error
+
+
+@router.post("/checks/{check_id}/run")
+async def run_check_now(check_id: str, request: Request,
+                        tenant_id: str | None = None) -> dict:
+    """Trigger a check immediately, outside the scheduled cadence."""
+    tenant = _authoritative_tenant(request, tenant_id)
+    async with db_tenant_connection(tenant) as conn:
+        cur = await conn.execute(
+            """
+            SELECT check_type, url, method, expected_status, timeout_seconds, headers
+              FROM monitoring.synthetic_check
+             WHERE tenant_id = %s AND check_id = %s
+            """, (tenant, check_id))
+        row = await cur.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="check not found")
+        check_type, url, method, exp_status, timeout, headers_obj = row
+
+    t0 = time.monotonic()
+    status_code: int | None = None
+
+    if check_type == "tcp":
+        ok, error = await _execute_tcp_check(url, timeout)
+    else:
+        headers: dict[str, str] = headers_obj or {}
+        ok, status_code, error = await _execute_http_check(url, method, exp_status, timeout, headers)
+
     response_ms = int((time.monotonic() - t0) * 1000)
 
     result_id = f"synres_{secrets.token_urlsafe(10)}"

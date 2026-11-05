@@ -4,7 +4,7 @@
  * Access via /auth/tv?token=<TV_TOKEN> which sets the session and
  * redirects here.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/api/client";
 import { useSession } from "@/hooks/useSession";
 
@@ -131,10 +131,17 @@ export function TVModePage() {
   const [incidents, setIncidents] = useState<RawIncident[]>([]);
   const [changes, setChanges] = useState<RawRfc[]>([]);
   const [connected, setConnected] = useState(false);
+  const [reconnectKey, setReconnectKey] = useState(0);
   const [template, setTemplate] = useState<WidgetConfig | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
   const tenantId = session?.tenant_id;
+
+  const handleReconnect = useCallback(() => {
+    esRef.current?.close();
+    setConnected(false);
+    setReconnectKey(k => k + 1);
+  }, []);
 
   // Load template from localStorage when tenantId is known
   useEffect(() => {
@@ -143,7 +150,7 @@ export function TVModePage() {
     setTemplate(tpl);
   }, [tenantId]);
 
-  // SSE + REST bootstrap
+  // SSE + REST bootstrap — re-runs on manual reconnect
   useEffect(() => {
     void api.get<RawAlert[]>("/api/v1/alerting/alerts?lifecycle_state=active&limit=100")
       .then(setAlerts).catch(() => null);
@@ -173,7 +180,8 @@ export function TVModePage() {
     }
     connect();
     return () => { cancelled = true; esRef.current?.close(); };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reconnectKey]);
 
   // Poll incidents/changes based on template config
   const cfg = template ?? DEFAULT_TV_TEMPLATE;
@@ -250,7 +258,7 @@ export function TVModePage() {
             <div key={a.alert_id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 20px", borderBottom: "1px solid var(--border, #262c3a)" }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: sevColor(a.source_evidence_summary?.severity_class) }} />
               <span style={{ fontSize: 14, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {a.source_evidence_summary?.problem_id || a.monitoring_resource_id || a.alert_id}
+                {a.source_evidence_summary?.problem_id || a.monitoring_resource_id || a.alert_id?.slice(0, 8)}
               </span>
               <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
                 {fmtTime(a.opened_at)}
@@ -352,11 +360,22 @@ export function TVModePage() {
           <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--text-muted)" }}>
             <span style={{
               display: "inline-block", width: 8, height: 8, borderRadius: "50%",
-              background: connected ? "var(--green, #22c55e)" : "var(--text-muted)",
+              background: connected ? "var(--green, #22c55e)" : "var(--yellow, #f59e0b)",
               boxShadow: connected ? "0 0 6px var(--green, #22c55e)" : "none",
               animation: connected ? "pulse 2s infinite" : "none",
             }} />
-            {connected ? "live" : "reconectando…"}
+            {connected ? "live" : (
+              <button
+                onClick={handleReconnect}
+                style={{
+                  background: "none", border: "1px solid var(--yellow, #f59e0b)",
+                  borderRadius: 6, color: "var(--yellow, #f59e0b)", cursor: "pointer",
+                  fontSize: 11, fontWeight: 500, padding: "2px 8px",
+                }}
+              >
+                Reconectar
+              </button>
+            )}
           </span>
           <span style={{ fontSize: 28, fontWeight: 600, fontVariantNumeric: "tabular-nums", color: "var(--text)" }}>
             <Clock />

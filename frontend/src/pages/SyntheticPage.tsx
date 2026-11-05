@@ -9,9 +9,12 @@ import { Spinner } from "@/components/ui/spinner";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useToast } from "@/components/ui/toast";
 
+type CheckType = "http" | "tcp";
+
 interface SyntheticCheck {
   check_id: string;
   name: string;
+  check_type: CheckType;
   url: string;
   method: string;
   expected_status: number;
@@ -83,49 +86,115 @@ function CheckForm({
 }: {
   initial?: Partial<SyntheticCheck>;
   onSave: (data: {
-    name: string; url: string; method: string;
+    name: string; check_type: CheckType; url: string; method: string;
     expected_status: number; timeout_seconds: number;
     interval_seconds: number; enabled: boolean;
+    headers?: Record<string, string> | null;
+    port?: number | null;
   }) => void;
   onCancel: () => void;
   isPending: boolean;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
+  const [checkType, setCheckType] = useState<CheckType>(initial?.check_type ?? "http");
   const [url, setUrl] = useState(initial?.url ?? "");
+  const [port, setPort] = useState<string>("");
   const [method, setMethod] = useState(initial?.method ?? "GET");
   const [expectedStatus, setExpectedStatus] = useState(initial?.expected_status ?? 200);
   const [timeout, setTimeout_] = useState(initial?.timeout_seconds ?? 10);
   const [interval, setInterval_] = useState(initial?.interval_seconds ?? 300);
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
+  const [authToken, setAuthToken] = useState("");
+  const [authHeader, setAuthHeader] = useState("Authorization");
+  const [showAuth, setShowAuth] = useState(false);
 
   const inp = "w-full text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--brand)]";
+  const isTcp = checkType === "tcp";
+
+  function buildPayload() {
+    const headers = (showAuth && authToken.trim())
+      ? { [authHeader.trim() || "Authorization"]: authToken.trim() }
+      : null;
+    if (isTcp) {
+      return {
+        name, check_type: checkType, url: url.trim(),
+        method: "TCP", expected_status: 0,
+        timeout_seconds: timeout, interval_seconds: interval,
+        enabled, headers: null,
+        port: port ? Number(port) : null,
+      };
+    }
+    return {
+      name, check_type: checkType, url: url.trim(), method,
+      expected_status: expectedStatus, timeout_seconds: timeout,
+      interval_seconds: interval, enabled, headers,
+    };
+  }
+
+  const canSave = !isPending && name.trim() && url.trim() && (!isTcp || port);
 
   return (
     <Card className="p-4 space-y-3">
+      {/* Type selector */}
+      <div className="flex gap-2">
+        {(["http", "tcp"] as CheckType[]).map((t) => (
+          <button key={t} onClick={() => setCheckType(t)}
+            className="text-xs px-3 py-1 rounded border transition-colors"
+            style={{
+              background: checkType === t ? "color-mix(in srgb,var(--brand) 15%,transparent)" : "none",
+              color: checkType === t ? "var(--brand)" : "var(--text-muted)",
+              borderColor: checkType === t ? "color-mix(in srgb,var(--brand) 40%,transparent)" : "var(--border)",
+            }}>
+            {t.toUpperCase()}
+          </button>
+        ))}
+        <span className="text-[10px] text-[var(--text-muted)] self-center ml-1">
+          {isTcp ? "Verifica conectividade TCP em host:porta" : "Verifica resposta HTTP de uma URL"}
+        </span>
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2 space-y-1">
           <label className="text-xs text-[var(--text-muted)]">Nome</label>
           <input className={inp} value={name} onChange={(e) => setName(e.target.value)}
             placeholder="ex: Site principal" />
         </div>
-        <div className="col-span-2 space-y-1">
-          <label className="text-xs text-[var(--text-muted)]">URL</label>
-          <input className={inp} value={url} onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://exemplo.com/health" />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-[var(--text-muted)]">Método</label>
-          <select className={inp} value={method} onChange={(e) => setMethod(e.target.value)}>
-            <option value="GET">GET</option>
-            <option value="HEAD">HEAD</option>
-            <option value="POST">POST</option>
-          </select>
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-[var(--text-muted)]">Status esperado</label>
-          <input className={inp} type="number" min={100} max={599}
-            value={expectedStatus} onChange={(e) => setExpectedStatus(Number(e.target.value))} />
-        </div>
+        {isTcp ? (
+          <>
+            <div className="col-span-2 space-y-1">
+              <label className="text-xs text-[var(--text-muted)]">Host</label>
+              <input className={inp} value={url} onChange={(e) => setUrl(e.target.value)}
+                placeholder="ex: meuservidor.com.br" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-[var(--text-muted)]">Porta</label>
+              <input className={inp} type="number" min={1} max={65535}
+                value={port} onChange={(e) => setPort(e.target.value)}
+                placeholder="ex: 443" />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="col-span-2 space-y-1">
+              <label className="text-xs text-[var(--text-muted)]">URL</label>
+              <input className={inp} value={url} onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://exemplo.com/health" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-[var(--text-muted)]">Método</label>
+              <select className={inp} value={method} onChange={(e) => setMethod(e.target.value)}>
+                <option value="GET">GET</option>
+                <option value="HEAD">HEAD</option>
+                <option value="POST">POST</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-[var(--text-muted)]">Status esperado</label>
+              <input className={inp} type="number" min={100} max={599}
+                value={expectedStatus} onChange={(e) => setExpectedStatus(Number(e.target.value))} />
+            </div>
+          </>
+        )}
         <div className="space-y-1">
           <label className="text-xs text-[var(--text-muted)]">Intervalo</label>
           <select className={inp} value={interval} onChange={(e) => setInterval_(Number(e.target.value))}>
@@ -140,15 +209,39 @@ function CheckForm({
             value={timeout} onChange={(e) => setTimeout_(Number(e.target.value))} />
         </div>
       </div>
+
+      {/* Auth token (HTTP only) */}
+      {!isTcp && (
+        <div className="space-y-2">
+          <button onClick={() => setShowAuth(!showAuth)}
+            className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text)] flex items-center gap-1">
+            {showAuth ? "▾" : "▸"} {showAuth ? "Ocultar autenticação" : "Adicionar token de autenticação (opcional)"}
+          </button>
+          {showAuth && (
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-xs text-[var(--text-muted)]">Header</label>
+                <input className={inp} value={authHeader} onChange={(e) => setAuthHeader(e.target.value)}
+                  placeholder="Authorization" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-[var(--text-muted)]">Valor</label>
+                <input className={inp} value={authToken} onChange={(e) => setAuthToken(e.target.value)}
+                  placeholder="Bearer seu-token" />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <label className="flex items-center gap-2 text-xs text-[var(--text)] cursor-pointer">
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)}
           className="rounded" />
         Habilitado
       </label>
       <div className="flex gap-2">
-        <Button size="sm" disabled={isPending || !name.trim() || !url.trim()}
-          onClick={() => onSave({ name, url, method, expected_status: expectedStatus,
-            timeout_seconds: timeout, interval_seconds: interval, enabled })}>
+        <Button size="sm" disabled={!canSave}
+          onClick={() => onSave(buildPayload())}>
           {isPending && <Spinner className="w-3 h-3 mr-1" />}
           Salvar
         </Button>
@@ -275,6 +368,10 @@ function CheckRow({
             <span className="text-sm font-medium text-[var(--text)] truncate">
               {check.name}
             </span>
+            <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+              style={{ background: check.check_type === "tcp" ? "color-mix(in srgb,var(--brand) 15%,transparent)" : "color-mix(in srgb,var(--green,#22c55e) 15%,transparent)", color: check.check_type === "tcp" ? "var(--brand)" : "var(--green,#22c55e)" }}>
+              {check.check_type ?? "http"}
+            </span>
             {!check.enabled && (
               <span className="text-[10px] text-[var(--text-muted)] border border-[var(--border)] rounded px-1">
                 desabilitado
@@ -284,8 +381,7 @@ function CheckRow({
           <div className="flex items-center gap-2 mt-0.5 text-[10px] text-[var(--text-muted)]">
             <span className="font-mono truncate max-w-[240px]">{check.url}</span>
             <span>·</span>
-            <span>{check.method}</span>
-            <span>·</span>
+            {check.check_type !== "tcp" && <><span>{check.method}</span><span>·</span></>}
             <span>a cada {fmtInterval(check.interval_seconds)}</span>
             {check.last_response_ms !== null && (
               <>

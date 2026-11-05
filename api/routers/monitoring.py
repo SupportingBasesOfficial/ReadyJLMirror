@@ -960,8 +960,14 @@ async def metric_history_endpoint(
         window_from: int | None = None,
         window_till: int | None = None,
         cursor: str | None = None,
-        limit: int = 500) -> dict:
-    """G4 metric-history contract — per-definition windowed view."""
+        limit: int = 500,
+        max_points: int | None = None) -> dict:
+    """G4 metric-history contract — per-definition windowed view.
+
+    max_points: decimate the result to at most this many points (for chart
+    rendering performance). When omitted the backend auto-selects based on
+    the window length.
+    """
     import time as _time
 
     tenant = _authoritative_tenant(request, tenant_id)
@@ -982,7 +988,31 @@ async def metric_history_endpoint(
     if payload is None:
         raise HTTPException(status_code=404,
                             detail="metric definition not found")
-    return _ser_rows(payload)
+    result = _ser_rows(payload)
+
+    # Auto-select max_points when caller doesn't specify
+    if max_points is None:
+        window_hours = (till - frm) / 3600
+        if window_hours <= 1:
+            max_points = 120
+        elif window_hours <= 6:
+            max_points = 180
+        elif window_hours <= 24:
+            max_points = 288
+        else:
+            max_points = 400
+
+    # Simple uniform decimation — keeps first and last points
+    items = result.get("items", [])
+    if items and len(items) > max_points:
+        step = (len(items) - 1) / (max_points - 1)
+        indices = {0, len(items) - 1}
+        indices.update(round(i * step) for i in range(1, max_points - 1))
+        items = [items[i] for i in sorted(indices)]
+        result["items"] = items
+        result["downsampled"] = True
+
+    return result
 
 
 @router.get("/sources/{source_id}/history/streams")

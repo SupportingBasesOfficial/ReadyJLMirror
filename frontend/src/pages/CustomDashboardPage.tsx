@@ -8,7 +8,10 @@ import {
   GripVertical, X, Plus, LayoutGrid, Check,
   Bell, AlertTriangle, Activity, Users,
   Wifi, GitBranch, Shield, RefreshCw,
+  Monitor, Tv, Smartphone,
 } from "lucide-react";
+
+type DeviceType = "pc" | "tv" | "mobile";
 
 // ── Widget types ──────────────────────────────────────────────────────────────
 
@@ -51,21 +54,21 @@ interface LayoutResponse {
   layout: { widgets?: WidgetType[] };
 }
 
-function useLayoutApi(tenantId: string) {
+function useLayoutApi(tenantId: string, deviceType: DeviceType) {
   const { toast } = useToast();
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery<LayoutResponse>({
-    queryKey: ["custom-dashboard-layout", tenantId],
-    queryFn: () => api.get<LayoutResponse>(`/api/v1/layout?view_type=dashboard&tenant_id=${tenantId}`),
+    queryKey: ["custom-dashboard-layout", tenantId, deviceType],
+    queryFn: () => api.get<LayoutResponse>(`/api/v1/layout?view_type=dashboard&view_key=${deviceType}`),
     staleTime: Infinity,
   });
 
   const saveMutation = useMutation({
     mutationFn: (widgets: WidgetType[]) =>
-      api.put(`/api/v1/layout?view_type=dashboard&tenant_id=${tenantId}`, { layout: { widgets } }),
+      api.put(`/api/v1/layout?view_type=dashboard&view_key=${deviceType}`, { layout: { widgets } }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["custom-dashboard-layout", tenantId] });
+      qc.invalidateQueries({ queryKey: ["custom-dashboard-layout", tenantId, deviceType] });
       toast("Layout salvo.", "success");
     },
     onError: () => toast("Erro ao salvar layout.", "error"),
@@ -555,12 +558,24 @@ function CatalogPanel({ active, onAdd }: {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+const DEVICE_TABS: { type: DeviceType; label: string; icon: React.ElementType }[] = [
+  { type: "pc",     label: "PC",     icon: Monitor },
+  { type: "tv",     label: "TV",     icon: Tv },
+  { type: "mobile", label: "Mobile", icon: Smartphone },
+];
+
 interface Props { tenantId: string }
 
 export function CustomDashboardPage({ tenantId }: Props) {
-  const { widgets: savedWidgets, isLoading, save, saving } = useLayoutApi(tenantId);
+  const [deviceType, setDeviceType] = useState<DeviceType>("pc");
+  const { widgets: savedWidgets, isLoading, save, saving } = useLayoutApi(tenantId, deviceType);
   const [widgets, setWidgets] = useState<WidgetType[]>([]);
   const [editMode, setEditMode] = useState(false);
+
+  // Reset edit mode when switching device type
+  useEffect(() => {
+    setEditMode(false);
+  }, [deviceType]);
 
   useEffect(() => {
     if (!isLoading) setWidgets(savedWidgets);
@@ -597,6 +612,29 @@ export function CustomDashboardPage({ tenantId }: Props) {
           <p className="text-[12px] text-[var(--text-muted)]">Widgets personalizáveis — arraste para reorganizar</p>
         </div>
         <div className="flex items-center gap-2">
+
+          {/* Device type selector */}
+          <div style={{ display: "flex", gap: 2, background: "var(--surface-2, #1e2130)", borderRadius: 8, padding: 2 }}>
+            {DEVICE_TABS.map(({ type, label, icon: Icon }) => (
+              <button
+                key={type}
+                onClick={() => setDeviceType(type)}
+                title={`Layout ${label}`}
+                style={{
+                  display: "flex", alignItems: "center", gap: 4,
+                  padding: "5px 10px", borderRadius: 6, fontSize: 11, fontWeight: 500,
+                  background: deviceType === type ? "var(--surface, #252836)" : "none",
+                  color: deviceType === type ? "var(--brand, #6366f1)" : "var(--text-muted)",
+                  border: deviceType === type ? "1px solid color-mix(in srgb, var(--brand) 30%, transparent)" : "1px solid transparent",
+                  cursor: "pointer", transition: "all .15s",
+                }}
+              >
+                <Icon size={12} />
+                {label}
+              </button>
+            ))}
+          </div>
+
           {editMode ? (
             <>
               <button
