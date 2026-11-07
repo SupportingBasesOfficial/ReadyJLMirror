@@ -24,6 +24,7 @@ import smtplib
 import uuid
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import parseaddr
 
 from shared.config import settings
 
@@ -120,7 +121,9 @@ def send_message(
                 server.starttls()
         if user and password:
             server.login(user, password)
-        server.sendmail(from_addr, [destination_ref], msg.as_string())
+        # parseaddr extracts bare email from "Display Name <addr>" for envelope
+        _, envelope_from = parseaddr(from_addr)
+        server.sendmail(envelope_from or from_addr, [destination_ref], msg.as_string())
         server.quit()
     except smtplib.SMTPException as exc:
         raise EmailError(f"smtp:{type(exc).__name__}") from exc

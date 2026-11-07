@@ -241,7 +241,7 @@ export function TenantSettingsPage({ tenantId }: Props) {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-medium text-[var(--text-muted)]">{t("tenantSettings.smtp.fromName")}</label>
-              <input type="text" value={smtpForm.smtp_from_name ?? ""} onChange={e => setSmtpForm(f => ({ ...f, smtp_from_name: e.target.value }))} placeholder="JLMirror Ops" className="w-full text-sm rounded border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 focus:outline-none focus:border-[var(--brand)]" />
+              <input type="text" value={smtpForm.smtp_from_name ?? ""} onChange={e => setSmtpForm(f => ({ ...f, smtp_from_name: e.target.value }))} placeholder="Argos Ops" className="w-full text-sm rounded border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 focus:outline-none focus:border-[var(--brand)]" />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-[var(--text-muted)]">{t("tenantSettings.smtp.fromEmail")}</label>

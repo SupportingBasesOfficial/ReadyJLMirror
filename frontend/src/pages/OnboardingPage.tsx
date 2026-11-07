@@ -127,7 +127,7 @@ export function OnboardingPage({ principalId: _principalId }: Props) {
           {/* Brand */}
           <div className="text-center mb-8">
             <div className="text-2xl font-bold mb-2">
-              <span style={{ color: "var(--brand)" }}>JL</span>Mirror
+              <span style={{ color: "var(--brand)" }}>Argos</span>
             </div>
             <p style={{ color: "var(--text-muted)", fontSize: 15 }}>
               Plataforma de operações para MSPs e equipes de TI

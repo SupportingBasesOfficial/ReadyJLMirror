@@ -353,7 +353,7 @@ export function StatusPublicPage() {
       >
         <div style={{ marginBottom: 4 }}>Atualizado em {now}</div>
         Monitorado por{" "}
-        <span style={{ color: "var(--brand)", fontWeight: 500 }}>JLMirror</span>
+        <span style={{ color: "var(--brand)", fontWeight: 500 }}>Argos</span>
       </footer>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

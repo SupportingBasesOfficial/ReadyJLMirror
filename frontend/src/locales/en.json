@@ -110,7 +110,7 @@
     "reactivate": "Reactivate"
   },
   "auth": {
-    "title": "JLMirror",
+    "title": "Argos",
     "subtitle": "Operations platform for MSPs and IT teams",
     "devSignIn": "dev sign-in",
     "accessDenied": "Access denied — no active workspace membership.",
@@ -893,7 +893,7 @@
   },
   "permissions": {
     "title": "Permission Catalog",
-    "subtitle": "Which pages and routes each user role can access in JLMirror.",
+    "subtitle": "Which pages and routes each user role can access in Argos.",
     "legendFull": "Full access",
     "legendRead": "Read only",
     "legendNone": "No access",
@@ -906,7 +906,7 @@
     "footnote": "Permissions are managed by Keycloak and validated on the backend. This catalog is a navigation reference."
   },
   "platformAdmin": {
-    "subtitle": "Global JLMirror platform administration · requires platform:admin",
+    "subtitle": "Global Argos platform administration · requires platform:admin",
     "newMspClient": "New MSP client",
     "tabs": {
       "orgs": "Organizations",
@@ -951,7 +951,7 @@
       "colName": "Name",
       "colNameTip": "Organization name. Below are the workspaces (tenants) belonging to it — these are the environments users access on login.",
       "colType": "Type",
-      "colTypeTip": "Client: company that contracts the monitoring service. MSP: partner that manages clients on behalf of the platform. Platform: the JLMirror operator itself.",
+      "colTypeTip": "Client: company that contracts the monitoring service. MSP: partner that manages clients on behalf of the platform. Platform: the Argos operator itself.",
       "colId": "ID",
       "colIdTip": "Unique, immutable identifier of the organization. Used in integrations and APIs.",
       "colState": "State",

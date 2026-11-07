@@ -112,7 +112,7 @@ export function ClientPortalPage() {
       >
         <div className="flex items-center gap-3">
           <span className="text-lg font-bold">
-            <span style={{ color: "var(--brand)" }}>JL</span>Mirror
+            <span style={{ color: "var(--brand)" }}>Argos</span>
           </span>
           {ov?.tenant_name && (
             <>
@@ -360,7 +360,7 @@ export function ClientPortalPage() {
         </section>
 
         <p className="text-center text-[11px] pb-4" style={{ color: "var(--text-dim)" }}>
-          Atualização automática a cada 2 minutos · Portal do Cliente JLMirror
+          Atualização automática a cada 2 minutos · Portal do Cliente Argos
         </p>
       </main>
     </div>

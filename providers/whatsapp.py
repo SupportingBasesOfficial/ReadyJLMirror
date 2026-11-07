@@ -1,12 +1,13 @@
-"""WhatsApp Business adapter (channel class whatsapp_business@1).
+"""WhatsApp adapter for Z-PRO gateway (channel class whatsapp_business@1).
 
-Provider-neutral domain outside; this module is the ONLY place that
-knows Meta's wire shape. Provider message IDs are evidence refs —
-never platform identity.
+Z-PRO (api.2ktecnologia.com) is a Z-API-compatible Brazilian WhatsApp
+gateway. Sends plain text — no Meta template registry required.
 
-Dev: WHATSAPP_API_URL may point at the internal dev sink; the
-access token comes from env for dev — production resolves it via
-credential binding like other providers (never hardcoded).
+Configure via env:
+  WHATSAPP_API_URL      = https://api.2ktecnologia.com/v2/api/external/{instanceId}
+  WHATSAPP_ACCESS_TOKEN = your Z-PRO Client-Token (omit if the UUID is the only key)
+
+Dev: set WHATSAPP_API_URL to the internal dev sink to discard sends silently.
 """
 
 from __future__ import annotations
@@ -15,19 +16,39 @@ import os
 
 import httpx
 
+# Simple human-readable templates keyed by template_name.
+# Variables are interpolated positionally as {0}, {1}, ...
+_TEMPLATES: dict[str, str] = {
+    "ir_error_event": "🚨 *Incidente detectado*\nTenant: {0}\nCorrelação: {1}",
+}
+
 
 class WhatsAppError(Exception):
     pass
+
+
+def _compose(template_name: str, variables: list[str] | None) -> str:
+    """Build message text from template_name + optional variables."""
+    tpl = _TEMPLATES.get(template_name)
+    if tpl and variables:
+        try:
+            return tpl.format(*variables)
+        except (IndexError, KeyError):
+            pass
+    if variables:
+        return f"{template_name}\n" + "\n".join(str(v) for v in variables)
+    return template_name
 
 
 def send_message(*, destination_ref: str, template_name: str,
                  correlation_id: str, timeout: float = 10.0,
                  template_variables: list[str] | None = None,
                  language_code: str = "en") -> dict:
-    """POST /{phone_number_id}/messages — returns
+    """POST {base}/send-text — returns
     {'provider_message_ref': ..., 'accepted': True} on HTTP 2xx.
 
-    template_variables: positional body params for {{1}}, {{2}}, … placeholders.
+    Z-PRO/Z-API wire shape: {"phone": "55119...", "message": "text"}
+    Auth: Client-Token header.
     A 2xx means PROVIDER ACCEPTED — not delivered, not read."""
     base = os.environ.get("WHATSAPP_API_URL", "").rstrip("/")
     if not base:
@@ -35,20 +56,11 @@ def send_message(*, destination_ref: str, template_name: str,
     token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
     headers = {"Content-Type": "application/json"}
     if token:
-        headers["Authorization"] = f"Bearer {token}"
-    url = f"{base}/{destination_ref}/messages"
-    template: dict = {"name": template_name, "language": {"code": language_code}}
-    if template_variables:
-        template["components"] = [{
-            "type": "body",
-            "parameters": [{"type": "text", "text": str(v)}
-                           for v in template_variables],
-        }]
+        headers["Client-Token"] = token
+    url = f"{base}/send-text"
     payload = {
-        "messaging_product": "whatsapp",
-        "to": destination_ref,
-        "type": "template",
-        "template": template,
+        "phone": destination_ref,
+        "message": _compose(template_name, template_variables),
     }
     try:
         resp = httpx.post(url, json=payload, headers=headers,
@@ -58,6 +70,7 @@ def send_message(*, destination_ref: str, template_name: str,
     if resp.status_code // 100 != 2:
         raise WhatsAppError(f"provider_rejected:{resp.status_code}")
     data = resp.json() if resp.content else {}
-    msgs = data.get("messages") or [{}]
-    return {"provider_message_ref": msgs[0].get("id"),
+    # Z-PRO/Z-API returns {"zaapId": "...", "messageId": "...", "id": "..."}
+    msg_id = data.get("messageId") or data.get("zaapId") or data.get("id")
+    return {"provider_message_ref": msg_id,
             "accepted": True, "raw": {"provider_status": resp.status_code}}

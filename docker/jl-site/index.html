@@ -74,7 +74,13 @@
     @media(max-width: 720px) { .sys-grid { grid-template-columns: 1fr; } }
     .sys-card { border: 1px solid var(--brd); border-radius: 10px; padding: 28px; background: var(--bg); transition: border-color .15s, box-shadow .15s; }
     .sys-card:hover { border-color: #a0b4d0; box-shadow: 0 4px 20px rgba(27,63,130,.07); }
-    .sys-card.featured { border-color: #b8cde8; background: var(--acl); }
+    .sys-card.featured { border-color: #1BA898; background: rgba(27,168,152,0.07); }
+    .sys-card.featured:hover { border-color: #0D6258; box-shadow: 0 4px 20px rgba(27,168,152,0.15); }
+    .sys-card.featured .tag { background: rgba(27,168,152,0.12); color: #0D6258; }
+    .sys-card.featured .sys-link { color: #0D6258; }
+    .argos-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .argos-name { font-size: 21px; font-weight: 700; letter-spacing: -.04em; color: #2A2A2A; line-height: 1; }
+    .argos-sub { font-size: 10px; font-weight: 600; color: #1BA898; text-transform: uppercase; letter-spacing: .08em; line-height: 1.4; margin-top: 3px; }
     .sys-badge { display: inline-block; padding: 3px 10px; border-radius: 100px; font-size: 11px; font-weight: 600; margin-bottom: 16px; }
     .sys-badge.live { background: #dff0d8; color: #2a6b2a; }
     .sys-badge.dev { background: #f5f5f5; color: var(--fgd); border: 1px solid var(--brd); }
@@ -365,8 +371,20 @@
     <p class="sb">Quando as ferramentas do mercado não respondem como precisamos, desenvolvemos as nossas. Cada sistema nasce de uma necessidade concreta da operação.</p>
     <div class="sys-grid">
       <div class="sys-card featured">
+        <div class="argos-brand">
+          <svg viewBox="0 0 100 100" width="38" height="38" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <ellipse cx="50" cy="50" rx="17" ry="36" fill="#9FE1CB" transform="rotate(0 50 50)"/>
+            <ellipse cx="50" cy="50" rx="17" ry="36" fill="#1BA898" transform="rotate(45 50 50)"/>
+            <ellipse cx="50" cy="50" rx="17" ry="36" fill="#0D6258" transform="rotate(90 50 50)"/>
+            <ellipse cx="50" cy="50" rx="17" ry="36" fill="#075044" transform="rotate(135 50 50)"/>
+            <circle cx="50" cy="50" r="11" fill="#052A24"/>
+          </svg>
+          <div>
+            <div class="argos-name">argos</div>
+            <div class="argos-sub">por JL Tecnologia</div>
+          </div>
+        </div>
         <span class="sys-badge live">Em produção</span>
-        <h3>JLMirror</h3>
         <p>Plataforma de operações e monitoramento para MSPs e equipes de TI. Centraliza alertas, incidentes, mudanças e SLA em um painel unificado.</p>
         <div class="sys-tags">
           <span class="tag">Monitoramento</span>

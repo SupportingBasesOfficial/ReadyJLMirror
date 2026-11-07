@@ -185,12 +185,12 @@ export function TeiaPage({ tenantId }: { tenantId: string }) {
           <Activity className="w-5 h-5 text-[var(--brand)]" />
         </div>
         <div>
-          <h1 className="text-lg font-semibold text-[var(--fg)]">Teia</h1>
-          <p className="text-xs text-[var(--fg-muted)]">
+          <h1 className="text-lg font-semibold text-[var(--text)]">Teia</h1>
+          <p className="text-xs text-[var(--text-muted)]">
             Mapa relacional do tenant — usuários, fontes e dispositivos
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-4 text-xs text-[var(--fg-muted)]">
+        <div className="ml-auto flex items-center gap-4 text-xs text-[var(--text-muted)]">
           <span className="flex items-center gap-1.5">
             <Users className="w-3.5 h-3.5" /> {memberList.length} membros
           </span>
@@ -226,11 +226,11 @@ export function TeiaPage({ tenantId }: { tenantId: string }) {
         <div className="flex gap-0 items-start" style={{ minHeight: "100%" }}>
           {/* ── Members column ── */}
           <div className="flex flex-col gap-3 w-52 flex-shrink-0 pt-8 pb-8 pr-6">
-            <div className="flex items-center gap-2 mb-1 text-xs font-semibold text-[var(--fg-muted)] uppercase tracking-wider">
+            <div className="flex items-center gap-2 mb-1 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
               <Users className="w-3.5 h-3.5" /> Membros
             </div>
             {memberList.length === 0 && (
-              <p className="text-xs text-[var(--fg-muted)]">Nenhum membro</p>
+              <p className="text-xs text-[var(--text-muted)]">Nenhum membro</p>
             )}
             {memberList.map((m) => {
               const name = m.display_name || m.email || m.principal_id;
@@ -250,9 +250,9 @@ export function TeiaPage({ tenantId }: { tenantId: string }) {
                       {initials}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-xs font-medium text-[var(--fg)] truncate leading-tight">{name}</p>
+                      <p className="text-xs font-medium text-[var(--text)] truncate leading-tight">{name}</p>
                       {m.email && m.display_name && (
-                        <p className="text-[10px] text-[var(--fg-muted)] truncate">{m.email}</p>
+                        <p className="text-[10px] text-[var(--text-muted)] truncate">{m.email}</p>
                       )}
                     </div>
                   </div>
@@ -263,7 +263,7 @@ export function TeiaPage({ tenantId }: { tenantId: string }) {
                       {m.role}
                     </span>
                     {m.state !== "active" && (
-                      <span className="text-[10px] text-[var(--fg-muted)]">{m.state}</span>
+                      <span className="text-[10px] text-[var(--text-muted)]">{m.state}</span>
                     )}
                   </div>
                 </div>
@@ -281,21 +281,21 @@ export function TeiaPage({ tenantId }: { tenantId: string }) {
                 <div className="w-10 h-10 rounded-full bg-[var(--brand)]/15 flex items-center justify-center">
                   <Building2 className="w-5 h-5 text-[var(--brand)]" />
                 </div>
-                <span className="text-xs font-semibold text-[var(--fg)] text-center leading-tight">
+                <span className="text-xs font-semibold text-[var(--text)] text-center leading-tight">
                   {tenantId}
                 </span>
-                <span className="text-[10px] text-[var(--fg-muted)]">tenant</span>
+                <span className="text-[10px] text-[var(--text-muted)]">tenant</span>
               </div>
             </div>
           </div>
 
           {/* ── Sources + devices column ── */}
           <div className="flex flex-col gap-3 flex-1 min-w-0 pt-8 pb-8 pl-6">
-            <div className="flex items-center gap-2 mb-1 text-xs font-semibold text-[var(--fg-muted)] uppercase tracking-wider">
+            <div className="flex items-center gap-2 mb-1 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
               <Activity className="w-3.5 h-3.5" /> Fontes de Monitoramento
             </div>
             {sourceList.length === 0 && (
-              <p className="text-xs text-[var(--fg-muted)]">Nenhuma fonte cadastrada</p>
+              <p className="text-xs text-[var(--text-muted)]">Nenhuma fonte cadastrada</p>
             )}
             {sourceList.map((src) => (
               <div key={src.source_id} className="flex gap-3 items-start">
@@ -310,25 +310,25 @@ export function TeiaPage({ tenantId }: { tenantId: string }) {
                   >
                     <div className="mt-0.5 flex-shrink-0">
                       {expandedSources.has(src.source_id)
-                        ? <ChevronDown className="w-3.5 h-3.5 text-[var(--fg-muted)]" />
-                        : <ChevronRight className="w-3.5 h-3.5 text-[var(--fg-muted)]" />}
+                        ? <ChevronDown className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                        : <ChevronRight className="w-3.5 h-3.5 text-[var(--text-muted)]" />}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 mb-1">
                         {healthDot(src.state)}
-                        <span className="text-xs font-medium text-[var(--fg)] truncate">
+                        <span className="text-xs font-medium text-[var(--text)] truncate">
                           {src.display_name}
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[10px] text-[var(--fg-muted)]">{src.provider}</span>
+                        <span className="text-[10px] text-[var(--text-muted)]">{src.provider}</span>
                         <span
                           className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${SOURCE_STATE_COLOR[src.state] ?? "bg-slate-500/15 text-slate-400 border-slate-500/30"}`}
                         >
                           {src.state}
                         </span>
                         {src.host_count != null && (
-                          <span className="text-[10px] text-[var(--fg-muted)]">{src.host_count} hosts</span>
+                          <span className="text-[10px] text-[var(--text-muted)]">{src.host_count} hosts</span>
                         )}
                       </div>
                     </div>
@@ -338,16 +338,16 @@ export function TeiaPage({ tenantId }: { tenantId: string }) {
                 {/* Devices */}
                 {expandedSources.has(src.source_id) && (
                   <div className="flex flex-col gap-2 min-w-0">
-                    <div className="flex items-center gap-2 text-[10px] font-semibold text-[var(--fg-muted)] uppercase tracking-wider ml-1">
+                    <div className="flex items-center gap-2 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider ml-1">
                       <Server className="w-3 h-3" /> Dispositivos
                     </div>
                     {loadingResources.has(src.source_id) && (
-                      <div className="flex items-center gap-2 text-xs text-[var(--fg-muted)] ml-1">
+                      <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] ml-1">
                         <Spinner className="w-3 h-3" /> Carregando...
                       </div>
                     )}
                     {!loadingResources.has(src.source_id) && (sourceResources[src.source_id] ?? []).length === 0 && (
-                      <p className="text-xs text-[var(--fg-muted)] ml-1">Nenhum dispositivo</p>
+                      <p className="text-xs text-[var(--text-muted)] ml-1">Nenhum dispositivo</p>
                     )}
                     {(sourceResources[src.source_id] ?? []).map((r) => (
                       <div
@@ -356,11 +356,11 @@ export function TeiaPage({ tenantId }: { tenantId: string }) {
                       >
                         {healthDot(r.health_state)}
                         <div className="min-w-0">
-                          <p className="text-xs font-medium text-[var(--fg)] truncate leading-tight">
+                          <p className="text-xs font-medium text-[var(--text)] truncate leading-tight">
                             {r.display_name}
                           </p>
                           {r.resource_type && (
-                            <p className="text-[10px] text-[var(--fg-muted)]">{r.resource_type}</p>
+                            <p className="text-[10px] text-[var(--text-muted)]">{r.resource_type}</p>
                           )}
                         </div>
                         <span
@@ -371,7 +371,7 @@ export function TeiaPage({ tenantId }: { tenantId: string }) {
                       </div>
                     ))}
                     {(sourceResources[src.source_id] ?? []).length === 10 && (
-                      <p className="text-[10px] text-[var(--fg-muted)] ml-1">mostrando primeiros 10</p>
+                      <p className="text-[10px] text-[var(--text-muted)] ml-1">mostrando primeiros 10</p>
                     )}
                   </div>
                 )}

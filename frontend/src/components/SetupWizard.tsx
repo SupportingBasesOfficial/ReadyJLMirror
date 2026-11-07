@@ -148,7 +148,7 @@ export function SetupWizard({ tenantId, hasSources }: Props) {
       }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>
-            {step === "source" ? "Bem-vindo ao JLMirror 👋" : "Configuração inicial"}
+            {step === "source" ? "Bem-vindo ao Argos 👋" : "Configuração inicial"}
           </div>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
             {step === "source"

@@ -1,5 +1,7 @@
 {
   "realm": "jlmirror",
+  "displayName": "Argos",
+  "displayNameHtml": "<span style='color:#1BA898;font-weight:700;'>Argos</span>",
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,
@@ -9,7 +11,7 @@
       "clientId": "jlmirror-bff",
       "name": "JLMirror BFF",
       "enabled": true,
-      "secret": "VZl7LoDkT-8OK0igIXggii5EVh7l05ZF",
+      "secret": "hZ1Q_s6M3_DOH24KMvni6tbkhE034yuVCTMtaSdBgV4",
       "publicClient": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
@@ -18,16 +20,16 @@
       "redirectUris": [
         "http://localhost:8080/*",
         "http://127.0.0.1:8080/*",
-        "https://mirror.jlinformatica.com.br/*"
+        "https://argos.jlinformatica.com.br/*"
       ],
       "webOrigins": [
         "http://localhost:8080",
         "http://127.0.0.1:8080",
-        "https://mirror.jlinformatica.com.br"
+        "https://argos.jlinformatica.com.br"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:8080/*##http://127.0.0.1:8080/*##https://REPLACE_WITH_PROD_HOSTNAME/*",
+        "post.logout.redirect.uris": "http://localhost:8080/*##http://127.0.0.1:8080/*##https://argos.jlinformatica.com.br/*",
         "backchannel.logout.session.required": "true",
         "backchannel.logout.revoke.offline.tokens": "false"
       },

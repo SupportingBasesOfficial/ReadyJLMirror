@@ -107,7 +107,7 @@
     "reactivate": "Reativar"
   },
   "auth": {
-    "title": "JLMirror",
+    "title": "Argos",
     "subtitle": "Plataforma de operações para MSPs e equipes de TI",
     "devSignIn": "dev sign-in",
     "accessDenied": "Acesso negado — sem associação a um workspace ativo.",
@@ -890,7 +890,7 @@
   },
   "permissions": {
     "title": "Catálogo de Permissões",
-    "subtitle": "Quais telas e rotas cada tipo de usuário pode acessar no JLMirror.",
+    "subtitle": "Quais telas e rotas cada tipo de usuário pode acessar no Argos.",
     "legendFull": "Acesso completo",
     "legendRead": "Apenas leitura",
     "legendNone": "Sem acesso",
@@ -903,7 +903,7 @@
     "footnote": "As permissões são gerenciadas pelo Keycloak e validadas no backend. Este catálogo é uma referência de navegação."
   },
   "platformAdmin": {
-    "subtitle": "Administração global da plataforma JLMirror · requer platform:admin",
+    "subtitle": "Administração global da plataforma Argos · requer platform:admin",
     "newMspClient": "Novo cliente MSP",
     "tabs": {
       "orgs": "Organizações",
@@ -948,7 +948,7 @@
       "colName": "Nome",
       "colNameTip": "Nome da organização. Abaixo aparecem os workspaces (tenants) que pertencem a ela — são os ambientes que os usuários acessam ao fazer login.",
       "colType": "Tipo",
-      "colTypeTip": "Cliente: empresa que contrata o serviço de monitoramento. MSP: parceiro que gerencia clientes em nome da plataforma. Plataforma: o próprio operador do JLMirror.",
+      "colTypeTip": "Cliente: empresa que contrata o serviço de monitoramento. MSP: parceiro que gerencia clientes em nome da plataforma. Plataforma: o próprio operador do Argos.",
       "colId": "ID",
       "colIdTip": "Identificador único e imutável da organização no sistema. Usado em integrações e APIs.",
       "colState": "Estado",

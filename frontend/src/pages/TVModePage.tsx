@@ -350,7 +350,7 @@ export function TVModePage() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <span style={{ fontSize: 22, fontWeight: 700, color: "var(--brand, #6366f1)" }}>
-            JL<span style={{ color: "var(--text, #e6e8ec)" }}>Mirror</span>
+            <span style={{ color: "var(--brand)" }}>Argos</span>
           </span>
           <span style={{ fontSize: 14, color: "var(--text-muted, #8b93a5)" }}>
             {tenantName} · NOC Display

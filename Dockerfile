@@ -30,4 +30,6 @@ COPY vendor/ProjectJLMirror/src/ vendor/ProjectJLMirror/src/
 
 RUN pip install --no-cache-dir -e .
 
+ENV PYTHONPATH=/srv/vendor/ProjectJLMirror/src
+
 EXPOSE 8000 8080

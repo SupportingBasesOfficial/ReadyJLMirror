@@ -146,14 +146,34 @@ async def run_scan(request: Request) -> dict:
         scanned = len(baselines)
 
         for (bid, source_id, resource_ref, config_key, expected) in baselines:
-            # metric_observation uses internal UUID-based FKs; a direct join
-            # requires a lookup table (source_id string → monitoring_source_id UUID)
-            # that doesn't exist yet. Skip observation lookup until schema aligns.
-            # Existing drift events created manually are still visible; the scan
-            # will detect new ones once the metric mapping layer is in place.
-            continue
+            # Resolve current observed value via metric_definition_provider_binding.
+            # config_baseline.source_id (UUID) maps to monitoring_source_id (TEXT)
+            # via cast; config_key maps to provider_key (Zabbix item key).
+            cur2 = await conn.execute(
+                """
+                SELECT mcs.canonical_value
+                  FROM monitoring.metric_definition_provider_binding mpb
+                  JOIN monitoring.metric_current_state mcs
+                    ON mcs.tenant_id = mpb.tenant_id
+                   AND mcs.metric_definition_id = mpb.metric_definition_id
+                 WHERE mpb.tenant_id = %s
+                   AND mpb.monitoring_source_id = %s
+                   AND mpb.monitoring_resource_id = %s
+                   AND mpb.provider_key = %s
+                   AND mcs.evidence_state = 'current'
+                 LIMIT 1
+                """,
+                (tenant_id, str(source_id), resource_ref, config_key),
+            )
+            row = await cur2.fetchone()
+            if row is None:
+                continue  # no live observation for this baseline
 
-            # Skip if open event already exists for this baseline
+            actual = str(row[0]) if row[0] is not None else ""
+            if actual == expected:
+                continue  # no drift
+
+            # De-duplicate: skip if an open event already exists
             cur3 = await conn.execute(
                 """
                 SELECT 1 FROM monitoring.config_drift_event

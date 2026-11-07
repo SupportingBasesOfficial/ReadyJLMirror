@@ -142,16 +142,12 @@ export function AlertDetail({
   });
 
   const noteMut = useMutation({
-    mutationFn: (vars: { title: string; description: string }) =>
-      api.post("/api/v1/itsm/changes", {
-        title: vars.title,
-        description: vars.description,
-        category: "normal",
-        risk: "low",
-      }),
+    mutationFn: (note: string) =>
+      api.post(`/api/v1/alerting/alerts/${alertId}/ack`, { note }),
     onSuccess: () => {
       toast("Nota registrada", "success");
       setNoteText("");
+      qc.invalidateQueries({ queryKey: ["alert", alertId] });
     },
     onError: () => toast("Erro ao salvar nota", "error"),
   });
@@ -384,10 +380,7 @@ export function AlertDetail({
               variant="secondary"
               disabled={!noteText.trim() || noteMut.isPending}
               onClick={() =>
-                noteMut.mutate({
-                  title: `Nota de alerta: ${a.alert_id}`,
-                  description: noteText.trim(),
-                })
+                noteMut.mutate(noteText.trim())
               }
             >
               {noteMut.isPending && <Spinner className="w-3 h-3 mr-1" />}

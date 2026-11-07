@@ -35,6 +35,7 @@ import { CustomDashboardPage } from "@/pages/CustomDashboardPage";
 import { OnboardingPage } from "@/pages/OnboardingPage";
 import { ApiKeysPage } from "@/pages/ApiKeysPage";
 import { ITSMPage } from "@/pages/ITSMPage";
+import { IncidentResponsePage } from "@/pages/IncidentResponsePage";
 import { SLAPage } from "@/pages/SLAPage";
 import { AutomationPage } from "@/pages/AutomationPage";
 import { ReportsPage } from "@/pages/ReportsPage";
@@ -70,6 +71,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   incidents: "/incidents",
   policies: "/policies",
   changes: "/changes",
+  "incident-response": "/incident-response",
   sla: "/sla",
   automation: "/automation",
   reports: "/reports",
@@ -292,7 +294,7 @@ export function Shell() {
       <div className="flex items-center justify-center min-h-screen">
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-10 min-w-[320px] max-w-md text-center shadow-xl">
           <h1 className="text-xl font-semibold mb-1">
-            <span className="text-[var(--brand)]">JL</span>Mirror
+            <span className="text-[var(--brand)]">Argos</span>
           </h1>
           <p className="text-[var(--text-muted)] text-sm mb-6">
             {t("auth.subtitle")}
@@ -386,6 +388,7 @@ export function Shell() {
       label: "ITSM",
       items: [
         { id: "changes" as View, label: t("nav.changes"), icon: GitMerge, description: "Controle de mudanças" },
+        { id: "incident-response" as View, label: t("nav.incident_response", "Resposta a Incidentes"), icon: ShieldCheck, description: "Políticas de resposta automática" },
         ...(flagEnabled("module_sla") ? [{ id: "sla" as View, label: t("nav.sla"), icon: Clock, description: "Níveis de serviço" }] : []),
         ...(flagEnabled("module_automation") ? [{ id: "automation" as View, label: t("nav.automation"), icon: Zap, description: "Scripts e tarefas" }] : []),
         ...(flagEnabled("module_reports") ? [{ id: "reports" as View, label: t("nav.reports"), icon: BarChart2, description: "Relatórios periódicos" }] : []),
@@ -529,23 +532,22 @@ export function Shell() {
           "flex items-center border-b border-[var(--border)] flex-shrink-0",
           collapsed ? "h-[52px] justify-center px-0" : "h-[52px] px-4 gap-2",
         ].join(" ")}>
-          {branding?.configured && branding.logo_url && !collapsed ? (
-            <img src={branding.logo_url} alt="logo" className="h-5 w-auto max-w-[100px] object-contain" />
-          ) : null}
+          <svg viewBox="0 0 100 100" width={collapsed ? 28 : 24} height={collapsed ? 28 : 24} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+            <ellipse cx="50" cy="50" rx="17" ry="36" fill="#9FE1CB" transform="rotate(0 50 50)"/>
+            <ellipse cx="50" cy="50" rx="17" ry="36" fill="#1BA898" transform="rotate(45 50 50)"/>
+            <ellipse cx="50" cy="50" rx="17" ry="36" fill="#0D6258" transform="rotate(90 50 50)"/>
+            <ellipse cx="50" cy="50" rx="17" ry="36" fill="#075044" transform="rotate(135 50 50)"/>
+            <circle cx="50" cy="50" r="11" fill="#052A24"/>
+          </svg>
           {!collapsed && (
-            <span className="text-sm font-semibold tracking-tight">
-              {branding?.configured && branding.brand_name
-                ? <span style={{ color: "var(--brand)" }}>{branding.brand_name}</span>
-                : <><span style={{ color: "var(--brand)" }}>JL</span>Mirror</>}
+            <span className="text-sm font-semibold tracking-tight" style={{ color: "var(--brand)" }}>
+              {branding?.configured && branding.brand_name ? branding.brand_name : "argos"}
             </span>
-          )}
-          {collapsed && (
-            <span className="text-sm font-bold" style={{ color: "var(--brand)" }}>JL</span>
           )}
         </div>
 
         {/* Nav groups */}
-        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 scrollbar-thin">
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]">
           {navGroups.map((group, gi) => {
             const isGroupCollapsed = !collapsed && collapsedGroups.has(group.label);
             return (
@@ -675,7 +677,7 @@ export function Shell() {
                 <span style={{
                   position: "absolute", bottom: -2, right: -2,
                   width: 8, height: 8, borderRadius: "50%",
-                  background: "var(--brand, #6366f1)",
+                  background: "var(--brand, #1BA898)",
                   border: "1.5px solid var(--surface)",
                 }} />
               )}
@@ -851,6 +853,7 @@ export function Shell() {
           {view === "custom_dashboard" && <CustomDashboardPage tenantId={s.tenant_id!} />}
           {view === "apikeys" && <ApiKeysPage tenantId={s.tenant_id!} />}
           {view === "changes" && <ITSMPage tenantId={s.tenant_id!} />}
+          {view === "incident-response" && <IncidentResponsePage tenantId={s.tenant_id!} />}
           {view === "sla" && <SLAPage tenantId={s.tenant_id!} />}
           {view === "automation" && <AutomationPage tenantId={s.tenant_id!} />}
           {view === "reports" && <ReportsPage tenantId={s.tenant_id!} />}
