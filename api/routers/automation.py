@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from shared import access
 from shared.db import db_connection, db_tenant_connection
+from shared.ssrf import validate_outbound_url
 
 router = APIRouter(prefix="/api/v1/automation", tags=["automation"])
 
@@ -96,9 +97,9 @@ async def create_script(request: Request, body: CreateScript) -> dict:
                             detail=f"script_type must be one of {sorted(_VALID_TYPES)}")
     if body.script_type == "webhook":
         url = body.config.get("url", "").strip()
-        if not url.startswith("https://"):
-            raise HTTPException(status_code=422,
-                                detail="webhook config.url must be an https:// URL")
+        err = validate_outbound_url(url)
+        if err:
+            raise HTTPException(status_code=422, detail=f"webhook config.url: {err}")
 
     script_id = f"auto:{uuid.uuid4()}"
     async with db_tenant_connection(tenant_id) as conn:
@@ -122,6 +123,14 @@ async def update_script(request: Request, script_id: str,
     if body.script_type and body.script_type not in _VALID_TYPES:
         raise HTTPException(status_code=422,
                             detail=f"script_type must be one of {sorted(_VALID_TYPES)}")
+    if body.config is not None and (
+            body.script_type == "webhook"
+            or body.script_type is None):
+        url = body.config.get("url", "").strip() if body.config.get("url") else ""
+        if url:
+            err = validate_outbound_url(url)
+            if err:
+                raise HTTPException(status_code=422, detail=f"webhook config.url: {err}")
 
     async with db_tenant_connection(tenant_id) as conn:
         row = await conn.execute(

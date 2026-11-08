@@ -11,6 +11,7 @@ Implements the accepted IR-D-001/G1 shape:
 
 from __future__ import annotations
 
+import collections
 import hashlib
 import hmac
 import logging
@@ -59,6 +60,28 @@ SHELL_DIR = Path(__file__).resolve().parent / "shell"
 # grace period is within industry-standard token/session staleness bounds.
 _MEMBERSHIP_CACHE_TTL = 10  # seconds
 _membership_cache: dict[tuple[str, str], tuple[Optional[dict], float]] = {}
+
+# In-process sliding-window rate limiter for session-authenticated requests.
+# Keyed by (principal_id, tier). Asyncio is single-threaded — no lock needed.
+_RATE_WINDOW = 60.0  # seconds
+_RATE_LIMIT_NORMAL = 300        # requests/min for regular endpoints
+_RATE_LIMIT_HEAVY = 20          # requests/min for expensive endpoints
+_HEAVY_PREFIXES = ("aiops/", "executive/", "synthetic/", "apm/")
+_rate_buckets: dict[tuple[str, str], collections.deque] = collections.defaultdict(collections.deque)
+
+def _rate_limit_ok(principal_id: str, path: str) -> bool:
+    tier = "heavy" if any(path.startswith(p) for p in _HEAVY_PREFIXES) else "normal"
+    limit = _RATE_LIMIT_HEAVY if tier == "heavy" else _RATE_LIMIT_NORMAL
+    key = (principal_id, tier)
+    now = time.monotonic()
+    bucket = _rate_buckets[key]
+    cutoff = now - _RATE_WINDOW
+    while bucket and bucket[0] <= cutoff:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        return False
+    bucket.append(now)
+    return True
 
 
 def _prune_membership_cache() -> None:
@@ -697,6 +720,10 @@ async def proxy_to_api(request: Request, path: str) -> Response:
     if session is None:
         return JSONResponse({"state": "unauthenticated"},
                             status_code=status.HTTP_401_UNAUTHORIZED)
+
+    if not _rate_limit_ok(session["principal_id"], path):
+        return JSONResponse({"state": "rate_limited"},
+                            status_code=status.HTTP_429_TOO_MANY_REQUESTS)
 
     if request.method != "GET" and not _csrf_ok(request, session):
         return JSONResponse({"state": "forbidden"},

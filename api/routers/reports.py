@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import Response
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from shared import access
@@ -356,3 +359,90 @@ async def list_deliveries(request: Request) -> list:
         )
         cols = [d[0] for d in rows.description]
         return [dict(zip(cols, r)) for r in await rows.fetchall()]
+
+
+# ── On-demand CSV download ─────────────────────────────────────────────────────
+
+_REPORT_QUERIES: dict[str, tuple[list[str], str]] = {
+    "alert_summary": (
+        ["alert_id", "title", "severity", "lifecycle_state", "fired_at", "resolved_at"],
+        """
+        SELECT alert_id::text, title, severity, lifecycle_state,
+               fired_at::text, resolved_at::text
+          FROM alerting.alert
+         WHERE tenant_id = %s
+           AND fired_at >= now() - interval '30 days'
+         ORDER BY fired_at DESC
+        """,
+    ),
+    "incident_summary": (
+        ["incident_id", "title", "severity", "lifecycle_state", "detected_at", "resolved_at"],
+        """
+        SELECT incident_id::text, title, severity, lifecycle_state,
+               detected_at::text, resolved_at::text
+          FROM itsm.incident
+         WHERE tenant_id = %s
+           AND detected_at >= now() - interval '30 days'
+         ORDER BY detected_at DESC
+        """,
+    ),
+    "sla_summary": (
+        ["sla_id", "policy_name", "severity_match", "checked_at", "met"],
+        """
+        SELECT b.sla_id::text, p.name, p.severity_match,
+               b.checked_at::text, b.met::text
+          FROM g1.sla_breach b
+          JOIN g1.sla_policy p ON p.sla_id = b.sla_id
+         WHERE b.tenant_id = %s
+           AND b.checked_at >= now() - interval '30 days'
+         ORDER BY b.checked_at DESC
+        """,
+    ),
+}
+
+
+@router.get("/download/{report_type}")
+async def download_report(
+    request: Request,
+    report_type: str,
+    fmt: str = Query("csv", pattern="^(csv|json)$"),
+) -> Response:
+    """Generate and download a report on-demand (last 30 days).
+
+    report_type: alert_summary | incident_summary | sla_summary
+    fmt: csv (default) | json
+    """
+    tenant_id = _require_tenant(request)
+
+    if report_type not in _REPORT_QUERIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"report_type must be one of {sorted(_REPORT_QUERIES)}")
+
+    headers, query = _REPORT_QUERIES[report_type]
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(query, (tenant_id,))
+        rows = await cur.fetchall()
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"{report_type}_{tenant_id}_{ts}"
+
+    if fmt == "json":
+        import json
+        data = json.dumps([dict(zip(headers, r)) for r in rows], ensure_ascii=False)
+        return Response(
+            content=data,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}.json"'},
+        )
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(headers)
+    writer.writerows(rows)
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
+    )

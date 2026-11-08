@@ -93,6 +93,14 @@ services:
     # No host port binding — OpenBao is accessed only by containers on the
     # Docker internal network. External exposure was removed: unseal.key
     # must never be reachable from outside the Docker network.
+    healthcheck:
+      # sys/health returns 200 (unsealed) or 503/429/501 (other states) —
+      # any HTTP response means the process is up; we only fail on no connection.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8200/v1/sys/health > /dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       wal-init:
         condition: service_completed_successfully
@@ -321,6 +329,12 @@ services:
       - ./secrets/tls:/run/secrets/tls:ro
     ports:
       - "9090:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       api:
         condition: service_started
@@ -343,6 +357,12 @@ services:
       - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "3300:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       prometheus:
         condition: service_started
@@ -446,6 +466,13 @@ services:
       POSTGRES_DB: zabbix
       POSTGRES_USER: jlmirror_owner
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jlmirror_dev}
+    healthcheck:
+      # Zabbix server listens on port 10051 (trapper); a TCP connection proves the process is up.
+      test: ["CMD-SHELL", "echo '' | nc -z localhost 10051 2>/dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       db:
         condition: service_healthy
@@ -468,6 +495,12 @@ services:
       - ./secrets/tls/dhparam.pem:/etc/ssl/nginx/dhparam.pem:ro
     ports:
       - "8443:8443"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://localhost:8443/ > /dev/null 2>&1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       zabbix-server:
         condition: service_started
@@ -494,6 +527,12 @@ services:
     volumes:
       - ./docker/jl-site:/usr/share/nginx/html:ro
       - ./docker/jl-site/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     depends_on:
       - bff
     restart: unless-stopped

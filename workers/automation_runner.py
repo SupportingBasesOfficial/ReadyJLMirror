@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 
 import psycopg
 
+from shared.ssrf import validate_outbound_url
+
 logger = logging.getLogger(__name__)
 
 _WEBHOOK_TIMEOUT = 10.0
@@ -36,8 +38,9 @@ def _render(template: str, ctx: dict) -> str:
 
 def _execute_webhook(config: dict, ctx: dict) -> tuple[str, int | None, str | None]:
     url = config.get("url", "").strip()
-    if not url or not url.startswith("https://"):
-        return "failed", None, "invalid webhook URL"
+    ssrf_err = validate_outbound_url(url)
+    if ssrf_err:
+        return "failed", None, f"ssrf_blocked:{ssrf_err}"
 
     method = config.get("method", "POST").upper()
     headers = {str(k): str(v) for k, v in config.get("headers", {}).items()}

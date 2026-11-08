@@ -6,10 +6,14 @@ operational configuration. Clients see exactly their own tenant data.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 
 from api.routers.itsm import _INVOKER_ROLE
 from shared.db import db_connection
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/portal", tags=["client-portal"])
 
@@ -77,7 +81,7 @@ async def get_overview(request: Request) -> dict:
                 )
                 open_incidents = int(row.get("cnt") or 0)
         except Exception:
-            pass
+            logger.warning("portal overview: incident count failed for tenant=%s", tenant_id, exc_info=True)
 
         sla_row: dict = {}
         try:
@@ -94,7 +98,7 @@ async def get_overview(request: Request) -> dict:
                 (tenant_id,),
             )
         except Exception:
-            pass
+            logger.warning("portal overview: SLA query failed for tenant=%s", tenant_id, exc_info=True)
 
         total_sla = int(sla_row.get("total") or 0)
         met_sla = int(sla_row.get("met") or 0)
@@ -175,7 +179,7 @@ async def list_incidents(request: Request, state: str = "open") -> list:
                     params,
                 )
         except Exception:
-            pass
+            logger.warning("portal incidents: query failed for tenant=%s", tenant_id, exc_info=True)
     return [
         {
             "incident_id": str(r["incident_id"]),
@@ -219,7 +223,7 @@ async def list_sla(request: Request) -> list:
                 (tenant_id, tenant_id),
             )
         except Exception:
-            pass
+            logger.warning("portal SLA: query failed for tenant=%s", tenant_id, exc_info=True)
     return [
         {
             "sla_id": str(r["sla_id"]),
