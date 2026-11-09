@@ -67,13 +67,16 @@ $COMPOSE --profile secrets up -d openbao
 
 info "Waiting for OpenBao…"
 for i in $(seq 1 20); do
-  BAO_STATUS=$(curl -sf "http://localhost:8200/v1/sys/health" 2>/dev/null || true)
+  BAO_STATUS=$($COMPOSE --profile secrets exec -T openbao bao status 2>/dev/null || true)
   [ -n "$BAO_STATUS" ] && break
   sleep 3
 done
 
-BAO_INIT=$(curl -sf "http://localhost:8200/v1/sys/init" | jq -r '.initialized' 2>/dev/null || echo "false")
-if [ "$BAO_INIT" = "false" ]; then
+# Query init status from inside Docker network (port 8200 is not exposed to host)
+BAO_INIT=$($COMPOSE --profile secrets exec -T openbao \
+  bao operator init -status -format=json 2>/dev/null \
+  | jq -r '.initialized // false' 2>/dev/null || echo "false")
+if [ "$BAO_INIT" != "true" ]; then
   info "Initializing OpenBao…"
   $COMPOSE --profile secrets run --rm bao-init
   info "OpenBao initialized."

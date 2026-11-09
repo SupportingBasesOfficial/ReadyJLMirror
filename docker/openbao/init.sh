@@ -16,7 +16,7 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-if bao operator init -status 2>/dev/null | grep -q "true"; then
+if bao operator init -status -format=json 2>/dev/null | grep -q '"initialized":true'; then
   echo "openbao already initialized"
 else
   echo "initializing openbao..."
