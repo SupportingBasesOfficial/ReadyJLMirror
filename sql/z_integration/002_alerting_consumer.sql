@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS alerting.inbox_receipt (
 CREATE INDEX IF NOT EXISTS inbox_receipt_state_idx
     ON alerting.inbox_receipt (state)
     WHERE state IN ('received', 'processing', 'reconciliation_required');
+-- Multi-tenant composite index (supersedes state-only for multi-tenant selectivity)
+CREATE INDEX IF NOT EXISTS inbox_receipt_state_tenant_idx
+    ON alerting.inbox_receipt (tenant_id, state)
+    WHERE state IN ('received', 'processing', 'reconciliation_required');
 
 ALTER TABLE alerting.inbox_receipt ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alerting.inbox_receipt FORCE ROW LEVEL SECURITY;
