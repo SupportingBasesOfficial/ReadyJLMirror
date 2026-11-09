@@ -745,19 +745,19 @@ export function Shell() {
       <div className="flex flex-col flex-1 min-w-0">
         {/* Topbar */}
         <header className="flex items-center justify-between px-5 py-2.5 bg-[var(--surface)] border-b border-[var(--border)] sticky top-0 z-10 h-[52px]">
-          <h1 className="text-sm font-medium" style={{ color: "var(--text)" }}>
+          <h1 className="text-sm font-medium truncate flex-1 min-w-0 mr-2" style={{ color: "var(--text)" }}>
             {currentLabel}
           </h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             {s.is_platform_admin && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+              <span className="hidden sm:inline-flex text-[10px] px-2 py-0.5 rounded-full font-semibold"
                 style={{ background: "color-mix(in srgb, var(--brand) 15%, transparent)", color: "var(--brand)", border: "1px solid color-mix(in srgb, var(--brand) 30%, transparent)" }}>
                 {t("topbar.platformAdmin")}
               </span>
             )}
-            <LanguageToggle />
-            <PageInfoButton screenId={view} />
-            <BugReportButton screenId={view} />
+            <div className="hidden sm:flex"><LanguageToggle /></div>
+            <div className="hidden sm:flex"><PageInfoButton screenId={view} /></div>
+            <div className="hidden sm:flex"><BugReportButton screenId={view} /></div>
             <button
               onClick={() => goTo("alerts")}
               title={t("topbar.criticalAlerts")}

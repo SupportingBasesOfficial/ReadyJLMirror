@@ -140,6 +140,12 @@ export function SetupWizard({ tenantId, hasSources }: Props) {
       border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden",
       background: "color-mix(in srgb, var(--brand) 3%, var(--surface))",
     }}>
+      <style>{`
+        @media (max-width: 540px) {
+          .wizard-step-label { display: none; }
+          .wizard-form-grid { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
       {/* Header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -192,7 +198,7 @@ export function SetupWizard({ tenantId, hasSources }: Props) {
                       ? <Icon size={11} color="#fff" />
                       : <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>{i + 1}</span>}
                 </div>
-                <span style={{
+                <span className="wizard-step-label" style={{
                   fontSize: 11, fontWeight: isActive ? 600 : 400,
                   color: isActive ? "var(--text)" : isDone ? "var(--green, #22c55e)" : "var(--text-muted)",
                   whiteSpace: "nowrap",
@@ -221,7 +227,7 @@ export function SetupWizard({ tenantId, hasSources }: Props) {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="wizard-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <WizardField label="Nome da fonte *">
                   <input type="text" placeholder="Ex: Produção - Cliente X" value={form.display_name}
                     onChange={(e) => setForm((f) => ({ ...f, display_name: e.target.value }))} />
@@ -233,7 +239,7 @@ export function SetupWizard({ tenantId, hasSources }: Props) {
                 </WizardField>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="wizard-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <WizardField label="URL do Zabbix *">
                   <input type="url" placeholder="https://zabbix.exemplo.com" value={form.provider_base_url}
                     onChange={(e) => {
