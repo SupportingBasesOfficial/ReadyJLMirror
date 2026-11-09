@@ -65,25 +65,16 @@ info "Migrations complete."
 info "Starting OpenBao…"
 $COMPOSE --profile secrets up -d openbao
 
-info "Waiting for OpenBao…"
-for i in $(seq 1 20); do
-  BAO_STATUS=$($COMPOSE --profile secrets exec -T openbao bao status 2>/dev/null || true)
-  [ -n "$BAO_STATUS" ] && break
-  sleep 3
-done
-
-# Query init status from inside Docker network (port 8200 is not exposed to host)
-BAO_INIT=$($COMPOSE --profile secrets exec -T openbao \
-  bao operator init -status -format=json 2>/dev/null \
-  | jq -r '.initialized // false' 2>/dev/null || echo "false")
-if [ "$BAO_INIT" != "true" ]; then
-  info "Initializing OpenBao…"
+# Port 8200 is not exposed to the host — detect init state via the token
+# file written by bao-init on success, not via curl/exec.
+if [ -s ./secrets/bao_token ]; then
+  info "OpenBao already initialized — skipping init."
+else
+  info "Initializing OpenBao… (bao-init will retry until OpenBao is ready)"
   $COMPOSE --profile secrets run --rm bao-init
   info "OpenBao initialized."
   warn "Add BAO_TOKEN=$(cat ./secrets/bao_token 2>/dev/null || echo '<see ./secrets/bao_token>') to .env and re-run deploy.sh."
   exit 0
-else
-  info "OpenBao already initialized — skipping init."
 fi
 
 # ── 5. Start all services (including Caddy) ───────────────────────────────────
