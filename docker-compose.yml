@@ -44,6 +44,8 @@ services:
       POSTGRES_DB: jlmirror
       POSTGRES_USER: jlmirror_owner
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jlmirror_dev}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-jlmirror_dev}
+      WORKER_DB_PASSWORD: ${WORKER_DB_PASSWORD:-jlmirror_dev}
     ports:
       - "5434:5432"
     volumes:
@@ -96,7 +98,7 @@ services:
     healthcheck:
       # sys/health returns 200 (unsealed) or 503/429/501 (other states) —
       # any HTTP response means the process is up; we only fail on no connection.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8200/v1/sys/health > /dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -SO- http://localhost:8200/v1/sys/health 2>&1 | grep -q 'HTTP/'"]
       interval: 15s
       timeout: 5s
       retries: 5
