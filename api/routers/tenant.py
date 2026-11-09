@@ -14,8 +14,9 @@ import psycopg
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from shared import access
 from shared.audit import record_audit_event
-from shared.db import db_tenant_connection
+from shared.db import db_connection, db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/tenant", tags=["tenant"])
 
@@ -258,3 +259,48 @@ async def tenant_usage(request: Request) -> list[dict]:
                  "window_end": r[4].isoformat(),
                  "contract_id": r[5]}
                 for r in await cur.fetchall()]
+
+
+# ── Permission catalog ─────────────────────────────────────────────────────────
+
+_PERMISSION_DESCRIPTIONS = {
+    "tenant:read":          "View tenant configuration and member list",
+    "tenant:admin":         "Manage tenant members, roles, and settings",
+    "monitoring:read":      "View hosts, services, checks, and status",
+    "monitoring:operate":   "Acknowledge alerts, run checks, manage suppressions",
+    "alerting:read":        "View alert rules, channels, and history",
+    "alerting:operate":     "Create and modify alert rules and notification channels",
+    "observability:read":   "Access logs, metrics, traces, and dashboards",
+    "audit:read":           "View audit trail and compliance reports",
+}
+
+
+@router.get("/permissions")
+async def list_permissions(request: Request) -> dict:
+    """Return the platform permission catalog: all permissions and role→permission mappings.
+
+    Any authenticated tenant member may call this endpoint.
+    Used by PermissionCatalogPage to display live data instead of hardcoded values.
+    """
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
+    tenant_id = ctx.get("tenant_id")
+    principal_id = ctx.get("principal_id")
+    if not tenant_id or not principal_id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="tenant context required")
+
+    # Return current caller's effective permissions alongside the catalog
+    async with db_connection() as conn:
+        caller_perms = await access.effective_permissions(conn, principal_id, tenant_id)
+
+    return {
+        "permissions": [
+            {"permission": p, "description": _PERMISSION_DESCRIPTIONS.get(p, "")}
+            for p in access.PERMISSIONS
+        ],
+        "roles": {
+            role: sorted(perms)
+            for role, perms in access.ROLE_PERMISSIONS.items()
+        },
+        "caller_permissions": sorted(caller_perms),
+    }
