@@ -30,6 +30,11 @@ services:
       keycloak:
         condition: service_started
 
+  # ── Migrate: precisa dos secrets para autenticar como jlmirror_owner ────────
+  migrate:
+    volumes:
+      - ./secrets:/run/secrets:ro
+
   # ── BFF: sem volumes de dev, URL pública correta ─────────────────────────────
   bff:
     volumes:
