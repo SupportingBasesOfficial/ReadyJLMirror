@@ -57,6 +57,8 @@ import { FeatureFlagsPage } from "@/pages/FeatureFlagsPage";
 import { TenantSettingsPage } from "@/pages/TenantSettingsPage";
 import { APMPage } from "@/pages/APMPage";
 import { ClientPortalPage } from "@/pages/ClientPortalPage";
+import { HelpDeskPage } from "@/pages/HelpDeskPage";
+import { BillingPage } from "@/pages/BillingPage";
 import { useBranding } from "@/hooks/useBranding";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useRef } from "react";
@@ -107,6 +109,8 @@ const VIEW_TO_PATH: Record<string, string> = {
   "tenant-settings": "/settings/tenant",
   apm: "/apm",
   "client-portal": "/portal",
+  helpdesk: "/helpdesk",
+  billing: "/billing",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -388,6 +392,7 @@ export function Shell() {
       label: "ITSM",
       items: [
         { id: "changes" as View, label: t("nav.changes"), icon: GitMerge, description: "Controle de mudanças" },
+        { id: "helpdesk" as View, label: t("nav.helpdesk", "Helpdesk"), icon: Wrench, description: "Chamados de suporte com SLA" },
         { id: "incident-response" as View, label: t("nav.incident_response", "Resposta a Incidentes"), icon: ShieldCheck, description: "Políticas de resposta automática" },
         ...(flagEnabled("module_sla") ? [{ id: "sla" as View, label: t("nav.sla"), icon: Clock, description: "Níveis de serviço" }] : []),
         ...(flagEnabled("module_automation") ? [{ id: "automation" as View, label: t("nav.automation"), icon: Zap, description: "Scripts e tarefas" }] : []),
@@ -440,6 +445,7 @@ export function Shell() {
           { id: "team" as View, label: t("nav.team"), icon: Users, description: "Membros e funções" },
           { id: "apikeys" as View, label: t("nav.apikeys"), icon: KeyRound, description: "Chaves de integração" },
           { id: "bugs" as View, label: t("nav.bugs"), icon: Bug, description: "Bugs reportados pelos usuários" },
+          { id: "billing" as View, label: t("nav.billing", "Faturamento"), icon: DollarSign, description: "Faturas e uso do período atual" },
         ] : []),
         ...(has("audit:read") ? [{ id: "audit" as View, label: t("nav.audit"), icon: ScrollText, description: "Logs de auditoria" }] : []),
       ],
@@ -853,6 +859,8 @@ export function Shell() {
           {view === "custom_dashboard" && <CustomDashboardPage tenantId={s.tenant_id!} />}
           {view === "apikeys" && <ApiKeysPage tenantId={s.tenant_id!} />}
           {view === "changes" && <ITSMPage tenantId={s.tenant_id!} />}
+          {view === "helpdesk" && <HelpDeskPage tenantId={s.tenant_id!} permissions={s.permissions ?? []} />}
+          {view === "billing" && <BillingPage tenantId={s.tenant_id!} permissions={s.permissions ?? []} />}
           {view === "incident-response" && <IncidentResponsePage tenantId={s.tenant_id!} />}
           {view === "sla" && <SLAPage tenantId={s.tenant_id!} />}
           {view === "automation" && <AutomationPage tenantId={s.tenant_id!} />}
