@@ -91,13 +91,13 @@ function InvoiceDetail({
             <Button size="sm" onClick={() => paid.mutate()} disabled={paid.isPending}>
               <CheckCircle className="w-3 h-3" /> Marcar pago
             </Button>
-            <Button size="sm" variant="outline" onClick={() => voidMut.mutate()} disabled={voidMut.isPending}>
+            <Button size="sm" variant="ghost" onClick={() => voidMut.mutate()} disabled={voidMut.isPending}>
               <XCircle className="w-3 h-3" /> Cancelar
             </Button>
           </div>
         )}
         {canAdmin && invoice.status === "draft" && (
-          <Button size="sm" variant="outline" onClick={() => voidMut.mutate()} disabled={voidMut.isPending}>
+          <Button size="sm" variant="ghost" onClick={() => voidMut.mutate()} disabled={voidMut.isPending}>
             <XCircle className="w-3 h-3" /> Cancelar
           </Button>
         )}
@@ -285,11 +285,11 @@ export function BillingPage({ tenantId, permissions = [] }: {
           )}
 
           {invoices.map(inv => (
-            <Card key={inv.invoice_id}
-              className={`p-3 cursor-pointer transition-colors hover:border-[var(--brand)] ${
+            <div key={inv.invoice_id} className="cursor-pointer" onClick={() => setSelected(selected === inv.invoice_id ? null : inv.invoice_id)}>
+            <Card
+              className={`p-3 transition-colors hover:border-[var(--brand)] ${
                 selected === inv.invoice_id ? "border-[var(--brand)] bg-[var(--surface-2)]" : ""
-              }`}
-              onClick={() => setSelected(selected === inv.invoice_id ? null : inv.invoice_id)}>
+              }`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 mb-1">
@@ -314,6 +314,7 @@ export function BillingPage({ tenantId, permissions = [] }: {
                 </div>
               </div>
             </Card>
+            </div>
           ))}
         </div>
 

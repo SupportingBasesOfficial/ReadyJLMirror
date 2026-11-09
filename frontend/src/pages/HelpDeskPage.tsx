@@ -221,19 +221,19 @@ function TicketDetail({
         {canOperate && ticket.status !== "closed" && (
           <div className="flex gap-1.5 flex-wrap">
             {ticket.status !== "in_progress" && (
-              <Button size="sm" variant="outline"
+              <Button size="sm" variant="ghost"
                 onClick={() => updateMut.mutate({ status: "in_progress" })}>
                 Em atendimento
               </Button>
             )}
             {ticket.status !== "resolved" && (
-              <Button size="sm" variant="outline"
+              <Button size="sm" variant="ghost"
                 onClick={() => updateMut.mutate({ status: "resolved" })}>
                 <CheckCircle className="w-3 h-3" /> Resolver
               </Button>
             )}
             {ticket.status === "resolved" && (
-              <Button size="sm" variant="outline"
+              <Button size="sm" variant="ghost"
                 onClick={() => updateMut.mutate({ status: "closed" })}>
                 <XCircle className="w-3 h-3" /> Encerrar
               </Button>
@@ -400,12 +400,11 @@ export function HelpDeskPage({ tenantId, permissions = [] }: {
           )}
 
           {tickets.map(ticket => (
+            <div key={ticket.ticket_id} className="cursor-pointer" onClick={() => setSelected(selected === ticket.ticket_id ? null : ticket.ticket_id)}>
             <Card
-              key={ticket.ticket_id}
-              className={`p-3 cursor-pointer transition-colors hover:border-[var(--brand)] ${
+              className={`p-3 transition-colors hover:border-[var(--brand)] ${
                 selected === ticket.ticket_id ? "border-[var(--brand)] bg-[var(--surface-2)]" : ""
               }`}
-              onClick={() => setSelected(selected === ticket.ticket_id ? null : ticket.ticket_id)}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
@@ -441,6 +440,7 @@ export function HelpDeskPage({ tenantId, permissions = [] }: {
                   : <ChevronRight className="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />}
               </div>
             </Card>
+            </div>
           ))}
         </div>
 
