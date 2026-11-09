@@ -1399,7 +1399,7 @@ footer span{color:#6ea8fe;font-weight:500;}
 </main>
 <footer>Monitorado por <span>JLMirror</span></footer>
 <script>
-var SLUG=window.location.pathname.replace(/^\/status\//,'');
+var SLUG=window.location.pathname.replace(/^[/]status[/]/,'');
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 var LABELS={
   operational:'Todos os sistemas operacionais',
