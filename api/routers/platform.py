@@ -852,7 +852,9 @@ async def list_principals(
             from shared import keycloak_admin
             kc_map = await keycloak_admin.get_users_by_ids(principal_ids)
         except Exception:
-            pass
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "platform: failed to resolve Keycloak display names", exc_info=True)
 
     result = []
     for r in rows:

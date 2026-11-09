@@ -94,7 +94,10 @@ async def get_overview(request: Request) -> dict:
                     if state in incident_counts:
                         incident_counts[state] = int(r["cnt"])
         except Exception:
-            pass
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "executive: failed to fetch incident counts for tenant %s",
+                tenant_id, exc_info=True)
 
         incidents = incident_counts
 
