@@ -18,7 +18,27 @@ from shared.ssrf import validate_outbound_url
 
 router = APIRouter(prefix="/api/v1/automation", tags=["automation"])
 
-_VALID_TYPES = {"webhook", "noop"}
+_VALID_TYPES = {"webhook", "noop", "ssh_command"}
+_SSH_DEFAULT_PORT = 22
+
+
+def _validate_ssh_config(config: dict) -> None:
+    """Raise HTTPException if ssh_command config is invalid."""
+    host = config.get("host", "").strip()
+    if not host:
+        raise HTTPException(status_code=422, detail="ssh_command config.host is required")
+    # Re-use SSRF guard by constructing a dummy URL for the host
+    dummy_url = f"https://{host}/"
+    err = validate_outbound_url(dummy_url)
+    if err:
+        raise HTTPException(status_code=422, detail=f"ssh_command config.host: {err}")
+    port = config.get("port", _SSH_DEFAULT_PORT)
+    if not isinstance(port, int) or port < 1 or port > 65535:
+        raise HTTPException(status_code=422, detail="ssh_command config.port must be 1-65535")
+    if not config.get("credential_id", "").strip():
+        raise HTTPException(status_code=422, detail="ssh_command config.credential_id required")
+    if not config.get("command", "").strip():
+        raise HTTPException(status_code=422, detail="ssh_command config.command required")
 
 
 class CreateScript(BaseModel):
@@ -100,6 +120,8 @@ async def create_script(request: Request, body: CreateScript) -> dict:
         err = validate_outbound_url(url)
         if err:
             raise HTTPException(status_code=422, detail=f"webhook config.url: {err}")
+    elif body.script_type == "ssh_command":
+        _validate_ssh_config(body.config)
 
     script_id = f"auto:{uuid.uuid4()}"
     async with db_tenant_connection(tenant_id) as conn:
@@ -123,14 +145,16 @@ async def update_script(request: Request, script_id: str,
     if body.script_type and body.script_type not in _VALID_TYPES:
         raise HTTPException(status_code=422,
                             detail=f"script_type must be one of {sorted(_VALID_TYPES)}")
-    if body.config is not None and (
-            body.script_type == "webhook"
-            or body.script_type is None):
-        url = body.config.get("url", "").strip() if body.config.get("url") else ""
-        if url:
-            err = validate_outbound_url(url)
-            if err:
-                raise HTTPException(status_code=422, detail=f"webhook config.url: {err}")
+    if body.config is not None:
+        effective_type = body.script_type or "webhook"
+        if effective_type == "webhook":
+            url = body.config.get("url", "").strip() if body.config.get("url") else ""
+            if url:
+                err = validate_outbound_url(url)
+                if err:
+                    raise HTTPException(status_code=422, detail=f"webhook config.url: {err}")
+        elif effective_type == "ssh_command":
+            _validate_ssh_config(body.config)
 
     async with db_tenant_connection(tenant_id) as conn:
         row = await conn.execute(
@@ -297,3 +321,84 @@ async def list_runs(request: Request, script_id: Optional[str] = None) -> list:
             )
         cols = [d[0] for d in rows.description]
         return [dict(zip(cols, r)) for r in await rows.fetchall()]
+
+
+# ── SSH Credentials ───────────────────────────────────────────────────────────
+
+class CreateCredential(BaseModel):
+    label: str
+    username: str
+    key_pem: str
+    known_hosts: Optional[str] = None
+
+
+@router.get("/credentials")
+async def list_credentials(request: Request) -> list:
+    tenant_id = _require_tenant(request)
+    async with db_tenant_connection(tenant_id) as conn:
+        rows = await conn.execute(
+            """
+            SELECT credential_id, label, credential_type, username, created_at
+              FROM g1.automation_credential
+             WHERE tenant_id = %s
+             ORDER BY created_at DESC
+            """,
+            (tenant_id,),
+        )
+        cols = [d[0] for d in rows.description]
+        return [dict(zip(cols, r)) for r in await rows.fetchall()]
+
+
+@router.post("/credentials", status_code=status.HTTP_201_CREATED)
+async def create_credential(request: Request, body: CreateCredential) -> dict:
+    tenant_id = await _require_operator(request)
+    label = body.label.strip()
+    if not label:
+        raise HTTPException(status_code=422, detail="label is required")
+    if len(label) > 120:
+        raise HTTPException(status_code=422, detail="label max 120 chars")
+    username = body.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="username is required")
+    key_pem = body.key_pem.strip()
+    if not key_pem.startswith("-----BEGIN"):
+        raise HTTPException(status_code=422, detail="key_pem must be a PEM-encoded private key")
+
+    credential_id = f"cred:{uuid.uuid4()}"
+    async with db_tenant_connection(tenant_id) as conn:
+        try:
+            await conn.execute(
+                """
+                INSERT INTO g1.automation_credential
+                    (credential_id, tenant_id, label, username, key_pem, known_hosts)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (credential_id, tenant_id, label, username, key_pem,
+                 body.known_hosts),
+            )
+            await conn.commit()
+        except Exception as exc:
+            if "unique" in str(exc).lower():
+                raise HTTPException(status_code=409,
+                                    detail=f"credential with label '{label}' already exists")
+            raise
+    return {"credential_id": credential_id, "label": label, "username": username}
+
+
+@router.delete("/credentials/{credential_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_credential(request: Request, credential_id: str) -> Response:
+    tenant_id = await _require_operator(request)
+    async with db_tenant_connection(tenant_id) as conn:
+        row = await conn.execute(
+            "SELECT credential_id FROM g1.automation_credential "
+            "WHERE tenant_id=%s AND credential_id=%s",
+            (tenant_id, credential_id),
+        )
+        if await row.fetchone() is None:
+            raise HTTPException(status_code=404, detail="credential not found")
+        await conn.execute(
+            "DELETE FROM g1.automation_credential WHERE credential_id=%s",
+            (credential_id,),
+        )
+        await conn.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

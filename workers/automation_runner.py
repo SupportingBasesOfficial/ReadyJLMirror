@@ -13,6 +13,7 @@ and is retried on the next cycle.
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import secrets
@@ -64,6 +65,81 @@ def _execute_webhook(config: dict, ctx: dict) -> tuple[str, int | None, str | No
     return "success", status, None
 
 
+def _execute_ssh_command(config: dict, ctx: dict,
+                         conn: psycopg.Connection) -> tuple[str, str | None]:
+    """Execute an SSH command on a remote host. Returns (outcome, error_detail)."""
+    try:
+        import paramiko  # noqa: PLC0415 — optional dep, only loaded for ssh_command
+    except ImportError:
+        return "failed", "paramiko not installed — add paramiko>=3.4 to dependencies"
+
+    credential_id = config.get("credential_id", "").strip()
+    host = config.get("host", "").strip()
+    port = int(config.get("port", 22))
+    command_template = config.get("command", "").strip()
+    command = _render(command_template, ctx)
+    timeout = int(config.get("timeout_secs", 30))
+
+    # Fetch credential from DB
+    cur = conn.execute(
+        "SELECT username, key_pem, known_hosts "
+        "FROM g1.automation_credential "
+        "WHERE credential_id=%s AND tenant_id=%s",
+        (credential_id, ctx["tenant_id"]),
+    )
+    cred_row = cur.fetchone()
+    if cred_row is None:
+        return "failed", f"credential not found: {credential_id}"
+
+    username, key_pem, known_hosts_text = cred_row
+
+    # Load private key
+    try:
+        pkey = paramiko.RSAKey.from_private_key(io.StringIO(key_pem))
+    except paramiko.SSHException:
+        try:
+            pkey = paramiko.Ed25519Key.from_private_key(io.StringIO(key_pem))
+        except paramiko.SSHException:
+            try:
+                pkey = paramiko.ECDSAKey.from_private_key(io.StringIO(key_pem))
+            except paramiko.SSHException as exc:
+                return "failed", f"cannot load private key: {exc}"
+
+    client = paramiko.SSHClient()
+    if known_hosts_text:
+        host_keys = paramiko.HostKeys()
+        host_keys.load(io.StringIO(known_hosts_text))  # type: ignore[arg-type]
+        client._host_keys = host_keys  # noqa: SLF001
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    else:
+        # No known_hosts — accept and log fingerprint (not silently trusting)
+        client.set_missing_host_key_policy(paramiko.WarningPolicy())
+
+    try:
+        client.connect(host, port=port, username=username, pkey=pkey,
+                       timeout=timeout, allow_agent=False, look_for_keys=False)
+        _stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
+        exit_status = stdout.channel.recv_exit_status()
+        stdout_text = stdout.read(4096).decode("utf-8", errors="replace").strip()
+        stderr_text = stderr.read(1024).decode("utf-8", errors="replace").strip()
+    except Exception as exc:
+        return "failed", f"ssh:{type(exc).__name__}:{exc}"
+    finally:
+        client.close()
+
+    if exit_status != 0:
+        detail = f"exit:{exit_status}"
+        if stderr_text:
+            detail += f" stderr:{stderr_text[:256]}"
+        return "failed", detail
+
+    logger.info(
+        "automation ssh run=%s host=%s cmd=%r exit=0 out=%r",
+        ctx["run_id"], host, command, stdout_text[:120],
+    )
+    return "success", None
+
+
 def _execute_run(conn: psycopg.Connection, run_id: str, tenant_id: str,
                  script_id: str) -> None:
     """Execute one pending run (schedule or manual). Commits the result."""
@@ -102,6 +178,12 @@ def _execute_run(conn: psycopg.Connection, run_id: str, tenant_id: str,
         logger.info(
             "automation webhook run=%s script=%s outcome=%s status=%s",
             run_id, script_name, outcome, http_status)
+    elif script_type == "ssh_command":
+        outcome, error = _execute_ssh_command(config, ctx, conn)
+        http_status = None
+        logger.info(
+            "automation ssh run=%s script=%s outcome=%s",
+            run_id, script_name, outcome)
     else:
         outcome, http_status, error = "skipped", None, f"unknown type: {script_type}"
 
