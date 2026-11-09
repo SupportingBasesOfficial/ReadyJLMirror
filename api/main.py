@@ -44,6 +44,7 @@ from api.routers import (
     api_keys,
     automation,
     bugreport,
+    helpdesk,
     reports,
     billing,
     branding,
@@ -576,6 +577,7 @@ app.include_router(tenant_settings.router)
 app.include_router(apm.router)
 app.include_router(push.router)
 app.include_router(client_portal.router)
+app.include_router(helpdesk.router)
 
 
 @app.get("/metrics", tags=["health"])
