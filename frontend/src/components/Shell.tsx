@@ -534,22 +534,47 @@ export function Shell() {
         style={{ width: collapsed ? 52 : 220, transition: "width 0.22s cubic-bezier(0.4,0,0.2,1)" }}
         className="flex-shrink-0 flex flex-col bg-[var(--surface)] border-r border-[var(--border)] h-screen sticky top-0 overflow-hidden z-20"
       >
-        {/* Logo */}
+        {/* Logo + collapse toggle */}
         <div className={[
           "flex items-center border-b border-[var(--border)] flex-shrink-0",
-          collapsed ? "h-[52px] justify-center px-0" : "h-[52px] px-4 gap-2",
+          collapsed ? "h-[52px] justify-center px-0" : "h-[52px] px-3 gap-2",
         ].join(" ")}>
-          <svg viewBox="0 0 100 100" width={collapsed ? 28 : 24} height={collapsed ? 28 : 24} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
-            <ellipse cx="50" cy="50" rx="17" ry="36" fill="#9FE1CB" transform="rotate(0 50 50)"/>
-            <ellipse cx="50" cy="50" rx="17" ry="36" fill="#1BA898" transform="rotate(45 50 50)"/>
-            <ellipse cx="50" cy="50" rx="17" ry="36" fill="#0D6258" transform="rotate(90 50 50)"/>
-            <ellipse cx="50" cy="50" rx="17" ry="36" fill="#075044" transform="rotate(135 50 50)"/>
-            <circle cx="50" cy="50" r="11" fill="#052A24"/>
-          </svg>
-          {!collapsed && (
-            <span className="text-sm font-semibold tracking-tight" style={{ color: "var(--brand)" }}>
-              {branding?.configured && branding.brand_name ? branding.brand_name : "argos"}
-            </span>
+          {collapsed ? (
+            <button
+              onClick={toggleCollapsed}
+              title={t("sidebar.expandMenu")}
+              className="flex items-center justify-center rounded-lg hover:bg-[var(--surface-2)] transition-colors"
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 6 }}
+            >
+              <svg viewBox="0 0 100 100" width={28} height={28} xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <ellipse cx="50" cy="50" rx="17" ry="36" fill="#9FE1CB" transform="rotate(0 50 50)"/>
+                <ellipse cx="50" cy="50" rx="17" ry="36" fill="#1BA898" transform="rotate(45 50 50)"/>
+                <ellipse cx="50" cy="50" rx="17" ry="36" fill="#0D6258" transform="rotate(90 50 50)"/>
+                <ellipse cx="50" cy="50" rx="17" ry="36" fill="#075044" transform="rotate(135 50 50)"/>
+                <circle cx="50" cy="50" r="11" fill="#052A24"/>
+              </svg>
+            </button>
+          ) : (
+            <>
+              <svg viewBox="0 0 100 100" width={24} height={24} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+                <ellipse cx="50" cy="50" rx="17" ry="36" fill="#9FE1CB" transform="rotate(0 50 50)"/>
+                <ellipse cx="50" cy="50" rx="17" ry="36" fill="#1BA898" transform="rotate(45 50 50)"/>
+                <ellipse cx="50" cy="50" rx="17" ry="36" fill="#0D6258" transform="rotate(90 50 50)"/>
+                <ellipse cx="50" cy="50" rx="17" ry="36" fill="#075044" transform="rotate(135 50 50)"/>
+                <circle cx="50" cy="50" r="11" fill="#052A24"/>
+              </svg>
+              <span className="text-sm font-semibold tracking-tight flex-1 min-w-0 truncate" style={{ color: "var(--brand)" }}>
+                {branding?.configured && branding.brand_name ? branding.brand_name : "argos"}
+              </span>
+              <button
+                onClick={toggleCollapsed}
+                title={t("sidebar.collapseMenu")}
+                className="flex items-center justify-center rounded-lg hover:bg-[var(--surface-2)] transition-colors"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 5, flexShrink: 0 }}
+              >
+                <ChevronLeft size={13} />
+              </button>
+            </>
           )}
         </div>
 
@@ -723,22 +748,6 @@ export function Shell() {
             )}
           </div>
 
-          <button
-            onClick={toggleCollapsed}
-            className={[
-              "w-full flex items-center rounded-lg py-1.5 text-xs transition-colors hover:bg-[var(--surface-2)]",
-              collapsed ? "justify-center" : "gap-2 px-2.5",
-            ].join(" ")}
-            style={{ color: "var(--text-muted)" }}
-            title={collapsed ? t("sidebar.expandMenu") : t("sidebar.collapseMenu")}
-          >
-            {collapsed ? <ChevronRight size={13} /> : (
-              <>
-                <ChevronLeft size={13} />
-                <span>{t("common.collapse")}</span>
-              </>
-            )}
-          </button>
         </div>
       </aside>
 
