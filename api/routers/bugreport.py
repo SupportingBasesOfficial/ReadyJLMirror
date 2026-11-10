@@ -8,28 +8,26 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from shared.db import db_tenant_connection
+from shared import access
+from shared.db import db_connection, db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/bugs", tags=["bugs"])
 
 
-def _require_tenant(request: Request) -> str:
-    tid = (getattr(request.state, "jlmirror_context", None) or {}).get("tenant_id")
-    if not tid:
+def _ctx(request: Request) -> tuple[str, str]:
+    ctx = getattr(request.state, "jlmirror_context", None)
+    if ctx is None or not ctx.get("tenant_id") or not ctx.get("principal_id"):
         raise HTTPException(status_code=403, detail="tenant context required")
-    return tid
+    return ctx["tenant_id"], ctx["principal_id"]
 
 
-def _require_principal(request: Request) -> str:
-    return (getattr(request.state, "jlmirror_context", None) or {}).get(
-        "principal_id", "unknown"
-    )
-
-
-def _require_perm(request: Request, perm: str) -> None:
-    perms = (getattr(request.state, "jlmirror_context", None) or {}).get("permissions", [])
-    if perm not in perms and "platform_admin" not in perms:
-        raise HTTPException(status_code=403, detail=f"requires {perm}")
+async def _require_admin(request: Request) -> tuple[str, str]:
+    tenant_id, principal_id = _ctx(request)
+    async with db_connection() as conn:
+        perms = await access.effective_permissions(conn, principal_id, tenant_id)
+    if "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="tenant:admin required")
+    return tenant_id, principal_id
 
 
 class CreateBugReport(BaseModel):
@@ -48,8 +46,7 @@ class UpdateBugReport(BaseModel):
 
 @router.post("", status_code=201)
 async def create_bug_report(request: Request, body: CreateBugReport) -> dict:
-    tenant_id = _require_tenant(request)
-    principal_id = _require_principal(request)
+    tenant_id, principal_id = _ctx(request)
     report_id = f"bug:{uuid.uuid4()}"
     async with db_tenant_connection(tenant_id) as conn:
         await conn.execute(
@@ -77,8 +74,7 @@ async def list_bug_reports(
     screen_id: Optional[str] = Query(None),
     limit: int = Query(100, le=500),
 ) -> list[dict]:
-    tenant_id = _require_tenant(request)
-    _require_perm(request, "tenant:admin")
+    tenant_id, _ = await _require_admin(request)
     clauses = ["tenant_id = %s"]
     params: list = [tenant_id]
     if status:
@@ -116,8 +112,7 @@ async def list_bug_reports(
 async def update_bug_report(
     request: Request, report_id: str, body: UpdateBugReport
 ) -> dict:
-    tenant_id = _require_tenant(request)
-    _require_perm(request, "tenant:admin")
+    tenant_id, _ = await _require_admin(request)
     valid_statuses = {"open", "in_progress", "resolved", "wont_fix"}
     if body.status and body.status not in valid_statuses:
         raise HTTPException(status_code=422, detail=f"invalid status: {body.status}")
