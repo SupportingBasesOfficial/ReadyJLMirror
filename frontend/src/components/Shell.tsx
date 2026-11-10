@@ -512,6 +512,7 @@ export function Shell() {
 
   return (
     <div className="flex min-h-screen bg-[var(--bg)]">
+      <style>{`@media (max-width: 767px) { .jlm-desktop-only { display: none !important; } }`}</style>
       {sessionExpired && (
         <div
           style={{
@@ -750,14 +751,14 @@ export function Shell() {
           </h1>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {s.is_platform_admin && (
-              <span className="hidden sm:inline-flex text-[10px] px-2 py-0.5 rounded-full font-semibold"
+              <span className="jlm-desktop-only text-[10px] px-2 py-0.5 rounded-full font-semibold"
                 style={{ background: "color-mix(in srgb, var(--brand) 15%, transparent)", color: "var(--brand)", border: "1px solid color-mix(in srgb, var(--brand) 30%, transparent)" }}>
                 {t("topbar.platformAdmin")}
               </span>
             )}
-            <div className="hidden sm:flex"><LanguageToggle /></div>
-            <div className="hidden sm:flex"><PageInfoButton screenId={view} /></div>
-            <div className="hidden sm:flex"><BugReportButton screenId={view} /></div>
+            <div className="jlm-desktop-only"><LanguageToggle /></div>
+            <div className="jlm-desktop-only"><PageInfoButton screenId={view} /></div>
+            <div className="jlm-desktop-only"><BugReportButton screenId={view} /></div>
             <button
               onClick={() => goTo("alerts")}
               title={t("topbar.criticalAlerts")}
