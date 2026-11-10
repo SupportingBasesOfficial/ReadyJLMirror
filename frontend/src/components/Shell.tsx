@@ -10,7 +10,7 @@ import {
   Brain, DollarSign, Activity, Package,
   Webhook, Server, Wrench, Settings2,
   MessageSquare, PhoneCall, Users, UserPlus, KeyRound,
-  ScrollText, BookOpen, ChevronLeft,
+  ScrollText, BookOpen, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Building2, ShieldCheck, Network, Radio, CalendarClock,
   LayoutGrid, Globe, Bug, TrendingUp, GitCompare, ToggleLeft, Gauge,
 } from "lucide-react";
@@ -543,16 +543,17 @@ export function Shell() {
             <button
               onClick={toggleCollapsed}
               title={t("sidebar.expandMenu")}
-              className="flex items-center justify-center rounded-lg hover:bg-[var(--surface-2)] transition-colors"
-              style={{ background: "none", border: "none", cursor: "pointer", padding: 6 }}
+              className="flex flex-col items-center justify-center gap-0.5 rounded-lg hover:bg-[var(--surface-2)] transition-colors"
+              style={{ background: "none", border: "none", cursor: "pointer", padding: "6px 4px", width: 44 }}
             >
-              <svg viewBox="0 0 100 100" width={28} height={28} xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <svg viewBox="0 0 100 100" width={22} height={22} xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <ellipse cx="50" cy="50" rx="17" ry="36" fill="#9FE1CB" transform="rotate(0 50 50)"/>
                 <ellipse cx="50" cy="50" rx="17" ry="36" fill="#1BA898" transform="rotate(45 50 50)"/>
                 <ellipse cx="50" cy="50" rx="17" ry="36" fill="#0D6258" transform="rotate(90 50 50)"/>
                 <ellipse cx="50" cy="50" rx="17" ry="36" fill="#075044" transform="rotate(135 50 50)"/>
                 <circle cx="50" cy="50" r="11" fill="#052A24"/>
               </svg>
+              <ChevronRight size={10} style={{ color: "var(--text-muted)", opacity: 0.6 }} />
             </button>
           ) : (
             <>
