@@ -10,7 +10,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
-import secrets
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel

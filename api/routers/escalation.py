@@ -8,9 +8,8 @@ step-by-step until the alert resolves or all steps are exhausted.
 
 from __future__ import annotations
 
-from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
 from api.routers.monitoring import _authoritative_tenant

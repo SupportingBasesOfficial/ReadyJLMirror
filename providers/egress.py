@@ -32,13 +32,13 @@ import secrets
 import socket
 from urllib.parse import urlparse
 
-logger = logging.getLogger(__name__)
-
 from jlmirror_monitoring.source import ZabbixProviderConfiguration
 from jlmirror_monitoring.validation_worker import (
     AdmittedProviderEndpoint,
     EgressAdmissionError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _env_flag(name: str) -> bool:

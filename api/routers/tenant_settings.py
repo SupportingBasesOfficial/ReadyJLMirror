@@ -88,7 +88,6 @@ async def update_settings(request: Request, body: SettingsUpdate) -> dict:
         raise HTTPException(status_code=400, detail="no fields to update")
 
     set_clause = ", ".join(f"{k} = %s" for k in data)
-    values = list(data.values()) + [actor, tenant]
 
     async with db_tenant_connection("platform") as conn:
         await conn.execute(

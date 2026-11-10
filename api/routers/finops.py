@@ -6,14 +6,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from shared.db import db_connection
+
 
 def _get_context(request: Request) -> dict:
     ctx = getattr(request.state, "jlmirror_context", None)
     if ctx is None:
         raise HTTPException(status_code=401, detail="authentication required")
     return ctx
-
-from shared.db import db_connection
 
 router = APIRouter(prefix="/api/v1/finops", tags=["finops"])
 

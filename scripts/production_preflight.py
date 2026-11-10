@@ -129,7 +129,7 @@ def main() -> None:
 
             cur = conn.execute("SELECT count(*) FROM public._migrations")
             migration_count = cur.fetchone()[0]
-            results.append(_check(f"Migrations applied",
+            results.append(_check("Migrations applied",
                                   migration_count > 0,
                                   f"{migration_count} rows in _migrations"))
 

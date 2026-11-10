@@ -10,14 +10,12 @@ from __future__ import annotations
 import logging
 import secrets
 import smtplib
-import uuid
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import psycopg
 
-from shared.config import settings
 
 logger = logging.getLogger(__name__)
 

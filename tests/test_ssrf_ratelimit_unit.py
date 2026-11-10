@@ -6,7 +6,6 @@ No database or HTTP server required — pure function tests.
 from __future__ import annotations
 
 import collections
-import sys
 import time
 import uuid
 

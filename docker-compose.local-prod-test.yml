@@ -1,0 +1,31 @@
+# Local prod test override — simulates production without Let's Encrypt.
+# Usage: see test-prod-local.sh
+#
+# Overrides only what breaks on a dev machine:
+#   - Keycloak: start-dev mode + localhost hostname (no HTTPS requirement)
+#   - BFF: localhost public URLs (browser-side OIDC redirect)
+#   - Caddy: disabled (access BFF directly on http://localhost:8080)
+
+services:
+
+  keycloak:
+    command: start-dev --import-realm
+    environment:
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: "8180"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: ""
+
+  bff:
+    environment:
+      BFF_PUBLIC_URL: http://localhost:8080
+      KEYCLOAK_PUBLIC_URL: http://localhost:8180
+
+  # Disable Caddy — not needed locally (BFF is on :8080 directly)
+  caddy:
+    command: sh -c "echo 'Caddy disabled in local-prod-test mode' && sleep infinity"
+    restart: "no"
+    healthcheck:
+      disable: true
+    depends_on: []

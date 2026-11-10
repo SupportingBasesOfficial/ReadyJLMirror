@@ -15,7 +15,7 @@ import secrets
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
-from shared.db import db_connection, db_tenant_connection
+from shared.db import db_connection
 
 router = APIRouter(prefix="/api/v1/onboarding", tags=["onboarding"])
 

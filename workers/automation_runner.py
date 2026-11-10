@@ -17,7 +17,6 @@ import io
 import json
 import logging
 import secrets
-import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone

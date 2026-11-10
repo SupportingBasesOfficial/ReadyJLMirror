@@ -7,7 +7,6 @@ linear regression, daily averages) — no external model required.
 """
 from __future__ import annotations
 
-import math
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -314,11 +313,10 @@ async def list_predictions(
         )
         rows = await cur.fetchall()
 
-    now_epoch = datetime.now(timezone.utc).timestamp()
     predictions = []
     for r in rows:
         slope = float(r[2])         # units per second
-        intercept = float(r[3])
+        _intercept = float(r[3])
         r2 = float(r[4])
         current = float(r[5])
         last_seen = r[6]
@@ -379,7 +377,6 @@ async def capacity_overview(
     tenant_id = ctx["tenant_id"]
 
     source_clause = "AND mo.monitoring_source_id = %s" if source_id else ""
-    metric_clause = "AND md.name ILIKE %s" if metric_key else ""
     params: list = [tenant_id, tenant_id, tenant_id]
     if source_id:
         params.insert(1, source_id)

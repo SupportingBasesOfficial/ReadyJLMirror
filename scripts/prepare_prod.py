@@ -19,10 +19,7 @@ Output:
 
 import argparse
 import json
-import os
-import re
 import secrets
-import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -99,7 +96,7 @@ def patch_realm(kc_secret: str, public_domain: str) -> None:
 def write_env(values: dict[str, str]) -> None:
     env_path = BASE_DIR / ".env"
     if env_path.exists():
-        print(f"\n  [aviso] .env já existe — salvando em .env.generated para não sobrescrever.")
+        print("\n  [aviso] .env já existe — salvando em .env.generated para não sobrescrever.")
         env_path = BASE_DIR / ".env.generated"
 
     lines = [
@@ -227,10 +224,10 @@ def main() -> None:
 
     print("\n=== Pronto! ===\n")
     print("Próximos passos:")
-    print(f"  1. Verifique .env e ajuste EGRESS_ALLOW_HOSTS se necessário")
-    print(f"  2. Faça push do repo (realm-jlmirror.json foi atualizado)")
-    print(f"  3. No servidor: git clone + mv .env.generated .env + ./deploy.sh")
-    print(f"  4. Após o primeiro boot: adicione BAO_TOKEN ao .env e rode ./deploy.sh novamente")
+    print("  1. Verifique .env e ajuste EGRESS_ALLOW_HOSTS se necessário")
+    print("  2. Faça push do repo (realm-jlmirror.json foi atualizado)")
+    print("  3. No servidor: git clone + mv .env.generated .env + ./deploy.sh")
+    print("  4. Após o primeiro boot: adicione BAO_TOKEN ao .env e rode ./deploy.sh novamente")
     print(f"\n  KC admin:  https://{args.kc_domain}/admin  (admin / <veja .env KEYCLOAK_ADMIN_PASSWORD>)")
     print(f"  App:       https://{args.domain}")
     print()

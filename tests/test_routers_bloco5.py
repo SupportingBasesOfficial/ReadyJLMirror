@@ -15,7 +15,7 @@ import asyncio
 import os
 import sys
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import psycopg
 import pytest

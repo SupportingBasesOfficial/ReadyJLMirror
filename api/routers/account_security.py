@@ -1,7 +1,5 @@
 import base64
 import hmac
-import io
-import json
 import secrets
 import struct
 import time
@@ -12,7 +10,6 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from shared.keycloak_admin import _REALM_BASE, _admin_token
-from shared.config import settings
 
 router = APIRouter(prefix="/api/v1/account", tags=["account-security"])
 

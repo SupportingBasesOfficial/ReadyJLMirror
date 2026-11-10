@@ -176,7 +176,6 @@ class BaoCredentialResolver:
         loop when invoked from an async route via asyncio.to_thread().
         """
         import httpx
-        import json as _json
         try:
             resp = httpx.get(
                 f"{self._addr}/v1/secret/data/jlmirror/credentials",
