@@ -146,7 +146,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=(), "
-            "payment=(), usb=(), interest-cohort=()"
+            "payment=(), usb=()"
         )
         # strict-dynamic lets nonced entry-point scripts load further chunks
         # (Vite lazy routes) without listing each hash individually.
