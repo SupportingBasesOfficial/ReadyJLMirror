@@ -10,7 +10,7 @@ import {
   Brain, DollarSign, Activity, Package,
   Webhook, Server, Wrench, Settings2,
   MessageSquare, PhoneCall, Users, UserPlus, KeyRound,
-  ScrollText, BookOpen, ChevronLeft, ChevronRight,
+  ScrollText, BookOpen, ChevronLeft,
   ChevronDown, LogOut, Building2, ShieldCheck, Network, Radio, CalendarClock,
   LayoutGrid, Globe, Bug, TrendingUp, GitCompare, ToggleLeft, Gauge,
 } from "lucide-react";
