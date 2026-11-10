@@ -7,7 +7,7 @@ linear regression, daily averages) — no external model required.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -313,10 +313,11 @@ async def list_predictions(
         )
         rows = await cur.fetchall()
 
+    now_epoch = datetime.now(timezone.utc).timestamp()
     predictions = []
     for r in rows:
-        slope = float(r[2])         # units per second
-        _intercept = float(r[3])
+        slope = float(r[2])         # units per second (regression x = epoch)
+        intercept = float(r[3])     # y-intercept: value = slope * epoch + intercept
         r2 = float(r[4])
         current = float(r[5])
         last_seen = r[6]
@@ -325,16 +326,21 @@ async def list_predictions(
         unit = r[9] or ""
 
         slope_per_hour = slope * 3600
-        remaining = _CRITICAL_THRESHOLD - current
         predicted_critical_at = None
         hours_to_critical = None
-        if slope_per_hour > 0 and remaining > 0:
-            hours_to_critical = remaining / slope_per_hour
-            if hours_to_critical <= horizon_hours:
-                import datetime as _dt
+        if slope > 0:
+            # Use regression line to find when value reaches threshold:
+            # threshold = slope * t_epoch + intercept  →  t = (threshold - intercept) / slope
+            t_critical_epoch = (_CRITICAL_THRESHOLD - intercept) / slope
+            hours_to_critical = (t_critical_epoch - now_epoch) / 3600
+            if hours_to_critical < 0:
+                # Trend line already crossed threshold — report as imminent
+                hours_to_critical = 0.0
+                predicted_critical_at = datetime.now(timezone.utc).isoformat()
+            elif hours_to_critical <= horizon_hours:
                 predicted_critical_at = (
                     datetime.now(timezone.utc)
-                    + _dt.timedelta(hours=hours_to_critical)
+                    + timedelta(hours=hours_to_critical)
                 ).isoformat()
 
         predictions.append({
