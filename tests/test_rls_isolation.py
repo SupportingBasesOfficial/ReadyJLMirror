@@ -163,7 +163,7 @@ def test_alert_transition_history_immutable(conn):
         "SELECT set_config('jlmirror.tenant_id', 'tenant:test', false)")
     with pytest.raises(psycopg.Error):
         conn.execute(
-            "UPDATE alerting.alert_transition SET to_state='resolved'")
+            "UPDATE alerting.alert_transition SET to_lifecycle_state='resolved'")
     with pytest.raises(psycopg.Error):
         conn.execute("DELETE FROM alerting.alert_transition")
 
@@ -195,7 +195,7 @@ def test_worker_cannot_mutate_alert_history():
             "SELECT set_config('jlmirror.tenant_id', 'tenant:test', false)")
         with pytest.raises(psycopg.Error):
             c.execute(
-                "UPDATE alerting.alert_transition SET to_state='resolved'")
+                "UPDATE alerting.alert_transition SET to_lifecycle_state='resolved'")
         with pytest.raises(psycopg.Error):
             c.execute("DELETE FROM alerting.alert_transition")
     finally:

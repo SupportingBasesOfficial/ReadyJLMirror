@@ -543,7 +543,7 @@ class TestBffSecurityHeaders:
     def _expected_permissions_policy(self) -> str:
         return (
             "camera=(), microphone=(), geolocation=(), "
-            "payment=(), usb=(), interest-cohort=()"
+            "payment=(), usb=()"
         )
 
     def test_permissions_policy_blocks_sensitive_apis(self):

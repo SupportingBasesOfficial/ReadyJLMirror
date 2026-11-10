@@ -7,7 +7,8 @@
 BEGIN;
 
 INSERT INTO g1.tenants (tenant_id, display_name, state, isolation_class, cell_id)
-VALUES ('tenant:dev', 'Development Tenant', 'active', 'pooled', 'cell:dev-1')
+VALUES ('tenant:dev', 'Development Tenant', 'active', 'pooled', 'cell:dev-1'),
+       ('tenant:test', 'Test Tenant (CI/unit tests)', 'active', 'pooled', 'cell:dev-1')
 ON CONFLICT (tenant_id) DO NOTHING;
 
 COMMIT;
