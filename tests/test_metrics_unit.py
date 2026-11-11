@@ -111,15 +111,19 @@ def test_item_get_truncation_detected():
     assert len(snap.items) == 2
 
 
-def test_item_get_unknown_value_type_rejected():
+def test_item_get_unknown_value_type_falls_back_to_text():
+    # Unknown value_type (e.g. Zabbix future type) must not abort the batch;
+    # it is tolerated and mapped to the TEXT native type.
+    from jlmirror_monitoring.validation_worker import ZabbixNativeValueType
     client = ZabbixClient()
     bad = dict(_ITEM_ROW, value_type="9")
     with patch("providers.zabbix.httpx.Client") as mock_client_cls:
         mock_client = mock_client_cls.return_value.__enter__.return_value
         mock_client.post.return_value = _rpc_response([bad])
-        from jlmirror_monitoring.validation_worker import ProviderProtocolError
-        with pytest.raises(ProviderProtocolError):
-            client.item_get(_endpoint(), _credential(), ["11"], max_items=10)
+        result = client.item_get(_endpoint(), _credential(), ["11"], max_items=10)
+    assert result.complete is True
+    assert len(result.items) == 1
+    assert result.items[0].native_value_type == ZabbixNativeValueType.TEXT
 
 
 # ---------------------------------------------------------------------------

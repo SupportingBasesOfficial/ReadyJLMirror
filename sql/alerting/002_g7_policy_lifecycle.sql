@@ -188,7 +188,6 @@ GRANT SELECT, INSERT, UPDATE ON
     alerting.alert_policy_version,
     alerting.alert_policy_effective_version,
     alerting.alert,
-    alerting.alert_transition,
     alerting.alert_decision
 TO jlmirror_app;
 
@@ -197,8 +196,12 @@ GRANT SELECT, INSERT, UPDATE ON
     alerting.alert_policy_version,
     alerting.alert_policy_effective_version,
     alerting.alert,
-    alerting.alert_transition,
     alerting.alert_decision
 TO jlmirror_worker;
+
+-- alert_transition is append-only evidence; UPDATE and DELETE are
+-- intentionally withheld to enforce immutability.
+GRANT SELECT, INSERT ON alerting.alert_transition TO jlmirror_app, jlmirror_worker;
+REVOKE UPDATE, DELETE ON alerting.alert_transition FROM jlmirror_app, jlmirror_worker;
 
 COMMIT;

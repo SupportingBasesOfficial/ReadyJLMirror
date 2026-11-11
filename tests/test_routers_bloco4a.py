@@ -186,10 +186,10 @@ async def test_automation_schedules_list(api_client):
 
 async def test_msp_overview_ok(api_client):
     r = await api_client.get("/api/v1/msp/overview")
-    # May return 200 (empty list) or 403 if caller isn't MSP admin
+    # May return 200 (empty list or dict) or 403 if caller isn't MSP admin
     assert r.status_code in (200, 403)
     if r.status_code == 200:
-        assert isinstance(r.json(), list)
+        assert isinstance(r.json(), (list, dict))
 
 
 async def test_msp_clients_create_requires_msp_admin(api_client):

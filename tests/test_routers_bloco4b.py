@@ -246,19 +246,22 @@ async def test_aiops_findings_nonexistent_dismiss(api_client):
 async def test_aiops_anomalies_list(api_client):
     r = await api_client.get("/api/v1/aiops/anomalies")
     assert r.status_code == 200
-    assert isinstance(r.json(), list)
+    data = r.json()
+    assert isinstance(data.get("anomalies", data), list)
 
 
 async def test_aiops_predictions_list(api_client):
     r = await api_client.get("/api/v1/aiops/predictions")
     assert r.status_code == 200
-    assert isinstance(r.json(), list)
+    data = r.json()
+    assert isinstance(data.get("predictions", data), list)
 
 
 async def test_aiops_capacity_list(api_client):
     r = await api_client.get("/api/v1/aiops/capacity")
     assert r.status_code == 200
-    assert isinstance(r.json(), list)
+    data = r.json()
+    assert isinstance(data.get("items", data), list)
 
 
 # ===========================================================================
@@ -317,7 +320,8 @@ async def test_incident_response_app_errors_list(api_client):
     )
     assert r.status_code in (200, 403)
     if r.status_code == 200:
-        assert isinstance(r.json(), list)
+        data = r.json()
+        assert isinstance(data.get("events", data), list)
 
 
 # SSRF and rate-limiter unit tests moved to test_ssrf_ratelimit_unit.py

@@ -110,6 +110,7 @@ async def db_tenant_connection(tenant_id: str) -> AsyncIterator[AsyncConnection]
             yield conn
         finally:
             try:
+                await conn.rollback()
                 await conn.execute(
                     "SELECT set_config('jlmirror.tenant_id', '', false)")
             except Exception:

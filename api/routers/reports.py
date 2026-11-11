@@ -364,14 +364,14 @@ async def list_deliveries(request: Request) -> list:
 
 _REPORT_QUERIES: dict[str, tuple[list[str], str]] = {
     "alert_summary": (
-        ["alert_id", "title", "severity", "lifecycle_state", "fired_at", "resolved_at"],
+        ["alert_id", "source_kind", "lifecycle_state", "opened_at", "resolved_at"],
         """
-        SELECT alert_id::text, title, severity, lifecycle_state,
-               fired_at::text, resolved_at::text
+        SELECT alert_id::text, source_kind, lifecycle_state,
+               opened_at::text, resolved_at::text
           FROM alerting.alert
          WHERE tenant_id = %s
-           AND fired_at >= now() - interval '30 days'
-         ORDER BY fired_at DESC
+           AND opened_at >= now() - interval '30 days'
+         ORDER BY opened_at DESC
         """,
     ),
     "incident_summary": (
@@ -386,15 +386,15 @@ _REPORT_QUERIES: dict[str, tuple[list[str], str]] = {
         """,
     ),
     "sla_summary": (
-        ["sla_id", "policy_name", "severity_match", "checked_at", "met"],
+        ["sla_id", "policy_name", "severity_match", "breach_type", "breached_at"],
         """
         SELECT b.sla_id::text, p.name, p.severity_match,
-               b.checked_at::text, b.met::text
+               b.breach_type, b.breached_at::text
           FROM g1.sla_breach b
           JOIN g1.sla_policy p ON p.sla_id = b.sla_id
          WHERE b.tenant_id = %s
-           AND b.checked_at >= now() - interval '30 days'
-         ORDER BY b.checked_at DESC
+           AND b.breached_at >= now() - interval '30 days'
+         ORDER BY b.breached_at DESC
         """,
     ),
 }

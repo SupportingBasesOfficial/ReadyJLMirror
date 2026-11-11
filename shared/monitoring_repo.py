@@ -3864,8 +3864,8 @@ async def list_problems(
         for it in items:
             for k in ("projection_revision", "provider_acknowledged",
                       "monitoring_resource_id", "provider_eventid",
-                      "sev_rank"):
-                it.pop(k)
+                      "sev_rank", "suppressed", "opdata", "cause_eventid"):
+                it.pop(k, None)
     return {"items": items, "next_cursor": next_cursor}
 
 

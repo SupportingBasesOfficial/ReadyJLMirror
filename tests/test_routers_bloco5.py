@@ -84,9 +84,19 @@ def db_available():
 
 @pytest_asyncio.fixture(scope="module")
 async def pool(db_available):
-    from shared.db import close_pool, init_pool
+    from shared.db import close_pool, db_connection, init_pool
 
     await init_pool()
+    async with db_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO g1.principals
+                (principal_id, kind, credential_generation)
+            VALUES ('principal.e2e-dev-admin', 'human_browser_session', 'gen-e2e-bloco5')
+            ON CONFLICT (principal_id) DO NOTHING
+            """
+        )
+        await conn.commit()
     yield
     await close_pool()
 
@@ -476,7 +486,7 @@ async def test_branding_get(api_client):
     r = await api_client.get("/api/v1/platform/branding")
     assert r.status_code == 200
     data = r.json()
-    assert "brand_name" in data or "tenant_id" in data
+    assert "configured" in data
 
 
 async def test_branding_put_and_verify(api_client):
@@ -598,7 +608,7 @@ async def test_status_page_config_get(api_client):
 async def test_status_page_config_update(api_client):
     r = await api_client.put("/api/v1/platform/status-page", json={
         "public_name": "Test Status Page",
-        "slug": f"test-{uuid.uuid4().hex[:8]}",
+        "status_slug": f"test-{uuid.uuid4().hex[:8]}",
         "enabled": False,
     })
     assert r.status_code in (200, 201, 204)

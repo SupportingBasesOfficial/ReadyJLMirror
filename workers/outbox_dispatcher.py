@@ -79,7 +79,7 @@ def wire_envelope(row: dict) -> dict:
         "message_class": row["message_class"],
         "contract_name": row["contract_name"],
         "contract_version": row["contract_version"],
-        "producer": row["producer"],
+        "producer": "Monitoring",
         "producer_generation": None,
         "scope_class": row["scope"],
         "tenant_id": row["tenant_id"],
