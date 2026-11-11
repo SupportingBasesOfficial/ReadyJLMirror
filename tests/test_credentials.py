@@ -280,7 +280,6 @@ def test_bao_store_unconfigured():
 def test_bao_fetch_document_404_is_empty(monkeypatch):
     """A missing credentials document resolves as ({}, 0) so the store
     path can create it and reads report a plain missing-ref error."""
-    import httpx
     from providers.credentials import BaoCredentialResolver
     r = BaoCredentialResolver(addr="http://bao.test", token="tok")
 
