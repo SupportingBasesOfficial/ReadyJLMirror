@@ -15,7 +15,7 @@ import asyncio
 import os
 import sys
 import uuid
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import psycopg
 import pytest
@@ -51,6 +51,26 @@ def event_loop_policy():
 
 
 @pytest.fixture(scope="module")
+def event_loop(event_loop_policy):
+    loop = event_loop_policy.new_event_loop()
+    yield loop
+    pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+    if pending:
+        for t in pending:
+            t.cancel()
+        try:
+            loop.run_until_complete(
+                asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=10.0,
+                )
+            )
+        except (asyncio.TimeoutError, Exception):
+            pass
+    loop.close()
+
+
+@pytest.fixture(scope="module")
 def db_available():
     from shared.config import settings
 
@@ -63,12 +83,22 @@ def db_available():
 
 
 @pytest_asyncio.fixture(scope="module")
-async def api_client(db_available):
-    with patch("api.main._verify_bff_context", return_value=_TENANT_CTX):
-        from api.main import app
+async def pool(db_available):
+    from shared.db import close_pool, init_pool
 
+    await init_pool()
+    yield
+    await close_pool()
+
+
+@pytest_asyncio.fixture(scope="module")
+async def api_client(pool):
+    import api.main
+
+    with patch("api.main._verify_bff_context", return_value=_TENANT_CTX), \
+         patch("api.main._session_current", new=AsyncMock(return_value=True)):
         async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
+            transport=ASGITransport(app=api.main.app), base_url="http://test"
         ) as client:
             yield client
 

@@ -167,7 +167,7 @@ def _bao(document, monkeypatch=None):
 
     def fake_fetch():
         calls["n"] += 1
-        return document
+        return document, 0
 
     r._fetch_document = fake_fetch
     return r, calls
@@ -218,7 +218,7 @@ def test_chain_prefers_bao_when_configured(monkeypatch, tmp_path):
     chain = ChainedCredentialResolver()
     bao = chain._resolvers[0]
     assert isinstance(bao, BaoCredentialResolver)
-    bao._fetch_document = lambda: {"cred-a": "bao-token"}
+    bao._fetch_document = lambda: ({"cred-a": "bao-token"}, 0)
     cred = chain.resolve_zabbix_api_token("cred-a")
     assert cred.api_token == "bao-token"
 
@@ -242,7 +242,7 @@ def test_bao_store_merges_into_document():
     """Store preserves existing keys and writes the merged doc back."""
     r, _ = _bao({"existing": "tok-old"})
     written = {}
-    r._put_document = lambda doc: written.update(doc)
+    r._put_document = lambda doc, cas_version=0: written.update(doc)
     r.store_zabbix_api_token("cred-new", "  tok-new  ")
     assert written == {"existing": "tok-old", "cred-new": "tok-new"}
 
@@ -250,10 +250,10 @@ def test_bao_store_merges_into_document():
 def test_bao_store_invalidates_cache():
     r, _ = _bao({"cred-a": "old"})
     r.resolve_zabbix_api_token("cred-a")  # populate cache
-    r._put_document = lambda doc: None
+    r._put_document = lambda doc, cas_version=0: None
     r.store_zabbix_api_token("cred-a", "rotated")
     # Next resolve re-fetches rather than serving the stale entry.
-    r._fetch_document = lambda: {"cred-a": "rotated"}
+    r._fetch_document = lambda: ({"cred-a": "rotated"}, 0)
     cred = r.resolve_zabbix_api_token("cred-a")
     assert cred.api_token == "rotated"
 

@@ -48,6 +48,26 @@ def event_loop_policy():
 
 
 @pytest.fixture(scope="module")
+def event_loop(event_loop_policy):
+    loop = event_loop_policy.new_event_loop()
+    yield loop
+    pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+    if pending:
+        for t in pending:
+            t.cancel()
+        try:
+            loop.run_until_complete(
+                asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=10.0,
+                )
+            )
+        except (asyncio.TimeoutError, Exception):
+            pass
+    loop.close()
+
+
+@pytest.fixture(scope="module")
 def db_available():
     from shared.config import settings
 
