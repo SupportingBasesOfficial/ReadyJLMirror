@@ -53,7 +53,7 @@ async def close_pool() -> None:
     """Close the connection pool. Safe to call at shutdown."""
     global _pool
     if _pool is not None:
-        await _pool.close()
+        await _pool.close(timeout=10.0)
         _pool = None
         logger.info("Database pool closed")
 

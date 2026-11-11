@@ -437,13 +437,15 @@ async def _apm_write(
     tenant_id: Optional[str], principal_id: Optional[str],
 ) -> None:
     try:
-        async with db_connection() as conn:
-            await conn.execute(
-                "INSERT INTO g1.apm_request_log"
-                " (method, path, status_code, duration_ms, tenant_id, principal_id)"
-                " VALUES (%s, %s, %s, %s, %s, %s)",
-                (method, path, status_code, duration_ms, tenant_id, principal_id),
-            )
+        async with asyncio.timeout(5.0):
+            async with db_connection() as conn:
+                await conn.execute(
+                    "INSERT INTO g1.apm_request_log"
+                    " (method, path, status_code, duration_ms, tenant_id, principal_id)"
+                    " VALUES (%s, %s, %s, %s, %s, %s)",
+                    (method, path, status_code, duration_ms, tenant_id, principal_id),
+                )
+                await conn.commit()
     except Exception:
         pass
 
