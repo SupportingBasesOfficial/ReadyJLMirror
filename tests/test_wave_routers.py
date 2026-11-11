@@ -68,6 +68,34 @@ def event_loop_policy():
     return asyncio.DefaultEventLoopPolicy()
 
 
+@pytest.fixture(scope="module")
+def event_loop(event_loop_policy):
+    """Module-scoped event loop shared across all async tests in this file.
+
+    pytest-asyncio 0.23 creates a spurious function-scoped event_loop per
+    test even when loop_scope="module" is set, causing teardown hangs when
+    fire-and-forget tasks (apm_middleware) are still pending on the loop.
+    Overriding as module-scoped here matches the fixture lifetimes and lets
+    us cancel pending tasks before the loop is closed.
+    """
+    loop = event_loop_policy.new_event_loop()
+    yield loop
+    pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+    if pending:
+        for t in pending:
+            t.cancel()
+        try:
+            loop.run_until_complete(
+                asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=10.0,
+                )
+            )
+        except (asyncio.TimeoutError, Exception):
+            pass
+    loop.close()
+
+
 # ---------------------------------------------------------------------------
 # DB reachability guard (sync, module-scoped)
 # ---------------------------------------------------------------------------
