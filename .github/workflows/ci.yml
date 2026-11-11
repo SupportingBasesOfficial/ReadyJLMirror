@@ -62,7 +62,7 @@ jobs:
           DB_PASSWORD: jlmirror_dev
           APP_ENVIRONMENT: development
           DEV_AUTH_BYPASS: "true"
-        run: pytest -q
+        run: pytest -q --tb=short --timeout=120 --timeout-method=signal
 
       - name: Restore rehearsal (ADR-018 — backup + isolated verify)
         env:

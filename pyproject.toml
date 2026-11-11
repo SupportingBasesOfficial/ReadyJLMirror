@@ -23,6 +23,7 @@ dependencies = [
 dev = [
     "pytest>=8,<9",
     "pytest-asyncio>=0.23,<0.24",
+    "pytest-timeout>=0.5",
     "ruff>=0.5,<0.6",
     "jsonschema>=4.21,<5",
 ]
