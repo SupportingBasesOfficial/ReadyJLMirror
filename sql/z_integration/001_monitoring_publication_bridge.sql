@@ -94,7 +94,7 @@ BEGIN
         (NEW.tenant_id, v_message_id, v_scope, 'integration_event',
          v_contract, '1', 'monitoring-transition-bridge', 'tenant',
          v_correlation_id, v_transition_id, 'confidential_tenant',
-         'canonical-json-utf8', convert_to(v_payload::text, 'UTF8'),
+         'jsonb-text-utf8@1', convert_to(v_payload::text, 'UTF8'),
          v_evidence, 'sha256-canonical-json', '1',
          v_subject_type, v_subject_id,
          transaction_timestamp())
