@@ -553,7 +553,7 @@ async def test_api_key_create_returns_raw_key(api_client):
         "label": f"test-key-{uuid.uuid4().hex[:8]}",
         "scopes": ["read"],
     })
-    assert r.status_code == 201
+    assert r.status_code == 201, r.text
     data = r.json()
     assert "key_id" in data
     assert "raw_key" in data
@@ -565,7 +565,7 @@ async def test_api_key_revoke(api_client):
         "label": f"revoke-me-{uuid.uuid4().hex[:8]}",
         "scopes": ["read"],
     })
-    assert r.status_code == 201
+    assert r.status_code == 201, r.text
     key_id = r.json()["key_id"]
 
     r2 = await api_client.delete(f"/api/v1/api-keys/{key_id}")

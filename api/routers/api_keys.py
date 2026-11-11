@@ -102,8 +102,8 @@ async def create_api_key(request: Request, body: ApiKeyCreate) -> dict:
                 (tenant, principal, digest, body.label.strip(), body.scopes),
             )
             key_id = (await cur.fetchone())[0]
-        except Exception:
-            raise HTTPException(status_code=500, detail="key creation failed")
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"key creation failed: {exc!r}")
         await conn.commit()
 
     return {
