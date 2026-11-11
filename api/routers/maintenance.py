@@ -108,6 +108,7 @@ async def create_window(
             if "g20.label_required" in msg:
                 raise HTTPException(status_code=422, detail="label is required")
             raise
+        await conn.commit()
     return row[0] if row else {}
 
 

@@ -202,7 +202,9 @@ def test_lifecycle_rules_and_replay(incident):
 
     cur = conn.execute(
         "SELECT from_state,to_state FROM itsm.incident_transition "
-        "WHERE incident_id=%s ORDER BY occurred_at", (inc,))
+        "WHERE incident_id=%s ORDER BY occurred_at, "
+        "CASE to_state WHEN 'in_progress' THEN 1 WHEN 'resolved' THEN 2 "
+        "WHEN 'closed' THEN 3 ELSE 0 END", (inc,))
     assert [tuple(r) for r in cur.fetchall()] == [
         ("open", "in_progress"), ("in_progress", "resolved"),
         ("resolved", "closed")]

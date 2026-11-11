@@ -96,6 +96,14 @@ async def pool(db_available):
             ON CONFLICT (principal_id) DO NOTHING
             """
         )
+        await conn.execute(
+            """
+            INSERT INTO g1.tenant_memberships
+                (membership_id, tenant_id, principal_id, role, state)
+            VALUES ('mem-e2e-bloco5-admin', 'tenant:dev', 'principal.e2e-dev-admin', 'admin', 'active')
+            ON CONFLICT (tenant_id, principal_id) DO NOTHING
+            """
+        )
         await conn.commit()
     yield
     await close_pool()
@@ -602,7 +610,7 @@ async def test_status_page_config_get(api_client):
     r = await api_client.get("/api/v1/platform/status-page")
     assert r.status_code == 200
     data = r.json()
-    assert "enabled" in data or "slug" in data or "tenant_id" in data
+    assert "configured" in data
 
 
 async def test_status_page_config_update(api_client):

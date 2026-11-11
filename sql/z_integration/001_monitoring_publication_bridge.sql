@@ -28,6 +28,8 @@ AS $fn$
 DECLARE
     v_contract TEXT;
     v_transition_id TEXT;
+    v_subject_type TEXT;
+    v_subject_id TEXT;
     v_payload JSONB;
     v_message_id TEXT;
     v_correlation_id TEXT;
@@ -38,6 +40,8 @@ BEGIN
     IF TG_TABLE_NAME = 'monitoring_problem_transition' THEN
         v_contract := 'monitoring.problem-state.changed';
         v_transition_id := NEW.problem_transition_id;
+        v_subject_type := 'monitoring_problem';
+        v_subject_id := NEW.problem_id;
         v_payload := jsonb_build_object(
             'problem_id', NEW.problem_id,
             'monitoring_source_id', NEW.monitoring_source_id,
@@ -48,6 +52,8 @@ BEGIN
     ELSIF TG_TABLE_NAME = 'health_projection_transition' THEN
         v_contract := 'monitoring.health-projection.changed';
         v_transition_id := NEW.health_transition_id;
+        v_subject_type := 'monitoring_resource';
+        v_subject_id := NEW.monitoring_resource_id;
         v_payload := jsonb_build_object(
             'monitoring_source_id', NEW.monitoring_source_id,
             'source_instance_generation', NEW.source_instance_generation,
@@ -90,7 +96,7 @@ BEGIN
          v_correlation_id, v_transition_id, 'internal',
          'canonical-json-utf8', convert_to(v_payload::text, 'UTF8'),
          v_evidence, 'sha256-canonical-json', '1',
-         'monitoring_transition', v_transition_id,
+         v_subject_type, v_subject_id,
          transaction_timestamp())
     ON CONFLICT (tenant_id, producer_message_scope, message_id) DO NOTHING;
 

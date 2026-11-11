@@ -128,6 +128,7 @@ async def create_policy(request: Request,
                 raise HTTPException(status_code=422,
                                     detail="name must not be empty")
             raise
+        await conn.commit()
     return row[0] if row else {}
 
 

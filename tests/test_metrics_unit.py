@@ -112,7 +112,7 @@ def test_item_get_truncation_detected():
 def test_item_get_unknown_value_type_falls_back_to_text():
     # Unknown value_type (e.g. Zabbix future type) must not abort the batch;
     # it is tolerated and mapped to the TEXT native type.
-    from jlmirror_monitoring.validation_worker import ZabbixNativeValueType
+    from jlmirror_monitoring.metric_definitions import ZabbixNativeValueType
     client = ZabbixClient()
     bad = dict(_ITEM_ROW, value_type="9")
     with patch("providers.zabbix.httpx.Client") as mock_client_cls:
