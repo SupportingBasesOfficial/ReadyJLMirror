@@ -122,7 +122,15 @@ def _sweep_zombie_pending(conn: psycopg.Connection) -> int:
                              IS DISTINCT FROM o.current_state_poll_epoch
                          OR s.current_state_poll_generation
                              IS DISTINCT FROM
-                                 o.current_state_poll_generation - 1)))
+                                 o.current_state_poll_generation - 1))
+                OR (o.responsibility_kind = 'problem_state_sync'
+                    AND (o.problem_poll_epoch IS NULL
+                         OR o.problem_poll_generation IS NULL
+                         OR s.problem_poll_epoch
+                             IS DISTINCT FROM o.problem_poll_epoch
+                         OR s.problem_poll_generation
+                             IS DISTINCT FROM
+                                 o.problem_poll_generation - 1)))
         """,
     )
     n = cur.rowcount

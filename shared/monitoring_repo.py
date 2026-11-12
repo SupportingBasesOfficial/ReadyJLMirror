@@ -475,6 +475,7 @@ class PgValidationRepository:
                  visible_host_group_refs, missing_host_group_refs,
                  failure_class, egress_decision_ref, credential_generation_ref)
             VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s)
+            ON CONFLICT (tenant_id, monitoring_sync_operation_id) DO NOTHING
             """,
             (
                 validation_evidence_id,
@@ -2430,9 +2431,14 @@ class PgMetricHistoryRepository:
                         (tenant_id, history_gap_id, monitoring_source_id,
                          source_instance_generation, provider_external_ref,
                          history_value_type, metric_definition_id,
-                         gap_from_clock, gap_through_clock, reason)
+                         gap_from_clock, gap_through_clock, reason,
+                         monitoring_sync_operation_id)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,
-                            'truncated_window')
+                            'truncated_window', %s)
+                    ON CONFLICT (tenant_id, monitoring_sync_operation_id,
+                                 provider_external_ref, history_value_type)
+                    WHERE monitoring_sync_operation_id IS NOT NULL
+                    DO NOTHING
                     """,
                     (
                         claim.tenant_id, _opaque("mon-gap"),
@@ -2441,6 +2447,7 @@ class PgMetricHistoryRepository:
                         target.provider_external_ref,
                         target.history_value_type, target.metric_definition_id,
                         claim.window.time_from, claim.window.time_till,
+                        claim.monitoring_sync_operation_id,
                     ),
                 )
 
