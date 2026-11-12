@@ -14,8 +14,11 @@ sandbox mode (no BFF context), explicit tenant_id is accepted.
 from __future__ import annotations
 
 import asyncio
+import logging
 import secrets
 from typing import Annotated
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
@@ -642,6 +645,10 @@ async def delete_source(
         # that references this source (or its generations/sync ops) before commit.
         # conn.transaction() creates a SAVEPOINT so a missing table in this
         # environment can be caught and skipped without aborting the outer txn.
+        #
+        # GUC re-assert: session-level set_config in db_tenant_connection is
+        # authoritative, but we re-assert inside each savepoint to defend against
+        # any pool/driver behaviour that might clear it between statements.
         for child_table in (
             # Tables that reference monitoring_source or monitoring_source_generation
             # (correct schema names — no DB-level CASCADE on these FKs).
@@ -667,17 +674,31 @@ async def delete_source(
         ):
             try:
                 async with conn.transaction():
+                    # Re-assert GUC inside each savepoint — defensive against any
+                    # driver/pool reset that might have cleared the session value.
                     await conn.execute(
+                        "SELECT set_config('jlmirror.tenant_id', %s, false)",
+                        (tenant,),
+                    )
+                    cur = await conn.execute(
                         f"DELETE FROM monitoring.{child_table}"  # noqa: S608
                         " WHERE tenant_id=%s AND monitoring_source_id=%s",
                         (tenant, source_id),
                     )
+                    logger.info(
+                        "delete_source %s: deleted %d rows from monitoring.%s",
+                        source_id, cur.rowcount, child_table,
+                    )
             except _pge.UndefinedTable:
-                pass  # table doesn't exist in this environment
-        await conn.execute(
+                logger.debug("delete_source %s: table monitoring.%s not found, skipped", source_id, child_table)
+            except Exception:
+                logger.exception("delete_source %s: unexpected error deleting from monitoring.%s", source_id, child_table)
+                raise
+        cur = await conn.execute(
             "DELETE FROM monitoring.monitoring_source WHERE tenant_id=%s AND monitoring_source_id=%s",
             (tenant, source_id),
         )
+        logger.info("delete_source %s: deleted %d rows from monitoring.monitoring_source", source_id, cur.rowcount)
         ctx = getattr(request.state, "jlmirror_context", {}) or {}
         await record_audit_event(
             conn, tenant,
