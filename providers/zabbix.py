@@ -275,6 +275,11 @@ class ZabbixClient:
         # snmp_available, ipmi_available, jmx_available) and moved them to
         # interface objects (each interface now has its own `available` field).
         # We request both sets; _map_host picks the right one per version.
+        groups = self.hostgroup_get(endpoint, credential, host_group_refs)
+        groupids = [g.groupid for g in groups]
+        if not groupids:
+            return ZabbixHostSnapshot(hosts=(), complete=True)
+
         is_v7 = self._v7_group_select is True
         host_output = [
             "hostid", "host", "name",
@@ -290,7 +295,7 @@ class ZabbixClient:
             "host.get",
             {
                 "output": host_output,
-                "groupids": list(host_group_refs),
+                "groupids": groupids,
                 "selectInterfaces": [
                     "interfaceid", "type", "main", "useip",
                     "ip", "dns", "port", "available",
