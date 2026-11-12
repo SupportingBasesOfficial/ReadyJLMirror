@@ -815,8 +815,12 @@ class PgHostInventoryRepository:
             self._conn.rollback()
             raise ValueError("monitoring.host_inventory_claim_lost")
 
-        # Immutable snapshot evidence
-        self._conn.execute(
+        # Immutable snapshot evidence.
+        # ON CONFLICT DO NOTHING makes this idempotent: if the worker crashed
+        # after the INSERT committed (autocommit path) but before the op-state
+        # UPDATE committed, the reaper re-queues the same op and the second run
+        # must not fail here.
+        cur = self._conn.execute(
             """
             INSERT INTO monitoring.monitoring_host_inventory_snapshot_evidence
                 (tenant_id, host_inventory_snapshot_evidence_id,
@@ -827,6 +831,7 @@ class PgHostInventoryRepository:
                  operation_state, failure_class, egress_decision_ref,
                  credential_generation_ref)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, monitoring_sync_operation_id) DO NOTHING
             """,
             (
                 claim.tenant_id,
@@ -847,8 +852,9 @@ class PgHostInventoryRepository:
                 result.credential_generation_ref,
             ),
         )
+        snapshot_already_existed = cur.rowcount == 0
 
-        if result.succeeded:
+        if result.succeeded and not snapshot_already_existed:
             self._persist_snapshot(claim, result, snapshot_evidence_id)
             usage.record_sync_usage(
                 self._conn, tenant_id=claim.tenant_id,
