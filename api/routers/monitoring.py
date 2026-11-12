@@ -669,8 +669,8 @@ async def delete_source(
             "monitoring_metric_definition",
             "monitoring_resource_snapshot",
             "monitoring_problem_state",
-            # Must be last: source generation itself references monitoring_source.
-            "monitoring_source_generation",
+            # monitoring_source_generation is intentionally NOT here —
+            # see below for why it must be deleted outside the savepoint loop.
         ):
             try:
                 async with conn.transaction():
@@ -694,6 +694,23 @@ async def delete_source(
             except Exception:
                 logger.exception("delete_source %s: unexpected error deleting from monitoring.%s", source_id, child_table)
                 raise
+        # monitoring_source_generation and monitoring_source MUST be deleted in
+        # the same outer transaction (no SAVEPOINT isolation between them).
+        # Both have DEFERRABLE INITIALLY DEFERRED FKs pointing at each other;
+        # PostgreSQL checks both constraints only at COMMIT, so both rows must
+        # be absent at that single commit boundary. Deleting monitoring_source_generation
+        # inside its own conn.transaction() SAVEPOINT causes the DELETE to return
+        # 0 rows (confirmed via production diagnostic), leaving the generation row
+        # alive and triggering ForeignKeyViolation when monitoring_source is deleted.
+        await conn.execute(
+            "SELECT set_config('jlmirror.tenant_id', %s, false)", (tenant,)
+        )
+        cur = await conn.execute(
+            "DELETE FROM monitoring.monitoring_source_generation"
+            " WHERE tenant_id=%s AND monitoring_source_id=%s",
+            (tenant, source_id),
+        )
+        logger.info("delete_source %s: deleted %d rows from monitoring.monitoring_source_generation", source_id, cur.rowcount)
         cur = await conn.execute(
             "DELETE FROM monitoring.monitoring_source WHERE tenant_id=%s AND monitoring_source_id=%s",
             (tenant, source_id),
