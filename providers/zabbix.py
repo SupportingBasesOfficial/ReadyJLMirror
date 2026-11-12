@@ -212,7 +212,7 @@ class ZabbixClient:
                 # host_group_refs are the provider-visible group identifiers
                 # the tenant bound as scope anchors; visibility is checked
                 # by groupid membership in the domain worker.
-                "filter": {"groupid": list(host_group_refs)},
+                "filter": {"name": list(host_group_refs)},
             },
             credential.api_token,
         )
