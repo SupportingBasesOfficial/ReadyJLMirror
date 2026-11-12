@@ -639,83 +639,18 @@ async def delete_source(
             delete_binding_token(cred_ref)
         except CredentialResolutionError:
             pass  # missing credential is fine when deleting
-        import psycopg.errors as _pge
-        # All FKs in the monitoring schema are DEFERRABLE INITIALLY DEFERRED —
-        # violations fire at COMMIT, not per-statement. We must delete every row
-        # that references this source (or its generations/sync ops) before commit.
-        # conn.transaction() creates a SAVEPOINT so a missing table in this
-        # environment can be caught and skipped without aborting the outer txn.
-        #
-        # GUC re-assert: session-level set_config in db_tenant_connection is
-        # authoritative, but we re-assert inside each savepoint to defend against
-        # any pool/driver behaviour that might clear it between statements.
-        for child_table in (
-            # Tables that reference monitoring_source or monitoring_source_generation
-            # (correct schema names — no DB-level CASCADE on these FKs).
-            "monitoring_sync_operation",
-            "monitoring_source_create_idempotency",
-            "monitoring_source_validation_evidence",
-            "monitoring_resource",
-            "monitoring_problem_transition",
-            "monitoring_problem",
-            "monitoring_problem_provider_binding",
-            "monitoring_trigger_binding",
-            "monitoring_problem_state_runtime_admission",
-            "health_projection_transition",
-            "health_projection",
-            # Legacy names that may exist in older deployments.
-            "monitoring_metric_history",
-            "monitoring_metric_snapshot",
-            "monitoring_metric_definition",
-            "monitoring_resource_snapshot",
-            "monitoring_problem_state",
-            # monitoring_source_generation is intentionally NOT here —
-            # see below for why it must be deleted outside the savepoint loop.
-        ):
-            try:
-                async with conn.transaction():
-                    # Re-assert GUC inside each savepoint — defensive against any
-                    # driver/pool reset that might have cleared the session value.
-                    await conn.execute(
-                        "SELECT set_config('jlmirror.tenant_id', %s, false)",
-                        (tenant,),
-                    )
-                    cur = await conn.execute(
-                        f"DELETE FROM monitoring.{child_table}"  # noqa: S608
-                        " WHERE tenant_id=%s AND monitoring_source_id=%s",
-                        (tenant, source_id),
-                    )
-                    logger.info(
-                        "delete_source %s: deleted %d rows from monitoring.%s",
-                        source_id, cur.rowcount, child_table,
-                    )
-            except _pge.UndefinedTable:
-                logger.debug("delete_source %s: table monitoring.%s not found, skipped", source_id, child_table)
-            except Exception:
-                logger.exception("delete_source %s: unexpected error deleting from monitoring.%s", source_id, child_table)
-                raise
-        # monitoring_source_generation and monitoring_source MUST be deleted in
-        # the same outer transaction (no SAVEPOINT isolation between them).
-        # Both have DEFERRABLE INITIALLY DEFERRED FKs pointing at each other;
-        # PostgreSQL checks both constraints only at COMMIT, so both rows must
-        # be absent at that single commit boundary. Deleting monitoring_source_generation
-        # inside its own conn.transaction() SAVEPOINT causes the DELETE to return
-        # 0 rows (confirmed via production diagnostic), leaving the generation row
-        # alive and triggering ForeignKeyViolation when monitoring_source is deleted.
-        await conn.execute(
-            "SELECT set_config('jlmirror.tenant_id', %s, false)", (tenant,)
-        )
+        # monitoring.delete_source_cascade runs as jlmirror_owner (SECURITY DEFINER).
+        # It sets session_replication_role = 'replica' locally to bypass the
+        # reject_evidence_mutation row triggers on immutable evidence tables, then
+        # deletes every child table in leaf-to-root order.  All FKs are
+        # DEFERRABLE INITIALLY DEFERRED so the circular source↔generation
+        # constraint is resolved at the single outer COMMIT below.
         cur = await conn.execute(
-            "DELETE FROM monitoring.monitoring_source_generation"
-            " WHERE tenant_id=%s AND monitoring_source_id=%s",
+            "SELECT monitoring.delete_source_cascade(%s, %s)",
             (tenant, source_id),
         )
-        logger.info("delete_source %s: deleted %d rows from monitoring.monitoring_source_generation", source_id, cur.rowcount)
-        cur = await conn.execute(
-            "DELETE FROM monitoring.monitoring_source WHERE tenant_id=%s AND monitoring_source_id=%s",
-            (tenant, source_id),
-        )
-        logger.info("delete_source %s: deleted %d rows from monitoring.monitoring_source", source_id, cur.rowcount)
+        counts = (await cur.fetchone())[0]
+        logger.info("delete_source %s: %s", source_id, counts)
         ctx = getattr(request.state, "jlmirror_context", {}) or {}
         await record_audit_event(
             conn, tenant,
