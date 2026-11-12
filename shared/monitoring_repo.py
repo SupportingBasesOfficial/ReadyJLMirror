@@ -1338,7 +1338,7 @@ class PgMetricDefinitionRepository:
                         failure_class=MetricDefinitionFailureClass.HOST_ASSOCIATION_INVALID,
                     )
 
-        self._conn.execute(
+        cur = self._conn.execute(
             """
             INSERT INTO monitoring.monitoring_metric_definition_snapshot_evidence
                 (tenant_id, metric_definition_snapshot_evidence_id,
@@ -1349,6 +1349,7 @@ class PgMetricDefinitionRepository:
                  item_count, operational_evidence_state, operation_state,
                  failure_class, egress_decision_ref, credential_generation_ref)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, monitoring_sync_operation_id) DO NOTHING
             """,
             (
                 claim.tenant_id, snapshot_evidence_id,
@@ -1366,8 +1367,9 @@ class PgMetricDefinitionRepository:
                 effective.credential_generation_ref,
             ),
         )
+        snapshot_already_existed = cur.rowcount == 0
 
-        if effective.succeeded:
+        if effective.succeeded and not snapshot_already_existed:
             self._persist_item_snapshot(claim, effective, snapshot_evidence_id)
             usage.record_sync_usage(
                 self._conn, tenant_id=claim.tenant_id,
