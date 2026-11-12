@@ -636,33 +636,45 @@ async def delete_source(
             delete_binding_token(cred_ref)
         except CredentialResolutionError:
             pass  # missing credential is fine when deleting
-        # Null out circular FK before cascade-deleting child rows.
-        await conn.execute(
-            "UPDATE monitoring.monitoring_source SET active_source_instance_generation = NULL"
-            " WHERE tenant_id=%s AND monitoring_source_id=%s",
-            (tenant, source_id),
-        )
-        # Delete all child data tied to this source (no DB-level CASCADE on most FKs).
+        import psycopg.errors as _pge
+        # All FKs in the monitoring schema are DEFERRABLE INITIALLY DEFERRED —
+        # violations fire at COMMIT, not per-statement. We must delete every row
+        # that references this source (or its generations/sync ops) before commit.
+        # SAVEPOINT per table so a missing table in this environment is skipped
+        # without aborting the transaction.
         for child_table in (
+            # Tables that reference monitoring_source or monitoring_source_generation
+            # (correct schema names — no DB-level CASCADE on these FKs).
+            "monitoring_sync_operation",
+            "monitoring_source_create_idempotency",
+            "monitoring_source_validation_evidence",
+            "monitoring_resource",
+            "monitoring_problem_transition",
+            "monitoring_problem",
+            "monitoring_problem_provider_binding",
+            "monitoring_trigger_binding",
+            "monitoring_problem_state_runtime_admission",
+            "health_projection_transition",
+            "health_projection",
+            # Legacy names that may exist in older deployments.
             "monitoring_metric_history",
             "monitoring_metric_snapshot",
             "monitoring_metric_definition",
             "monitoring_resource_snapshot",
-            "monitoring_resource",
-            "monitoring_problem_transition",
             "monitoring_problem_state",
-            "monitoring_health_projection_transition",
-            "monitoring_health_projection",
-            "monitoring_sync_operation",
-            "monitoring_source_validation_evidence",
-            "monitoring_source_create_idempotency",
+            # Must be last: source generation itself references monitoring_source.
             "monitoring_source_generation",
         ):
-            await conn.execute(
-                f"DELETE FROM monitoring.{child_table}"  # noqa: S608 — table names are literals
-                " WHERE tenant_id=%s AND monitoring_source_id=%s",
-                (tenant, source_id),
-            )
+            await conn.execute("SAVEPOINT del_child")
+            try:
+                await conn.execute(
+                    f"DELETE FROM monitoring.{child_table}"  # noqa: S608
+                    " WHERE tenant_id=%s AND monitoring_source_id=%s",
+                    (tenant, source_id),
+                )
+                await conn.execute("RELEASE SAVEPOINT del_child")
+            except _pge.UndefinedTable:
+                await conn.execute("ROLLBACK TO SAVEPOINT del_child")
         await conn.execute(
             "DELETE FROM monitoring.monitoring_source WHERE tenant_id=%s AND monitoring_source_id=%s",
             (tenant, source_id),
