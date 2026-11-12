@@ -640,8 +640,8 @@ async def delete_source(
         # All FKs in the monitoring schema are DEFERRABLE INITIALLY DEFERRED —
         # violations fire at COMMIT, not per-statement. We must delete every row
         # that references this source (or its generations/sync ops) before commit.
-        # SAVEPOINT per table so a missing table in this environment is skipped
-        # without aborting the transaction.
+        # conn.transaction() creates a SAVEPOINT so a missing table in this
+        # environment can be caught and skipped without aborting the outer txn.
         for child_table in (
             # Tables that reference monitoring_source or monitoring_source_generation
             # (correct schema names — no DB-level CASCADE on these FKs).
@@ -665,16 +665,15 @@ async def delete_source(
             # Must be last: source generation itself references monitoring_source.
             "monitoring_source_generation",
         ):
-            await conn.execute("SAVEPOINT del_child")
             try:
-                await conn.execute(
-                    f"DELETE FROM monitoring.{child_table}"  # noqa: S608
-                    " WHERE tenant_id=%s AND monitoring_source_id=%s",
-                    (tenant, source_id),
-                )
-                await conn.execute("RELEASE SAVEPOINT del_child")
+                async with conn.transaction():
+                    await conn.execute(
+                        f"DELETE FROM monitoring.{child_table}"  # noqa: S608
+                        " WHERE tenant_id=%s AND monitoring_source_id=%s",
+                        (tenant, source_id),
+                    )
             except _pge.UndefinedTable:
-                await conn.execute("ROLLBACK TO SAVEPOINT del_child")
+                pass  # table doesn't exist in this environment
         await conn.execute(
             "DELETE FROM monitoring.monitoring_source WHERE tenant_id=%s AND monitoring_source_id=%s",
             (tenant, source_id),
