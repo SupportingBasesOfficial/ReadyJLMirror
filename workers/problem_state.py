@@ -167,11 +167,12 @@ def _process_pending(conn: psycopg.Connection) -> int:
                 conn.commit()
             processed += 1
             logger.info(
-                "problem state %s/%s -> %s/%s problems=%s recoveries=%s",
+                "problem state %s/%s -> %s/%s problems=%s recoveries=%s%s",
                 tenant_id, op_id,
                 persisted.operation_state.value,
                 persisted.operational_evidence_state.value,
                 len(result.problems), len(recoveries),
+                f" failure_class={result.failure_class.value}" if result.failure_class else "",
             )
         except ValueError as exc:
             conn.rollback()
