@@ -855,7 +855,7 @@ class PgHostInventoryRepository:
         )
         snapshot_already_existed = cur.rowcount == 0
 
-        if result.succeeded and not snapshot_already_existed:
+        if result.succeeded:
             self._persist_snapshot(claim, result, snapshot_evidence_id)
             usage.record_sync_usage(
                 self._conn, tenant_id=claim.tenant_id,
