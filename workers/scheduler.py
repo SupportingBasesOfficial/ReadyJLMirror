@@ -47,12 +47,17 @@ _HISTORY_WINDOW_SECONDS = int(
 # cadence, while a deterministically-broken source costs at most one
 # probe per cadence instead of churning on every poll kind.
 _SCHEDULABLE = {
+    # problem_state_sync must only run on 'current' sources — alert evaluation
+    # must never see incomplete scope evidence.
     "problem_state_sync": ("current",),
-    "current_state_poll": ("current", "stale", "reconciliation_required"),
+    # All other kinds treat 'incomplete' the same as 'stale': a successful
+    # pass is what restores evidence to 'current', so they must be schedulable
+    # even when the source is in an incomplete state.
+    "current_state_poll": ("current", "stale", "incomplete", "reconciliation_required"),
     "host_inventory_sync": (
-        "current", "stale", "reconciliation_required", "unavailable"),
-    "metric_definition_poll": ("current", "stale", "reconciliation_required"),
-    "metric_history_sync": ("current", "stale", "reconciliation_required"),
+        "current", "stale", "incomplete", "reconciliation_required", "unavailable"),
+    "metric_definition_poll": ("current", "stale", "incomplete", "reconciliation_required"),
+    "metric_history_sync": ("current", "stale", "incomplete", "reconciliation_required"),
 }
 
 # A pending op older than this stops deduplicating new enqueues —
