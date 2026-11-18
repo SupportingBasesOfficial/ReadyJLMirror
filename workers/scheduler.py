@@ -64,7 +64,8 @@ SELECT s.tenant_id, s.monitoring_source_id,
        s.active_source_instance_generation, s.configuration_revision,
        s.scope_revision,
        s.item_definition_poll_epoch, s.item_definition_poll_generation,
-       s.current_state_poll_epoch, s.current_state_poll_generation
+       s.current_state_poll_epoch, s.current_state_poll_generation,
+       s.problem_poll_epoch, s.problem_poll_generation
   FROM monitoring.monitoring_source s
  WHERE s.operational_evidence_state = ANY(%s)
    AND NOT EXISTS (
@@ -91,8 +92,9 @@ INSERT INTO monitoring.monitoring_sync_operation
      scope_revision, responsibility_kind, state,
      item_definition_poll_epoch, item_definition_poll_generation,
      current_state_poll_epoch, current_state_poll_generation,
-     history_time_from, history_time_till)
-VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s)
+     history_time_from, history_time_till,
+     problem_poll_epoch, problem_poll_generation)
+VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 
@@ -105,7 +107,8 @@ def _enqueue_due(conn: psycopg.Connection, kind: str, cadence: int) -> int:
     rows = cur.fetchall()
     now = int(datetime.now(timezone.utc).timestamp())
     for (tenant_id, source_id, gen, cfg_rev, scope_rev,
-         item_epoch, item_gen, cur_epoch, cur_gen) in rows:
+         item_epoch, item_gen, cur_epoch, cur_gen,
+         prob_epoch, prob_gen) in rows:
         # Two schedulers must not double-enqueue the same due slot —
         # advisory xact lock per (tenant, source, kind).
         cur = conn.execute(
@@ -115,17 +118,20 @@ def _enqueue_due(conn: psycopg.Connection, kind: str, cadence: int) -> int:
             continue
         op_id = f"mon-op_{secrets.token_urlsafe(18)}"
         hist_from = hist_till = None
-        item_e = item_g = cur_e = cur_g = None
+        item_e = item_g = cur_e = cur_g = prob_e = prob_g = None
         if kind == "metric_definition_poll":
             item_e, item_g = item_epoch, (item_gen or 0) + 1
         elif kind == "current_state_poll":
             cur_e, cur_g = cur_epoch, (cur_gen or 0) + 1
         elif kind == "metric_history_sync":
             hist_from, hist_till = now - _HISTORY_WINDOW_SECONDS, now
+        elif kind == "problem_state_sync":
+            prob_e, prob_g = prob_epoch, (prob_gen or 0) + 1
         conn.execute(
             _INSERT_SQL,
             (tenant_id, op_id, source_id, gen, cfg_rev, scope_rev, kind,
-             item_e, item_g, cur_e, cur_g, hist_from, hist_till),
+             item_e, item_g, cur_e, cur_g, hist_from, hist_till,
+             prob_e, prob_g),
         )
         logger.info("scheduled %s for %s/%s", kind, tenant_id, source_id)
     return len(rows)

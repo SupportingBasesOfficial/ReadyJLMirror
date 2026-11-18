@@ -3137,7 +3137,7 @@ class PgProblemStateRepository:
             """
             SELECT o.monitoring_source_id, o.source_instance_generation,
                    o.configuration_revision, o.scope_revision,
-                   s.problem_poll_epoch, s.problem_poll_generation,
+                   o.problem_poll_epoch, o.problem_poll_generation,
                    s.provider_scope_tenant_binding_id,
                    g.provider_instance_ref, g.provider_base_url,
                    s.credential_binding_ref
@@ -3154,9 +3154,13 @@ class PgProblemStateRepository:
                AND o.state = 'pending'
                AND o.claim_token IS NULL
                AND o.responsibility_kind = 'problem_state_sync'
+               AND o.problem_poll_epoch IS NOT NULL
+               AND o.problem_poll_generation IS NOT NULL
                AND s.active_source_instance_generation = o.source_instance_generation
                AND s.configuration_revision = o.configuration_revision
                AND s.scope_revision = o.scope_revision
+               AND s.problem_poll_epoch = o.problem_poll_epoch
+               AND s.problem_poll_generation = o.problem_poll_generation - 1
                AND s.operational_evidence_state = 'current'
              FOR UPDATE OF o, s
             """,
@@ -3169,7 +3173,7 @@ class PgProblemStateRepository:
 
         (source_id, generation, config_rev, scope_rev, epoch, gen,
          _binding, provider_instance_ref, base_url, cred_ref) = row
-        poll_gen = gen + 1
+        poll_gen = gen  # already source.problem_poll_generation + 1
 
         # Fail-closed recovery admission must exist for this epoch
         cur = self._conn.execute(
@@ -3198,14 +3202,12 @@ class PgProblemStateRepository:
             """
             UPDATE monitoring.monitoring_sync_operation
                SET state = 'running', claim_token = %s,
-                   started_at = transaction_timestamp(),
-                   problem_poll_epoch = %s, problem_poll_generation = %s
+                   started_at = transaction_timestamp()
              WHERE tenant_id = %s
                AND monitoring_sync_operation_id = %s
                AND state = 'pending' AND claim_token IS NULL
             """,
-            (claim_token, epoch, poll_gen,
-             self._tenant_id, monitoring_sync_operation_id),
+            (claim_token, self._tenant_id, monitoring_sync_operation_id),
         )
         if cur.rowcount != 1:
             self._conn.rollback()
@@ -3772,7 +3774,7 @@ async def enqueue_problem_state_sync(
     cur = await conn.execute(
         """
         SELECT active_source_instance_generation, configuration_revision,
-               scope_revision
+               scope_revision, problem_poll_epoch, problem_poll_generation
           FROM monitoring.monitoring_source
          WHERE tenant_id = %s AND monitoring_source_id = %s
            AND operational_evidence_state = 'current'
@@ -3782,16 +3784,19 @@ async def enqueue_problem_state_sync(
     row = await cur.fetchone()
     if row is None:
         return None
+    generation, config_rev, scope_rev, prob_epoch, prob_gen = row
     op_id = _opaque("mon-op")
     await conn.execute(
         """
         INSERT INTO monitoring.monitoring_sync_operation
             (tenant_id, monitoring_sync_operation_id, monitoring_source_id,
              source_instance_generation, responsibility_kind, state,
-             configuration_revision, scope_revision)
-        VALUES (%s, %s, %s, %s, 'problem_state_sync', 'pending', %s, %s)
+             configuration_revision, scope_revision,
+             problem_poll_epoch, problem_poll_generation)
+        VALUES (%s, %s, %s, %s, 'problem_state_sync', 'pending', %s, %s, %s, %s)
         """,
-        (tenant_id, op_id, source_id, row[0], row[1], row[2]),
+        (tenant_id, op_id, source_id, generation, config_rev, scope_rev,
+         prob_epoch, (prob_gen or 0) + 1),
     )
     await conn.commit()
     return op_id
