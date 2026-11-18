@@ -143,6 +143,8 @@ def _process_pending(conn: psycopg.Connection) -> int:
             n = _enqueue_due(conn, kind, cadence)
             if n:
                 conn.commit()
+            else:
+                conn.rollback()
             enqueued += n
         except Exception:
             logger.exception("scheduler: failed to enqueue %s", kind)
