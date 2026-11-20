@@ -413,9 +413,12 @@ class ZabbixClient:
                 for iface in item.get("interfaces") or []
             )
             # Zabbix >= 7.0 returns `hostgroups`; older returns `groups`.
+            # ref must be the group name — the domain scope-evidence check
+            # intersects host.groups[*].ref with configured host_group_refs
+            # (which are names). groupid is kept via the name field only.
             groups = tuple(
                 ZabbixNamedRefEvidence(
-                    ref=str(g["groupid"]), name=g.get("name")
+                    ref=g.get("name") or str(g["groupid"]), name=g.get("name")
                 )
                 for g in (item.get("hostgroups") or item.get("groups") or [])
             )
