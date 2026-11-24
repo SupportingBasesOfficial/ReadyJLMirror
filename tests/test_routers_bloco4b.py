@@ -318,10 +318,10 @@ async def test_incident_response_app_errors_list(api_client):
     r = await api_client.get(
         "/api/v1/alerting/tenants/tenant:dev/application-error-events"
     )
-    assert r.status_code in (200, 403)
-    if r.status_code == 200:
-        data = r.json()
-        assert isinstance(data.get("events", data), list)
+    # tenant_id present in context → _authoritative_tenant never 403s
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data.get("events", data), list)
 
 
 # SSRF and rate-limiter unit tests moved to test_ssrf_ratelimit_unit.py

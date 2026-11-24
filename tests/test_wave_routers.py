@@ -489,10 +489,10 @@ async def test_mfa_status(api_client):
 async def test_executive_overview(admin_client):
     """GET /api/v1/executive/overview returns platform KPIs."""
     r = await admin_client.get("/api/v1/executive/overview")
-    assert r.status_code in (200, 403)
-    if r.status_code == 200:
-        body = r.json()
-        assert any(k in body for k in ("total_tenants", "alerts", "incidents", "tenants"))
+    # Platform admin (is_platform_admin=True) is never rejected by _get_context
+    assert r.status_code == 200
+    body = r.json()
+    assert any(k in body for k in ("total_tenants", "alerts", "incidents", "tenants"))
 
 
 # ===========================================================================
@@ -503,14 +503,14 @@ async def test_executive_overview(admin_client):
 async def test_client_portal_overview(api_client):
     """GET /api/v1/portal/overview returns 200, 403, or 404."""
     r = await api_client.get("/api/v1/portal/overview")
-    assert r.status_code in (200, 403, 404)
-    if r.status_code == 200:
-        assert isinstance(r.json(), dict)
+    # _require_tenant succeeds (tenant_id in ctx) → never 403
+    assert r.status_code == 200
+    assert isinstance(r.json(), dict)
 
 
 async def test_client_portal_alerts(api_client):
     """GET /api/v1/portal/alerts returns a list or 403."""
     r = await api_client.get("/api/v1/portal/alerts")
-    assert r.status_code in (200, 403, 404)
-    if r.status_code == 200:
-        assert isinstance(r.json(), list)
+    # _require_tenant succeeds (tenant_id in ctx) → never 403
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)

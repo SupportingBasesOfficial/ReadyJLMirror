@@ -186,10 +186,9 @@ async def test_automation_schedules_list(api_client):
 
 async def test_msp_overview_ok(api_client):
     r = await api_client.get("/api/v1/msp/overview")
-    # May return 200 (empty list or dict) or 403 if caller isn't MSP admin
-    assert r.status_code in (200, 403)
-    if r.status_code == 200:
-        assert isinstance(r.json(), (list, dict))
+    # Non-MSP tenant gets 200 with empty tenants list — msp_overview never 403s
+    assert r.status_code == 200
+    assert isinstance(r.json(), (list, dict))
 
 
 async def test_msp_clients_create_requires_msp_admin(api_client):
@@ -208,7 +207,8 @@ async def test_msp_clients_bad_slug(api_client):
         "/api/v1/msp/clients",
         json={"client_name": "Bad Slug", "client_slug": "Bad Slug!"},
     )
-    assert r.status_code in (422, 403)
+    # Non-MSP user is rejected before slug validation reaches the validator
+    assert r.status_code == 403
 
 
 # ===========================================================================
@@ -456,3 +456,47 @@ async def test_onboarding_self_managed_slug_collision(api_client):
         },
     )
     assert r2.status_code == 409
+
+
+async def test_register_empty_name(api_client):
+    """POST /register with blank tenant_name → 422."""
+    r = await api_client.post(
+        "/api/v1/onboarding/register",
+        json={"tenant_name": ""},
+    )
+    assert r.status_code == 422
+
+
+async def test_register_name_too_long(api_client):
+    """POST /register with name > 120 chars → 422."""
+    r = await api_client.post(
+        "/api/v1/onboarding/register",
+        json={"tenant_name": "x" * 121},
+    )
+    assert r.status_code == 422
+
+
+async def test_register_creates_workspace(api_client):
+    """POST /register happy path → 201 with tenant_id and role."""
+    r = await api_client.post(
+        "/api/v1/onboarding/register",
+        json={"tenant_name": f"Test Workspace {uuid.uuid4().hex[:8]}"},
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert "tenant_id" in data
+    assert "membership_id" in data
+    assert data["role"] == "admin"
+
+
+# ===========================================================================
+# msp clients list  — GET /api/v1/msp/clients
+# ===========================================================================
+
+async def test_msp_clients_list(api_client):
+    """GET /msp/clients returns dict with 'clients' key (empty for non-MSP tenant)."""
+    r = await api_client.get("/api/v1/msp/clients")
+    assert r.status_code == 200
+    data = r.json()
+    assert "clients" in data
+    assert isinstance(data["clients"], list)
