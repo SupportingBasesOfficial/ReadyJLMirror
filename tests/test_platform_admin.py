@@ -415,3 +415,59 @@ def test_service_provider_transfer_target_no_tenants(api_client):
         },
     )
     assert r.status_code == 404
+
+
+# ===========================================================================
+# GET /api/v1/platform/teia
+# ===========================================================================
+
+
+def test_platform_teia_shape(api_client):
+    """Endpoint returns a list of tenant objects with required keys."""
+    r = api_client.get("/api/v1/platform/teia")
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, list)
+    if data:
+        t = data[0]
+        assert "tenant_id" in t
+        assert "display_name" in t
+        assert "state" in t
+        assert "member_count" in t
+        assert "source_count" in t
+        assert isinstance(t["members"], list)
+
+
+def test_platform_teia_member_shape(api_client):
+    """Members array items carry expected keys."""
+    r = api_client.get("/api/v1/platform/teia")
+    assert r.status_code == 200
+    data = r.json()
+    for tenant in data:
+        for m in tenant["members"]:
+            assert "principal_id" in m
+            assert "role" in m
+            assert "display_name" in m
+
+
+def test_platform_teia_no_tenant_ctx_forbidden(db_available):
+    """Request without platform-admin context is rejected."""
+    import api.main
+
+    non_admin_ctx = {
+        "principal_id": "principal.e2e-dev-admin",
+        "session_digest": "test",
+        "session_generation": "gen",
+        "tenant_id": "tenant:dev",
+        "correlation_id": None,
+    }
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch("api.main._verify_bff_context", return_value=non_admin_ctx)
+        )
+        stack.enter_context(
+            patch("api.main._session_current", new=AsyncMock(return_value=True))
+        )
+        with TestClient(api.main.app) as client:
+            r = client.get("/api/v1/platform/teia")
+    assert r.status_code == 403

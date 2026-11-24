@@ -47,6 +47,7 @@ import { MSPOverviewPage } from "@/pages/MSPOverviewPage";
 import { UsersAdminPage } from "@/pages/UsersAdminPage";
 import { PlatformAdminPage } from "@/pages/PlatformAdminPage";
 import { TeiaPage } from "@/pages/TeiaPage";
+import { PlatformTeiaPage } from "@/pages/PlatformTeiaPage";
 import { StatusPageAdminPage } from "@/pages/StatusPageAdminPage";
 import { BugReportsPage } from "@/pages/BugReportsPage";
 import { ClientCompaniesPage } from "@/pages/ClientCompaniesPage";
@@ -885,7 +886,10 @@ export function Shell() {
           {view === "users" && <UsersAdminPage tenantId={s.tenant_id!} />}
           {view === "bugs" && <BugReportsPage tenantId={s.tenant_id!} />}
           {view === "platform-admin" && <PlatformAdminPage tenantId={s.tenant_id!} />}
-          {view === "teia" && <TeiaPage tenantId={s.tenant_id!} />}
+          {view === "teia" && (s.is_platform_admin
+            ? <PlatformTeiaPage />
+            : <TeiaPage tenantId={s.tenant_id!} />
+          )}
           {view === "companies" && <ClientCompaniesPage tenantId={s.tenant_id!} />}
           {view === "permissions" && <PermissionCatalogPage tenantId={s.tenant_id!} />}
           {view === "account-security" && <AccountSecurityPage tenantId={s.tenant_id!} />}

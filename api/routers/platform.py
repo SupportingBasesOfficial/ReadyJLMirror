@@ -8,6 +8,7 @@ is the privilege; all mutations emit durable audit evidence.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 
 import httpx
@@ -909,6 +910,89 @@ async def create_tenant(request: Request, body: TenantCreate) -> dict:
                     "organization_id": body.organization_id})
         await conn.commit()
     return {"tenant_id": body.tenant_id, "display_name": body.display_name}
+
+
+@router.get("/teia")
+async def platform_teia(request: Request) -> list[dict]:
+    """Cross-tenant relational map for Platform Admin.
+
+    Returns all active/suspended tenants with their members and monitoring
+    source counts. The g1 tables carry no RLS so member data loads in a
+    single query; source counts require a per-tenant GUC and are fetched
+    concurrently.
+    """
+    await _require_platform_admin(request)
+
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            """
+            SELECT t.tenant_id, t.display_name, t.state, t.organization_id,
+                   (SELECT count(*) FROM g1.tenant_memberships tm2
+                    WHERE tm2.tenant_id = t.tenant_id
+                      AND tm2.state = 'active') AS member_count
+              FROM g1.tenants t
+             WHERE t.state IN ('active', 'suspended')
+             ORDER BY t.display_name
+             LIMIT 200
+            """)
+        tenants: list[dict] = [
+            {
+                "tenant_id": r[0],
+                "display_name": r[1],
+                "state": r[2],
+                "organization_id": r[3],
+                "member_count": int(r[4]),
+                "source_count": 0,
+                "members": [],
+            }
+            for r in await cur.fetchall()
+        ]
+
+        if tenants:
+            tids = [t["tenant_id"] for t in tenants]
+            placeholders = ", ".join(["%s"] * len(tids))
+            cur = await conn.execute(
+                f"""
+                SELECT tm.tenant_id, tm.principal_id, tm.role,
+                       p.display_name, p.email
+                  FROM g1.tenant_memberships tm
+                  JOIN g1.principals p ON p.principal_id = tm.principal_id
+                 WHERE tm.tenant_id IN ({placeholders})
+                   AND tm.state = 'active'
+                   AND p.active = true
+                 ORDER BY tm.tenant_id, tm.role, p.display_name
+                """,
+                tids,
+            )
+            members_by: dict[str, list[dict]] = {}
+            for r in await cur.fetchall():
+                members_by.setdefault(r[0], []).append(
+                    {"principal_id": r[1], "role": r[2],
+                     "display_name": r[3], "email": r[4]}
+                )
+            for t in tenants:
+                t["members"] = members_by.get(t["tenant_id"], [])
+
+    async def _source_count(tenant_id: str) -> tuple[str, int]:
+        try:
+            async with db_tenant_connection(tenant_id) as conn:
+                cur = await conn.execute(
+                    "SELECT count(*) FROM monitoring.monitoring_source"
+                    " WHERE tenant_id = %s",
+                    (tenant_id,),
+                )
+                row = await cur.fetchone()
+                return tenant_id, int(row[0]) if row else 0
+        except Exception:
+            return tenant_id, 0
+
+    counts = dict(await asyncio.gather(*[
+        _source_count(t["tenant_id"]) for t in tenants
+    ]))
+    for t in tenants:
+        t["source_count"] = counts.get(t["tenant_id"], 0)
+
+    return tenants
 
 
 @router.get("/tenants")
