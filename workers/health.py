@@ -11,12 +11,11 @@ by the DB projection guard.
 from __future__ import annotations
 
 import logging
-import time
 
 import psycopg
 
 from shared import telemetry
-from shared.config import settings
+from workers.base import ResilientWorker
 from shared.monitoring_repo import (
     PgHealthProjectionRepository,
     list_all_monitoring_sources,
@@ -46,20 +45,17 @@ def _process_pending(conn: psycopg.Connection) -> int:
     return projected
 
 
+class _HealthWorker(ResilientWorker):
+    name = "health"
+    default_poll_interval = 15
+
+    def process_pending(self, conn: psycopg.Connection) -> int:
+        return _process_pending(conn)
+
+
 def run_health_worker(poll_interval: int = 15, once: bool = False) -> None:
     """Run the health projection worker loop (blocking)."""
-    dsn = settings.db_dsn
-    logger.info("Starting health projection worker (poll=%ss)", poll_interval)
-    with psycopg.connect(dsn, autocommit=False) as conn:
-        while True:
-            try:
-                n = _process_pending(conn)
-                if once:
-                    logger.info("Projected health for %s resources", n)
-                    return
-            except Exception:
-                logger.exception("health projection tick failed")
-            time.sleep(poll_interval)
+    _HealthWorker().run(poll_interval=poll_interval, once=once)
 
 
 if __name__ == "__main__":

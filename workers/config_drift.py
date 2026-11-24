@@ -33,24 +33,31 @@ def _scan_tenant(conn: psycopg.Connection, tenant_id: str) -> int:
 
     new_drifts = 0
     for (bid, source_id, resource_ref, config_key, expected) in baselines:
-        # Latest metric observation for this resource + key
+        # Resolve current observed value via metric_definition_provider_binding.
+        # config_baseline.source_id (UUID) maps to monitoring_source_id (TEXT);
+        # config_key maps to provider_key (Zabbix item key).
         cur2 = conn.execute(
             """
-            SELECT CAST(value AS TEXT)
-              FROM monitoring.metric_observation
-             WHERE tenant_id = %s AND source_id = %s
-               AND resource_ref = %s AND item_key = %s
-             ORDER BY observed_at DESC
+            SELECT mcs.canonical_value
+              FROM monitoring.metric_definition_provider_binding mpb
+              JOIN monitoring.metric_current_state mcs
+                ON mcs.tenant_id = mpb.tenant_id
+               AND mcs.metric_definition_id = mpb.metric_definition_id
+             WHERE mpb.tenant_id = %s
+               AND mpb.monitoring_source_id = %s
+               AND mpb.monitoring_resource_id = %s
+               AND mpb.provider_key = %s
+               AND mcs.evidence_state = 'current'
              LIMIT 1
             """,
-            (tenant_id, source_id, resource_ref, config_key),
+            (tenant_id, str(source_id), resource_ref, config_key),
         )
         row = cur2.fetchone()
         if row is None:
             continue
 
-        actual = str(row[0]).strip()
-        if actual == str(expected).strip():
+        actual = str(row[0]) if row[0] is not None else ""
+        if actual == expected:
             continue
 
         # Skip if an open event already exists for this baseline

@@ -14,7 +14,6 @@ still sit at the predecessor generation on completion.
 from __future__ import annotations
 
 import logging
-import time
 
 import psycopg
 
@@ -22,8 +21,8 @@ from jlmirror_monitoring.metric_definitions import MetricDefinitionWorker
 from providers.credentials import ChainedCredentialResolver
 from providers.egress import DevOutboundAdmission
 from providers.zabbix import ZabbixClient
-from shared.config import settings
 from shared import telemetry
+from workers.base import ResilientWorker
 from shared.monitoring_repo import (
     PgMetricDefinitionRepository,
     list_all_pending_metric_polls,
@@ -65,20 +64,17 @@ def _process_pending(conn: psycopg.Connection) -> int:
     return processed
 
 
+class _MetricsWorker(ResilientWorker):
+    name = "metrics"
+    default_poll_interval = 10
+
+    def process_pending(self, conn: psycopg.Connection) -> int:
+        return _process_pending(conn)
+
+
 def run_metrics_worker(poll_interval: int = 10, once: bool = False) -> None:
     """Run the metric definition worker loop (blocking)."""
-    dsn = settings.db_dsn
-    logger.info("Starting metric definition worker (poll=%ss)", poll_interval)
-    with psycopg.connect(dsn, autocommit=False) as conn:
-        while True:
-            try:
-                n = _process_pending(conn)
-                if once:
-                    logger.info("Processed %s pending metric polls", n)
-                    return
-            except Exception:
-                logger.exception("metrics worker tick failed")
-            time.sleep(poll_interval)
+    _MetricsWorker().run(poll_interval=poll_interval, once=once)
 
 
 if __name__ == "__main__":

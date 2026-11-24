@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import secrets
-import time
 from typing import Sequence
 
 import psycopg
@@ -34,8 +33,8 @@ from jlmirror_monitoring.validation_worker import (
 from providers.credentials import ChainedCredentialResolver
 from providers.egress import DevOutboundAdmission
 from providers.zabbix import ZabbixClient
-from shared.config import settings
 from shared import telemetry
+from workers.base import ResilientWorker
 from shared.monitoring_repo import (
     PgMetricHistoryRepository,
     list_all_pending_history_syncs,
@@ -137,20 +136,17 @@ def _process_pending(conn: psycopg.Connection) -> int:
     return processed
 
 
+class _HistoryWorker(ResilientWorker):
+    name = "history"
+    default_poll_interval = 30
+
+    def process_pending(self, conn: psycopg.Connection) -> int:
+        return _process_pending(conn)
+
+
 def run_history_worker(poll_interval: int = 30, once: bool = False) -> None:
     """Run the metric history worker loop (blocking)."""
-    dsn = settings.db_dsn
-    logger.info("Starting metric history worker (poll=%ss)", poll_interval)
-    with psycopg.connect(dsn, autocommit=False) as conn:
-        while True:
-            try:
-                n = _process_pending(conn)
-                if once:
-                    logger.info("Processed %s pending history syncs", n)
-                    return
-            except Exception:
-                logger.exception("history worker tick failed")
-            time.sleep(poll_interval)
+    _HistoryWorker().run(poll_interval=poll_interval, once=once)
 
 
 if __name__ == "__main__":

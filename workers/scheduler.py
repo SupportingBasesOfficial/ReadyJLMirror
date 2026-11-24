@@ -18,10 +18,11 @@ from __future__ import annotations
 import logging
 import os
 import secrets
-import time
 from datetime import datetime, timezone
 
 import psycopg
+
+from workers.base import ResilientWorker
 
 logger = logging.getLogger("workers.scheduler")
 
@@ -163,16 +164,16 @@ def _process_pending(conn: psycopg.Connection) -> int:
     return enqueued
 
 
+class _SchedulerWorker(ResilientWorker):
+    name = "scheduler"
+    default_poll_interval = 30
+
+    def process_pending(self, conn: psycopg.Connection) -> int:
+        return _process_pending(conn)
+
+
 def run_scheduler_worker(poll_interval: int = 30, once: bool = False) -> None:
-    from shared.config import settings
-    with psycopg.connect(settings.db_dsn, autocommit=False,
-                         connect_timeout=10) as conn:
-        while True:
-            n = _process_pending(conn)
-            if once:
-                logger.info("scheduled %s ops", n)
-                return
-            time.sleep(poll_interval)
+    _SchedulerWorker().run(poll_interval=poll_interval, once=once)
 
 
 if __name__ == "__main__":
