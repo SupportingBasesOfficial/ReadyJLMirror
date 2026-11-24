@@ -12,7 +12,9 @@ BEGIN
                    WHERE rolname = 'jlmirror_worker') THEN
         CREATE ROLE jlmirror_worker
             LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT BYPASSRLS
-            PASSWORD 'jlmirror_dev';
+            PASSWORD NULL;
+        -- Deploy runbook must set the real password:
+        -- ALTER ROLE jlmirror_worker PASSWORD '<worker_password from OpenBao>';
     END IF;
 END;
 $$;

@@ -10,8 +10,8 @@ here a script performs the same materialization step.
     python -m scripts.bao_sync --seed     # dev: seed + sync
     python -m scripts.bao_sync            # just sync
 
-KV layout: secret/data/jlmirror/{db_password,bff_internal_secret,
-keycloak_client_secret} and secret/data/jlmirror/credentials/
+KV layout: secret/data/jlmirror/{db_password,db_password_jlmirror_worker,
+bff_internal_secret,keycloak_client_secret} and secret/data/jlmirror/credentials/
 {binding-ref}_token per provider binding ref.
 
 Env: BAO_ADDR (default http://localhost:8200), BAO_TOKEN.
@@ -36,6 +36,7 @@ OUT = Path(os.environ.get("SECRETS_DIR", "secrets"))
 SEED = {
     "jlmirror": {
         "db_password": "jlmirror_dev",
+        "db_password_jlmirror_worker": "jlmirror_dev",
         "bff_internal_secret": "dev-internal-secret-change-me",
         "keycloak_client_secret": "dev-bff-secret-change-me",
     },
@@ -93,7 +94,7 @@ def main() -> None:
 
     print(f"syncing from {BAO_ADDR} -> {OUT}/")
     core = _get("jlmirror")
-    for key in ("db_password", "bff_internal_secret",
+    for key in ("db_password", "db_password_jlmirror_worker", "bff_internal_secret",
                 "keycloak_client_secret"):
         if key in core:
             _write(key, core[key])

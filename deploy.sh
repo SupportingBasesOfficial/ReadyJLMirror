@@ -61,6 +61,16 @@ info "Running migrations…"
 $COMPOSE run --rm migrate
 info "Migrations complete."
 
+# ── 3b. Set jlmirror_worker password from secret ────────────────────────────
+info "Setting jlmirror_worker DB role password from secrets/…"
+WORKER_SECRET="./secrets/db_password_jlmirror_worker"
+[ -s "$WORKER_SECRET" ] || error "$WORKER_SECRET is missing or empty. Run setup_prod_secrets.sh first."
+WORKER_PASS=$(cat "$WORKER_SECRET")
+printf "ALTER ROLE jlmirror_worker PASSWORD '%s';\n" "$WORKER_PASS" \
+  | $COMPOSE exec -T db psql -U jlmirror_owner -d jlmirror
+unset WORKER_PASS
+info "Worker role password set."
+
 # ── 4. Initialize OpenBao (skipped if already initialized) ───────────────────
 info "Starting OpenBao…"
 $COMPOSE --profile secrets up -d openbao
