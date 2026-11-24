@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from shared import access
 from shared.audit import record_audit_event
 from shared.db import db_connection, db_tenant_connection
 
@@ -34,14 +35,17 @@ _DEFAULTS: dict[str, Any] = {
 }
 
 
-def _tenant_ctx(request: Request) -> tuple[str, str]:
-    ctx = getattr(request.state, "jlmirror_context", None)
-    if ctx is None or not ctx.get("tenant_id"):
-        raise HTTPException(status_code=403, detail="no tenant authority")
-    role = ctx.get("role", "")
-    if role not in ("admin", "platform_admin_principal"):
+async def _require_admin(request: Request) -> tuple[str, str]:
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
+    principal_id = ctx.get("principal_id")
+    tenant_id = ctx.get("tenant_id")
+    if not principal_id or not tenant_id:
+        raise HTTPException(status_code=403, detail="tenant context required")
+    async with db_connection() as conn:
+        perms = await access.effective_permissions(conn, principal_id, tenant_id)
+    if "tenant:admin" not in perms:
         raise HTTPException(status_code=403, detail="tenant:admin required")
-    return ctx["tenant_id"], ctx.get("principal_id", "unknown")
+    return tenant_id, principal_id
 
 
 def _mask(row: dict) -> dict:
@@ -52,8 +56,8 @@ def _mask(row: dict) -> dict:
 
 @router.get("")
 async def get_settings(request: Request) -> dict:
-    tenant, _ = _tenant_ctx(request)
-    async with db_connection() as conn:
+    tenant, _ = await _require_admin(request)
+    async with db_tenant_connection(tenant) as conn:
         cur = await conn.execute(
             "SELECT * FROM g1.tenant_settings WHERE tenant_id = %s",
             (tenant,),
@@ -82,14 +86,14 @@ class SettingsUpdate(BaseModel):
 
 @router.put("")
 async def update_settings(request: Request, body: SettingsUpdate) -> dict:
-    tenant, actor = _tenant_ctx(request)
+    tenant, actor = await _require_admin(request)
     data = body.model_dump(exclude_none=True)
     if not data:
         raise HTTPException(status_code=400, detail="no fields to update")
 
     set_clause = ", ".join(f"{k} = %s" for k in data)
 
-    async with db_tenant_connection("platform") as conn:
+    async with db_tenant_connection(tenant) as conn:
         await conn.execute(
             f"""
             INSERT INTO g1.tenant_settings (tenant_id, {", ".join(data)}, updated_by)
@@ -117,8 +121,8 @@ class SmtpTestBody(BaseModel):
 
 @router.post("/smtp/test")
 async def test_smtp(request: Request, body: SmtpTestBody) -> dict:
-    tenant, _ = _tenant_ctx(request)
-    async with db_connection() as conn:
+    tenant, _ = await _require_admin(request)
+    async with db_tenant_connection(tenant) as conn:
         cur = await conn.execute(
             "SELECT smtp_host, smtp_port, smtp_user, smtp_password, "
             "smtp_from_name, smtp_from_email, smtp_tls "

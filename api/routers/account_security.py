@@ -1,5 +1,6 @@
 import base64
 import hmac
+import json
 import secrets
 import struct
 import time
@@ -12,6 +13,11 @@ from pydantic import BaseModel
 from shared.keycloak_admin import _REALM_BASE, _admin_token
 
 router = APIRouter(prefix="/api/v1/account", tags=["account-security"])
+
+# In-memory TOTP setup state: principal_id → (secret, expires_at)
+# Single-instance safe for pilot; replace with Redis/Vault for multi-instance.
+_MFA_PENDING: dict[str, tuple[str, float]] = {}
+_MFA_SETUP_TTL = 300  # 5 minutes
 
 
 def _ctx(request: Request) -> dict:
@@ -130,7 +136,7 @@ async def mfa_status(request: Request) -> dict:
 
     async with httpx.AsyncClient() as client:
         r = await client.get(
-            f"{_REALM_BASE}/users/{principal_id}",
+            f"{_REALM_BASE}/users/{principal_id}/credentials",
             headers=headers,
             timeout=10,
         )
@@ -138,8 +144,7 @@ async def mfa_status(request: Request) -> dict:
     if r.status_code >= 400:
         raise HTTPException(status_code=502, detail="Keycloak error")
 
-    user = r.json()
-    credentials = user.get("credentials") or []
+    credentials = r.json() if r.status_code < 400 else []
     totp_enabled = any(c.get("type") == "otp" for c in credentials)
     return {"totp_enabled": totp_enabled}
 
@@ -165,14 +170,12 @@ async def mfa_setup_begin(request: Request) -> dict:
     email = user.get("email") or principal_id
 
     secret = _totp_secret()
-    # Store secret temporarily; in production use a short-lived cache/vault entry.
-    # We return it to the frontend for confirmation step.
+    _MFA_PENDING[principal_id] = (secret, time.time() + _MFA_SETUP_TTL)
     uri = f"otpauth://totp/JLMirror:{email}?secret={secret}&issuer=JLMirror&algorithm=SHA1&digits=6&period=30"
-    return {"secret": secret, "uri": uri, "email": email}
+    return {"uri": uri, "email": email}
 
 
 class MFAVerifyBody(BaseModel):
-    secret: str
     code: str
 
 
@@ -181,27 +184,46 @@ async def mfa_verify_and_enable(body: MFAVerifyBody, request: Request) -> dict:
     ctx = _ctx(request)
     principal_id = ctx["principal_id"]
 
+    entry = _MFA_PENDING.get(principal_id)
+    if not entry:
+        raise HTTPException(status_code=400, detail="No MFA setup in progress")
+    secret, expires_at = entry
+    if time.time() > expires_at:
+        _MFA_PENDING.pop(principal_id, None)
+        raise HTTPException(status_code=400, detail="MFA setup expired — restart setup")
+
     t = int(time.time())
     valid = any(
-        _totp(body.secret, t - delta) == body.code.strip()
+        _totp(secret, t - delta) == body.code.strip()
         for delta in (-30, 0, 30)
     )
     if not valid:
         raise HTTPException(status_code=400, detail="Invalid TOTP code")
 
+    _MFA_PENDING.pop(principal_id, None)
+
     token = await _admin_token()
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
-    # Register OTP credential in Keycloak
+    # Register OTP credential in Keycloak via credentials endpoint
     payload = {
         "type": "otp",
-        "value": body.secret,
-        "temporary": False,
         "userLabel": "JLMirror Authenticator",
+        "credentialData": json.dumps({
+            "subType": "totp",
+            "digits": 6,
+            "counter": 0,
+            "period": 30,
+            "algorithm": "HmacSHA1",
+        }),
+        "secretData": json.dumps({
+            "value": secret,
+            "salt": "",
+        }),
     }
     async with httpx.AsyncClient() as client:
-        r = await client.put(
-            f"{_REALM_BASE}/users/{principal_id}/reset-password",
+        r = await client.post(
+            f"{_REALM_BASE}/users/{principal_id}/credentials",
             headers=headers,
             json=payload,
             timeout=10,
