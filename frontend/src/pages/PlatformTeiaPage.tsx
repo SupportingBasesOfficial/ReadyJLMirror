@@ -45,7 +45,7 @@ export function PlatformTeiaPage() {
   const { data, isLoading, isError } = useQuery<TeiaTenant[]>({
     queryKey: ["platform", "teia"],
     queryFn: () =>
-      api.get("/api/v1/platform/teia").then((r: { data: TeiaTenant[] }) => r.data),
+      api.get<TeiaTenant[]>("/api/v1/platform/teia").then((r) => r.data),
     staleTime: 30_000,
   });
 
