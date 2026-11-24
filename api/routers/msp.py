@@ -29,7 +29,7 @@ _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]$")
 
 def _actor(request: Request) -> str:
     ctx = getattr(request.state, "jlmirror_context", None) or {}
-    return ctx.get("principal_id", "dev-operator")
+    return ctx.get("principal_id", "")
 
 
 def _ctx(request: Request) -> dict:

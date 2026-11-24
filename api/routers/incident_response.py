@@ -56,7 +56,7 @@ async def _g11(fn: str, params: tuple):
 
 def _actor(request: Request) -> str:
     ctx = getattr(request.state, "jlmirror_context", None) or {}
-    return ctx.get("principal_id", "dev-operator")
+    return ctx.get("principal_id", "")
 
 
 def _minute_bucket(occurred_at: str) -> str:

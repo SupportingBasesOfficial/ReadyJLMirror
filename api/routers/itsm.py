@@ -37,6 +37,7 @@ _G10_ERRORS = {
     "g10.comment_input_invalid": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "g10.active_alert_required": status.HTTP_409_CONFLICT,
     "g10.current_authority_required": status.HTTP_403_FORBIDDEN,
+    "g10.itsm_adapter_not_configured": status.HTTP_422_UNPROCESSABLE_ENTITY,
 }
 
 
@@ -74,7 +75,7 @@ def _snapshot(tenant: str, actor: str, action: str) -> str:
 
 def _actor(request: Request) -> str:
     ctx = getattr(request.state, "jlmirror_context", None) or {}
-    return ctx.get("principal_id", "dev-operator")
+    return ctx.get("principal_id", "")
 
 
 def _logical(body_id: str | None) -> str:

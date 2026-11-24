@@ -7,7 +7,7 @@ g10 SECURITY DEFINER boundary.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from api.routers.itsm import _INVOKER_ROLE
 from shared.db import db_connection
@@ -18,8 +18,7 @@ router = APIRouter(prefix="/api/v1/executive", tags=["executive"])
 def _get_context(request: Request) -> dict:
     ctx = getattr(request.state, "jlmirror_context", None)
     if ctx is None:
-        return {"tenant_id": "dev-tenant", "is_platform_admin": False,
-                "principal_id": "dev-operator"}
+        raise HTTPException(status_code=403, detail="tenant context required")
     return ctx
 
 

@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/v1/apm", tags=["apm"])
 def _get_context(request: Request) -> dict:
     ctx = getattr(request.state, "jlmirror_context", None)
     if ctx is None:
-        return {"tenant_id": "dev-tenant", "is_platform_admin": False, "principal_id": "dev-operator"}
+        raise HTTPException(status_code=403, detail="tenant context required")
     return ctx
 
 

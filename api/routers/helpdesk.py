@@ -44,7 +44,7 @@ def _require_tenant(request: Request) -> str:
 
 def _actor(request: Request) -> str:
     ctx = getattr(request.state, "jlmirror_context", None) or {}
-    return ctx.get("principal_id", "dev-operator")
+    return ctx.get("principal_id", "")
 
 
 async def _require_operate(request: Request) -> tuple[str, str]:
