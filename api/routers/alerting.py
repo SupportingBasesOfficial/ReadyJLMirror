@@ -288,12 +288,13 @@ async def list_alerts(request: Request,
                        AND s.expires_at   > now()
                      ORDER BY s.expires_at DESC LIMIT 1) AS snoozed_until
               FROM alerting.alert a
-             WHERE (%s::text IS NULL OR a.lifecycle_state = %s)
+             WHERE a.tenant_id = %s
+               AND (%s::text IS NULL OR a.lifecycle_state = %s)
                AND (%s::text IS NULL OR a.monitoring_source_id = %s)
                AND (%s::text IS NULL OR a.source_evidence_summary->>'severity' = %s)
              ORDER BY (a.lifecycle_state = 'resolved'),
                       a.opened_at DESC LIMIT %s
-            """, (lifecycle_state, lifecycle_state,
+            """, (tenant, lifecycle_state, lifecycle_state,
                   source_id, source_id,
                   severity, severity, min(limit, 200)))
         cols = [d.name for d in cur.description]
@@ -314,8 +315,8 @@ async def get_alert(alert_id: str, request: Request,
                    current_source_revision, source_evidence_summary,
                    opened_at, resolved_at
               FROM alerting.alert
-             WHERE alert_id = %s
-            """, (alert_id,))
+             WHERE alert_id = %s AND tenant_id = %s
+            """, (alert_id, tenant))
         row = await cur.fetchone()
         if row is None:
             raise HTTPException(status_code=404,
@@ -338,8 +339,8 @@ async def get_alert(alert_id: str, request: Request,
             SELECT alert_transition_id, from_lifecycle_state,
                    to_lifecycle_state, source_revision, occurred_at
               FROM alerting.alert_transition
-             WHERE alert_id = %s ORDER BY occurred_at
-            """, (alert_id,))
+             WHERE alert_id = %s AND tenant_id = %s ORDER BY occurred_at
+            """, (alert_id, tenant))
         cols = [d.name for d in cur.description]
         transitions = [_ser(dict(zip(cols, r)))
                        for r in await cur.fetchall()]
@@ -361,9 +362,10 @@ async def list_inbox(request: Request,
                    source_revision_current, last_error_class,
                    received_at, completed_at
               FROM alerting.inbox_receipt
-             WHERE (%s::text IS NULL OR state = %s)
+             WHERE tenant_id = %s
+               AND (%s::text IS NULL OR state = %s)
              ORDER BY received_at DESC LIMIT %s
-            """, (state, state, min(limit, 200)))
+            """, (tenant, state, state, min(limit, 200)))
         cols = [d.name for d in cur.description]
         return [_ser(dict(zip(cols, r))) for r in await cur.fetchall()]
 

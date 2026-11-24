@@ -196,8 +196,8 @@ async def mark_invoice_paid(request: Request, invoice_id: str) -> dict:
         await conn.execute(
             "UPDATE g1.billing_invoice "
             "SET status='paid', paid_at=now(), updated_at=now() "
-            "WHERE invoice_id=%s",
-            (invoice_id,),
+            "WHERE invoice_id=%s AND tenant_id=%s",
+            (invoice_id, tenant_id),
         )
         await conn.commit()
     return {"invoice_id": invoice_id, "status": "paid"}
@@ -222,8 +222,8 @@ async def void_invoice(request: Request, invoice_id: str) -> dict:
         await conn.execute(
             "UPDATE g1.billing_invoice "
             "SET status='void', updated_at=now() "
-            "WHERE invoice_id=%s",
-            (invoice_id,),
+            "WHERE invoice_id=%s AND tenant_id=%s",
+            (invoice_id, tenant_id),
         )
         await conn.commit()
     return {"invoice_id": invoice_id, "status": "void"}

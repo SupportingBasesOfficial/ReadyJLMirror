@@ -51,7 +51,7 @@ async def create_intent(alert_id: str, request: Request,
     NEVER mutates alert lifecycle/action ownership."""
     tenant = _authoritative_tenant(request, tenant_id)
     ctx = getattr(request.state, "jlmirror_context", None) or {}
-    actor = ctx.get("principal_id", "dev-operator")
+    actor = ctx.get("principal_id", "")
     if body.reason not in _REASONS:
         raise HTTPException(status_code=422,
                             detail=f"reason one of {_REASONS}")
@@ -142,8 +142,9 @@ async def list_notifications(request: Request,
               LEFT JOIN notification.notification_projection p
                 ON p.tenant_id = i.tenant_id
                AND p.notification_intent_id = i.notification_intent_id
+             WHERE i.tenant_id = %s
              ORDER BY i.created_at DESC LIMIT %s
-            """, (min(limit, 200),))
+            """, (tenant, min(limit, 200)))
         cols = [d.name for d in cur.description]
         rows = []
         for r in await cur.fetchall():
@@ -167,8 +168,8 @@ async def notification_detail(intent_id: str, request: Request,
                    destination_ref, channel_class,
                    visibility_requirement_id, created_at
               FROM notification.notification_intent
-             WHERE notification_intent_id=%s
-            """, (intent_id,))
+             WHERE notification_intent_id=%s AND tenant_id=%s
+            """, (intent_id, tenant))
         row = await cur.fetchone()
         if row is None:
             raise HTTPException(status_code=404,
