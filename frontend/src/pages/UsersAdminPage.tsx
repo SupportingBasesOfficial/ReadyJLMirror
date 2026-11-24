@@ -119,7 +119,7 @@ function InviteModal({
   const invite = useMutation({
     mutationFn: () =>
       api.post<{ principal_id: string; temp_password: string }>(
-        "/api/admin/users",
+        "/api/v1/admin/users",
         { email: email.trim(), first_name: firstName.trim(), last_name: lastName.trim(), role }
       ),
     onSuccess: (data) => {
@@ -264,7 +264,7 @@ function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
 
   const update = useMutation({
     mutationFn: () =>
-      api.patch(`/api/admin/users/${user.principal_id}`, {
+      api.patch(`/api/v1/admin/users/${user.principal_id}`, {
         first_name: firstName.trim() || undefined,
         last_name: lastName.trim() || undefined,
         email: email.trim() !== user.email ? email.trim() : undefined,
@@ -386,7 +386,7 @@ function RoleCell({ user }: { user: User }) {
 
   const update = useMutation({
     mutationFn: (r: Role) =>
-      api.patch(`/api/admin/users/${user.principal_id}/role`, { role: r }),
+      api.patch(`/api/v1/admin/users/${user.principal_id}/role`, { role: r }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-users"] });
       setEditing(false);
@@ -449,12 +449,12 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
 
   const q = useQuery({
     queryKey: ["admin-users", tenantId],
-    queryFn: () => api.get<User[]>("/api/admin/users"),
+    queryFn: () => api.get<User[]>("/api/v1/admin/users"),
     refetchInterval: 60_000,
   });
 
   const deactivate = useMutation({
-    mutationFn: (id: string) => api.post(`/api/admin/users/${id}/deactivate`, {}),
+    mutationFn: (id: string) => api.post(`/api/v1/admin/users/${id}/deactivate`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-users"] });
       setConfirmAction(null);
@@ -464,7 +464,7 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
   });
 
   const reactivate = useMutation({
-    mutationFn: (id: string) => api.post(`/api/admin/users/${id}/reactivate`, {}),
+    mutationFn: (id: string) => api.post(`/api/v1/admin/users/${id}/reactivate`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-users"] });
       setConfirmAction(null);
@@ -474,7 +474,7 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
   });
 
   const remove = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/admin/users/${id}`),
+    mutationFn: (id: string) => api.delete(`/api/v1/admin/users/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-users"] });
       setConfirmAction(null);
@@ -485,7 +485,7 @@ export function UsersAdminPage({ tenantId }: { tenantId: string }) {
 
   const resetPwd = useMutation({
     mutationFn: (u: User) =>
-      api.post<{ temp_password: string }>(`/api/admin/users/${u.principal_id}/reset-password`, {}),
+      api.post<{ temp_password: string }>(`/api/v1/admin/users/${u.principal_id}/reset-password`, {}),
     onSuccess: (data, u) => {
       setTempPwd({ email: u.email, pwd: data.temp_password });
       toast("Senha redefinida", "success");
