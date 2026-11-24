@@ -977,6 +977,82 @@ function StatusDot({ avail }: { avail?: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Section ordering types
+// ---------------------------------------------------------------------------
+
+const SECTION_DEFS = [
+  { id: "overview",  label: "Visão Geral" },
+  { id: "problems",  label: "Problemas Ativos" },
+  { id: "inventory", label: "Inventário" },
+  { id: "tags",      label: "Grupos & Tags" },
+  { id: "metrics",   label: "Todas as Métricas" },
+] as const;
+
+type SectionId = typeof SECTION_DEFS[number]["id"];
+const DEFAULT_SECTION_ORDER: SectionId[] = SECTION_DEFS.map(s => s.id);
+
+// ---------------------------------------------------------------------------
+// SectionHeader: title + optional up/down/eye controls
+// ---------------------------------------------------------------------------
+
+function SectionHeader({
+  id, label, children,
+  onMoveUp, onMoveDown, canMoveUp, canMoveDown,
+  hidden, onToggleHidden,
+}: {
+  id: SectionId;
+  label: string;
+  children?: React.ReactNode;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  hidden: boolean;
+  onToggleHidden: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-sm font-semibold flex-1" style={{ color: "var(--fg)" }}>{label}</span>
+      {children}
+      <div className="flex items-center gap-0.5 ml-auto">
+        <button
+          onClick={onMoveUp}
+          disabled={!canMoveUp}
+          title="Mover seção para cima"
+          className="p-1 rounded text-xs disabled:opacity-30 hover:bg-[var(--surface-2)] transition-colors"
+          style={{ color: "var(--fg-muted)" }}
+        >↑</button>
+        <button
+          onClick={onMoveDown}
+          disabled={!canMoveDown}
+          title="Mover seção para baixo"
+          className="p-1 rounded text-xs disabled:opacity-30 hover:bg-[var(--surface-2)] transition-colors"
+          style={{ color: "var(--fg-muted)" }}
+        >↓</button>
+        <button
+          onClick={onToggleHidden}
+          title={hidden ? "Mostrar seção" : "Ocultar seção"}
+          className="p-1 rounded text-xs hover:bg-[var(--surface-2)] transition-colors"
+          style={{ color: hidden ? "var(--brand)" : "var(--fg-muted)" }}
+        >
+          {hidden ? (
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/>
+              <line x1="2" y1="2" x2="14" y2="14"/>
+            </svg>
+          ) : (
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/>
+              <circle cx="8" cy="8" r="2"/>
+            </svg>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -997,6 +1073,8 @@ export function DeviceDetail({
   const [expanded, setExpanded]         = useState<Set<string>>(new Set());
   const [hideZeros, setHideZeros]       = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [sectionOrder, setSectionOrder] = useState<SectionId[]>(DEFAULT_SECTION_ORDER);
+  const [hiddenSections, setHiddenSections] = useState<Set<SectionId>>(new Set());
   const layoutSaveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const chartWindowFrom = period === "custom" ? customRange?.from : undefined;
@@ -1006,7 +1084,13 @@ export function DeviceDetail({
   const layoutQ = useQuery({
     queryKey: ["device-layout", resourceId],
     queryFn: () =>
-      api.get<{ layout: { expanded?: string[]; period?: PeriodKey; hideZeros?: boolean } }>(
+      api.get<{ layout: {
+        expanded?: string[];
+        period?: PeriodKey;
+        hideZeros?: boolean;
+        sectionOrder?: string[];
+        hiddenSections?: string[];
+      } }>(
         `/api/v1/layout?view_type=device_panel&view_key=${encodeURIComponent(resourceId)}`,
       ),
     staleTime: Infinity,
@@ -1018,21 +1102,53 @@ export function DeviceDetail({
     if (l.expanded)  setExpanded(new Set(l.expanded));
     if (l.period)    setPeriod(l.period);
     if (l.hideZeros !== undefined) setHideZeros(l.hideZeros);
+    if (l.sectionOrder?.length) setSectionOrder(l.sectionOrder as SectionId[]);
+    if (l.hiddenSections?.length) setHiddenSections(new Set(l.hiddenSections as SectionId[]));
   }, [layoutQ.data]);
 
-  function saveLayout(next: { expanded?: Set<string>; period?: PeriodKey; hideZeros?: boolean }) {
+  function saveLayout(next: {
+    expanded?: Set<string>;
+    period?: PeriodKey;
+    hideZeros?: boolean;
+    sectionOrder?: SectionId[];
+    hiddenSections?: Set<SectionId>;
+  }) {
     if (layoutSaveTimeout.current) clearTimeout(layoutSaveTimeout.current);
     layoutSaveTimeout.current = setTimeout(() => {
       const payload = {
-        expanded:  [...(next.expanded  ?? expanded)],
-        period:     next.period    ?? period,
-        hideZeros:  next.hideZeros ?? hideZeros,
+        expanded:       [...(next.expanded       ?? expanded)],
+        period:          next.period          ?? period,
+        hideZeros:       next.hideZeros       ?? hideZeros,
+        sectionOrder:   next.sectionOrder     ?? sectionOrder,
+        hiddenSections: [...(next.hiddenSections ?? hiddenSections)],
       };
       api.put(
         `/api/v1/layout?view_type=device_panel&view_key=${encodeURIComponent(resourceId)}`,
         { layout: payload },
       ).catch(() => {});
     }, 800);
+  }
+
+  function moveSection(id: SectionId, dir: -1 | 1) {
+    setSectionOrder(prev => {
+      const idx = prev.indexOf(id);
+      if (idx < 0) return prev;
+      const next = [...prev];
+      const target = idx + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[idx], next[target]] = [next[target], next[idx]];
+      saveLayout({ sectionOrder: next });
+      return next;
+    });
+  }
+
+  function toggleHideSection(id: SectionId) {
+    setHiddenSections(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      saveLayout({ hiddenSections: next });
+      return next;
+    });
   }
 
   // Queries
@@ -1213,351 +1329,377 @@ export function DeviceDetail({
         </div>
       </div>
 
-      {/* ── Overview ── */}
-      {hasOverview && (
-        <Card>
-          <CardHeader>
-            <span className="text-sm font-semibold">Visão Geral</span>
-            <PeriodPicker value={period} onChange={changePeriod}
-              customRange={customRange} onCustomRange={setCustomRange} />
-          </CardHeader>
+      {sectionOrder.map((sId, idx) => {
+        const isHidden = hiddenSections.has(sId);
+        const def = SECTION_DEFS.find(d => d.id === sId)!;
+        const ctrl = {
+          id: sId, label: def.label, hidden: isHidden,
+          canMoveUp: idx > 0, canMoveDown: idx < sectionOrder.length - 1,
+          onMoveUp: () => moveSection(sId, -1),
+          onMoveDown: () => moveSection(sId, 1),
+          onToggleHidden: () => toggleHideSection(sId),
+        };
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {cpuMetric && (
-              <OverviewChartCard
-                title="CPU"
-                value={fmtMetricValue(cpuMetric.value, cpuMetric.unit)}
-                unit={cpuMetric.unit}
-                accent="cpu"
-              >
-                <MetricChart sourceId={sourceId} metricId={cpuMetric.metric_definition_id}
-                  unit={cpuMetric.unit} period={period} accent="cpu" height={180}
-                  thresholds={autoThreshold(cpuMetric.unit)}
-                  windowFrom={chartWindowFrom} windowTill={chartWindowTill} />
-              </OverviewChartCard>
-            )}
-
-            {memMetric && (
-              <OverviewChartCard
-                title="Memória"
-                value={fmtMetricValue(memMetric.value, memMetric.unit)}
-                unit={memMetric.unit}
-                accent="mem"
-              >
-                <MetricChart sourceId={sourceId} metricId={memMetric.metric_definition_id}
-                  unit={memMetric.unit} period={period} accent="mem" height={180}
-                  thresholds={autoThreshold(memMetric.unit)}
-                  windowFrom={chartWindowFrom} windowTill={chartWindowTill} />
-              </OverviewChartCard>
-            )}
-
-            {diskMetric && (
-              <OverviewChartCard
-                title="Disco"
-                value={fmtMetricValue(diskMetric.value, diskMetric.unit)}
-                unit={diskMetric.unit}
-                accent="disk"
-              >
-                <MetricChart sourceId={sourceId} metricId={diskMetric.metric_definition_id}
-                  unit={diskMetric.unit} period={period} accent="disk" height={180}
-                  thresholds={autoThreshold(diskMetric.unit)}
-                  windowFrom={chartWindowFrom} windowTill={chartWindowTill} />
-              </OverviewChartCard>
-            )}
-
-            {netInMetric && netOutMetric && (
-              <OverviewChartCard
-                title="Rede"
-                accent="net_in"
-              >
-                <DualNetChart
-                  sourceId={sourceId}
-                  metricIdIn={netInMetric.metric_definition_id}
-                  metricIdOut={netOutMetric.metric_definition_id}
-                  unitIn={netInMetric.unit}
-                  period={period}
-                  windowFrom={chartWindowFrom}
-                  windowTill={chartWindowTill}
-                />
-              </OverviewChartCard>
-            )}
-          </div>
-        </Card>
-      )}
-
-      {/* ── Identification + Location ── */}
-      {(inv || primaryIface) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Card>
-            <CardHeader><span className="text-sm font-semibold">Identificação</span></CardHeader>
-            <dl>
-              <KV label="Endereço IP"    value={primaryIface?.ip} />
-              <KV label="DNS"            value={primaryIface?.dns} />
-              <KV label="Porta"          value={primaryIface?.port} />
-              <KV label="Protocolo"      value={primaryIface?.interface_type} />
-              <KV label="Sistema op."    value={inv?.os_full ?? inv?.os} />
-              <KV label="Fabricante"     value={inv?.vendor} />
-              <KV label="Modelo"         value={inv?.model} />
-              <KV label="Tipo"           value={inv?.device_type} />
-              <KV label="Hardware"       value={inv?.hardware_full ?? inv?.hardware} />
-              <KV label="Serial"         value={inv?.serial_primary} />
-              <KV label="Asset tag"      value={inv?.asset_tag} />
-              <KV label="MAC primário"   value={inv?.mac_primary} />
-              <KV label="MAC secundário" value={inv?.mac_secondary} />
-              <KV label="Último visto"   value={fmtTs(r.last_observed_at)} />
-            </dl>
-          </Card>
-
-          <Card>
-            <CardHeader><span className="text-sm font-semibold">Localização e contato</span></CardHeader>
-            {(() => {
-              const hasLocationData = inv && (
-                inv.location || inv.site_rack || inv.site_city || inv.site_notes ||
-                inv.site_address_a || inv.site_state || inv.site_country ||
-                inv.location_lat || inv.location_lon ||
-                inv.contact || inv.poc_1_name || inv.poc_1_email || inv.poc_1_phone ||
-                inv.poc_2_name || inv.poc_2_email || inv.url_a || inv.url_b || inv.url_c
-              );
-              if (!hasLocationData) {
-                return (
-                  <p className="text-xs text-[var(--text-muted)] italic">
-                    Nenhum dado de localização cadastrado no inventário do Zabbix.
-                  </p>
-                );
-              }
-              const lat = inv?.location_lat ? parseFloat(inv.location_lat) : null;
-              const lon = inv?.location_lon ? parseFloat(inv.location_lon) : null;
-              const hasCoords = lat !== null && lon !== null && !isNaN(lat) && !isNaN(lon);
-              const addressParts = [inv?.site_address_a, inv?.site_city, inv?.site_state, inv?.site_country].filter(Boolean);
-              const addressStr = addressParts.join(", ");
-              const googleMapsUrl = hasCoords
-                ? `https://www.google.com/maps?q=${lat},${lon}`
-                : addressStr
-                  ? `https://www.google.com/maps/search/${encodeURIComponent(addressStr)}`
-                  : null;
-              return (
-                <>
-                  {hasCoords && (
-                    <div className="mb-3 rounded-lg overflow-hidden border border-[var(--border)]" style={{ height: 180 }}>
-                      <iframe
-                        title="Mapa de localização"
-                        width="100%"
-                        height="180"
-                        style={{ border: 0, display: "block" }}
-                        src={`https://www.openstreetmap.org/export/embed.html?bbox=${lon - 0.01},${lat - 0.01},${lon + 0.01},${lat + 0.01}&layer=mapnik&marker=${lat},${lon}`}
-                        loading="lazy"
-                      />
-                    </div>
+        if (sId === "overview") {
+          if (!hasOverview) return null;
+          return (
+            <Card key="overview">
+              <CardHeader>
+                <SectionHeader {...ctrl} />
+                <PeriodPicker value={period} onChange={changePeriod}
+                  customRange={customRange} onCustomRange={setCustomRange} />
+              </CardHeader>
+              {!isHidden && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {cpuMetric && (
+                    <OverviewChartCard
+                      title="CPU"
+                      value={fmtMetricValue(cpuMetric.value, cpuMetric.unit)}
+                      unit={cpuMetric.unit}
+                      accent="cpu"
+                    >
+                      <MetricChart sourceId={sourceId} metricId={cpuMetric.metric_definition_id}
+                        unit={cpuMetric.unit} period={period} accent="cpu" height={180}
+                        thresholds={autoThreshold(cpuMetric.unit)}
+                        windowFrom={chartWindowFrom} windowTill={chartWindowTill} />
+                    </OverviewChartCard>
                   )}
-                  <dl>
-                    <KV label="Local"         value={inv?.location} />
-                    <KV label="Endereço"      value={inv?.site_address_a} />
-                    <KV label="Estado"        value={inv?.site_state} />
-                    <KV label="País"          value={inv?.site_country} />
-                    <KV label="Rack"          value={inv?.site_rack} />
-                    <KV label="Cidade"        value={inv?.site_city} />
-                    {hasCoords && (
-                      <KV label="Coordenadas" value={`${lat?.toFixed(6)}, ${lon?.toFixed(6)}`} />
-                    )}
-                    <KV label="Observações"   value={inv?.site_notes} />
-                    <KV label="Contato"       value={inv?.contact} />
-                    <KV label="Responsável 1" value={inv?.poc_1_name} />
-                    <KV label="E-mail 1"      value={inv?.poc_1_email} />
-                    <KV label="Telefone 1"    value={inv?.poc_1_phone} />
-                    <KV label="Responsável 2" value={inv?.poc_2_name} />
-                    <KV label="E-mail 2"      value={inv?.poc_2_email} />
-                    {(inv?.url_a || inv?.url_b || inv?.url_c) && (
-                      <KV
-                        label="Acesso remoto"
-                        value={
-                          <span className="flex flex-wrap gap-2">
-                            {inv?.url_a && <a href={inv.url_a} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_a}</a>}
-                            {inv?.url_b && <a href={inv.url_b} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_b}</a>}
-                            {inv?.url_c && <a href={inv.url_c} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_c}</a>}
-                          </span>
-                        }
-                      />
-                    )}
-                    {googleMapsUrl && !hasCoords && (
-                      <KV
-                        label="Ver no mapa"
-                        value={<a href={googleMapsUrl} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline text-xs">Abrir no Google Maps</a>}
-                      />
-                    )}
-                  </dl>
-                  {hasCoords && googleMapsUrl && (
-                    <div className="mt-2">
-                      <a href={googleMapsUrl} target="_blank" rel="noreferrer"
-                        className="text-xs text-[var(--brand)] underline">
-                        Abrir no Google Maps
-                      </a>
-                    </div>
+                  {memMetric && (
+                    <OverviewChartCard
+                      title="Memória"
+                      value={fmtMetricValue(memMetric.value, memMetric.unit)}
+                      unit={memMetric.unit}
+                      accent="mem"
+                    >
+                      <MetricChart sourceId={sourceId} metricId={memMetric.metric_definition_id}
+                        unit={memMetric.unit} period={period} accent="mem" height={180}
+                        thresholds={autoThreshold(memMetric.unit)}
+                        windowFrom={chartWindowFrom} windowTill={chartWindowTill} />
+                    </OverviewChartCard>
                   )}
-                </>
-              );
-            })()}
-
-            {(ev?.interfaces?.length ?? 0) > 1 && (
-              <>
-                <div className="mt-4 mb-2 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-                  Interfaces
+                  {diskMetric && (
+                    <OverviewChartCard
+                      title="Disco"
+                      value={fmtMetricValue(diskMetric.value, diskMetric.unit)}
+                      unit={diskMetric.unit}
+                      accent="disk"
+                    >
+                      <MetricChart sourceId={sourceId} metricId={diskMetric.metric_definition_id}
+                        unit={diskMetric.unit} period={period} accent="disk" height={180}
+                        thresholds={autoThreshold(diskMetric.unit)}
+                        windowFrom={chartWindowFrom} windowTill={chartWindowTill} />
+                    </OverviewChartCard>
+                  )}
+                  {netInMetric && netOutMetric && (
+                    <OverviewChartCard title="Rede" accent="net_in">
+                      <DualNetChart
+                        sourceId={sourceId}
+                        metricIdIn={netInMetric.metric_definition_id}
+                        metricIdOut={netOutMetric.metric_definition_id}
+                        unitIn={netInMetric.unit}
+                        period={period}
+                        windowFrom={chartWindowFrom}
+                        windowTill={chartWindowTill}
+                      />
+                    </OverviewChartCard>
+                  )}
                 </div>
-                {ev!.interfaces!.map(iface => (
-                  <div key={iface.interfaceid}
-                    className="text-xs flex gap-2 py-1.5 border-b border-[var(--border)] last:border-0">
-                    <span className="text-[var(--text-muted)] w-14 flex-shrink-0">{iface.interface_type}</span>
-                    <span className="text-[var(--text)] font-mono">{iface.ip || iface.dns || "—"}</span>
-                    {iface.main && <span className="text-[var(--text-muted)]">(primário)</span>}
-                  </div>
-                ))}
-              </>
-            )}
-
-            {ev?.agent_error && (
-              <div className="mt-3 p-2.5 rounded-lg bg-[#3a1a1a] border border-[#4a2020]">
-                <p className="text-xs text-[var(--red)]">Erro agente: {ev.agent_error}</p>
-              </div>
-            )}
-            {ev?.snmp_error && (
-              <div className="mt-2 p-2.5 rounded-lg bg-[#3a1a1a] border border-[#4a2020]">
-                <p className="text-xs text-[var(--red)]">Erro SNMP: {ev.snmp_error}</p>
-              </div>
-            )}
-          </Card>
-        </div>
-      )}
-
-      {/* ── Groups / tags ── */}
-      {((ev?.groups?.length ?? 0) > 0 || (ev?.tags?.length ?? 0) > 0) && (
-        <Card>
-          <div className="flex flex-wrap gap-1.5">
-            {ev?.groups?.map(g => (
-              <span key={g.ref}
-                className="text-xs px-2.5 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)]">
-                {g.name ?? g.ref}
-              </span>
-            ))}
-            {ev?.tags?.map(t => (
-              <span key={`${t.tag}:${t.value}`}
-                className="text-xs px-2.5 py-1 rounded-full border text-[var(--brand)]"
-                style={{ borderColor: `${ACCENT.cpu}40`, background: `${ACCENT.cpu}10` }}>
-                {t.tag}{t.value ? `: ${t.value}` : ""}
-              </span>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {/* ── All metrics grid ── */}
-      {allMetrics.length > 0 && (
-        <Card>
-          <CardHeader>
-            <span className="text-sm font-semibold">
-              Todas as métricas
-              <span className="ml-2 text-xs font-normal text-[var(--text-muted)]">
-                ({gridMetrics.length}
-                {hideZeros && gridMetrics.length < allMetrics.length - overviewIds.size
-                  ? ` / ${allMetrics.length - overviewIds.size}`
-                  : ""})
-              </span>
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => changeHideZeros(!hideZeros)}
-                className={[
-                  "px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border",
-                  hideZeros
-                    ? "border-[var(--brand)] text-[var(--brand)] bg-[var(--brand-bg,#1e3a5f)]"
-                    : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]",
-                ].join(" ")}
-              >
-                {hideZeros ? "≠ 0" : "= 0"}
-              </button>
-              {!hasOverview && <PeriodPicker value={period} onChange={changePeriod}
-                customRange={customRange} onCustomRange={setCustomRange} />}
-            </div>
-          </CardHeader>
-
-          {currentQ.isLoading ? (
-            <div className="flex justify-center py-8"><Spinner /></div>
-          ) : currentQ.isError ? (
-            <p className="text-xs text-[var(--red)]">Falha ao carregar métricas.</p>
-          ) : gridMetrics.length === 0 ? (
-            <div className="text-xs text-[var(--text-muted)] space-y-2">
-              <p>
-                {allMetrics.length - overviewIds.size > 0
-                  ? "Todas as métricas estão com valor zero."
-                  : "Nenhuma métrica adicional disponível."}
-              </p>
-              {allMetrics.length - overviewIds.size > 0 && (
-                <button onClick={() => changeHideZeros(false)} className="text-[var(--brand)] hover:underline">
-                  Mostrar todas
-                </button>
               )}
+            </Card>
+          );
+        }
+
+        if (sId === "inventory") {
+          if (!inv && !primaryIface) return null;
+          if (isHidden) {
+            return (
+              <Card key="inventory">
+                <SectionHeader {...ctrl} />
+              </Card>
+            );
+          }
+          return (
+            <div key="inventory" className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader><SectionHeader {...ctrl} /></CardHeader>
+                <dl>
+                  <KV label="Endereço IP"    value={primaryIface?.ip} />
+                  <KV label="DNS"            value={primaryIface?.dns} />
+                  <KV label="Porta"          value={primaryIface?.port} />
+                  <KV label="Protocolo"      value={primaryIface?.interface_type} />
+                  <KV label="Sistema op."    value={inv?.os_full ?? inv?.os} />
+                  <KV label="Fabricante"     value={inv?.vendor} />
+                  <KV label="Modelo"         value={inv?.model} />
+                  <KV label="Tipo"           value={inv?.device_type} />
+                  <KV label="Hardware"       value={inv?.hardware_full ?? inv?.hardware} />
+                  <KV label="Serial"         value={inv?.serial_primary} />
+                  <KV label="Asset tag"      value={inv?.asset_tag} />
+                  <KV label="MAC primário"   value={inv?.mac_primary} />
+                  <KV label="MAC secundário" value={inv?.mac_secondary} />
+                  <KV label="Último visto"   value={fmtTs(r.last_observed_at)} />
+                </dl>
+              </Card>
+
+              <Card>
+                <CardHeader><span className="text-sm font-semibold">Localização e contato</span></CardHeader>
+                {(() => {
+                  const hasLocationData = inv && (
+                    inv.location || inv.site_rack || inv.site_city || inv.site_notes ||
+                    inv.site_address_a || inv.site_state || inv.site_country ||
+                    inv.location_lat || inv.location_lon ||
+                    inv.contact || inv.poc_1_name || inv.poc_1_email || inv.poc_1_phone ||
+                    inv.poc_2_name || inv.poc_2_email || inv.url_a || inv.url_b || inv.url_c
+                  );
+                  if (!hasLocationData) {
+                    return (
+                      <p className="text-xs text-[var(--text-muted)] italic">
+                        Nenhum dado de localização cadastrado no inventário do Zabbix.
+                      </p>
+                    );
+                  }
+                  const lat = inv?.location_lat ? parseFloat(inv.location_lat) : null;
+                  const lon = inv?.location_lon ? parseFloat(inv.location_lon) : null;
+                  const hasCoords = lat !== null && lon !== null && !isNaN(lat) && !isNaN(lon);
+                  const addressParts = [inv?.site_address_a, inv?.site_city, inv?.site_state, inv?.site_country].filter(Boolean);
+                  const addressStr = addressParts.join(", ");
+                  const googleMapsUrl = hasCoords
+                    ? `https://www.google.com/maps?q=${lat},${lon}`
+                    : addressStr
+                      ? `https://www.google.com/maps/search/${encodeURIComponent(addressStr)}`
+                      : null;
+                  return (
+                    <>
+                      {hasCoords && (
+                        <div className="mb-3 rounded-lg overflow-hidden border border-[var(--border)]" style={{ height: 180 }}>
+                          <iframe
+                            title="Mapa de localização"
+                            width="100%"
+                            height="180"
+                            style={{ border: 0, display: "block" }}
+                            src={`https://www.openstreetmap.org/export/embed.html?bbox=${lon - 0.01},${lat - 0.01},${lon + 0.01},${lat + 0.01}&layer=mapnik&marker=${lat},${lon}`}
+                            loading="lazy"
+                          />
+                        </div>
+                      )}
+                      <dl>
+                        <KV label="Local"         value={inv?.location} />
+                        <KV label="Endereço"      value={inv?.site_address_a} />
+                        <KV label="Estado"        value={inv?.site_state} />
+                        <KV label="País"          value={inv?.site_country} />
+                        <KV label="Rack"          value={inv?.site_rack} />
+                        <KV label="Cidade"        value={inv?.site_city} />
+                        {hasCoords && (
+                          <KV label="Coordenadas" value={`${lat?.toFixed(6)}, ${lon?.toFixed(6)}`} />
+                        )}
+                        <KV label="Observações"   value={inv?.site_notes} />
+                        <KV label="Contato"       value={inv?.contact} />
+                        <KV label="Responsável 1" value={inv?.poc_1_name} />
+                        <KV label="E-mail 1"      value={inv?.poc_1_email} />
+                        <KV label="Telefone 1"    value={inv?.poc_1_phone} />
+                        <KV label="Responsável 2" value={inv?.poc_2_name} />
+                        <KV label="E-mail 2"      value={inv?.poc_2_email} />
+                        {(inv?.url_a || inv?.url_b || inv?.url_c) && (
+                          <KV
+                            label="Acesso remoto"
+                            value={
+                              <span className="flex flex-wrap gap-2">
+                                {inv?.url_a && <a href={inv.url_a} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_a}</a>}
+                                {inv?.url_b && <a href={inv.url_b} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_b}</a>}
+                                {inv?.url_c && <a href={inv.url_c} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline">{inv.url_c}</a>}
+                              </span>
+                            }
+                          />
+                        )}
+                        {googleMapsUrl && !hasCoords && (
+                          <KV
+                            label="Ver no mapa"
+                            value={<a href={googleMapsUrl} target="_blank" rel="noreferrer" className="text-[var(--brand)] underline text-xs">Abrir no Google Maps</a>}
+                          />
+                        )}
+                      </dl>
+                      {hasCoords && googleMapsUrl && (
+                        <div className="mt-2">
+                          <a href={googleMapsUrl} target="_blank" rel="noreferrer"
+                            className="text-xs text-[var(--brand)] underline">
+                            Abrir no Google Maps
+                          </a>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+
+                {(ev?.interfaces?.length ?? 0) > 1 && (
+                  <>
+                    <div className="mt-4 mb-2 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                      Interfaces
+                    </div>
+                    {ev!.interfaces!.map(iface => (
+                      <div key={iface.interfaceid}
+                        className="text-xs flex gap-2 py-1.5 border-b border-[var(--border)] last:border-0">
+                        <span className="text-[var(--text-muted)] w-14 flex-shrink-0">{iface.interface_type}</span>
+                        <span className="text-[var(--text)] font-mono">{iface.ip || iface.dns || "—"}</span>
+                        {iface.main && <span className="text-[var(--text-muted)]">(primário)</span>}
+                      </div>
+                    ))}
+                  </>
+                )}
+
+                {ev?.agent_error && (
+                  <div className="mt-3 p-2.5 rounded-lg bg-[#3a1a1a] border border-[#4a2020]">
+                    <p className="text-xs text-[var(--red)]">Erro agente: {ev.agent_error}</p>
+                  </div>
+                )}
+                {ev?.snmp_error && (
+                  <div className="mt-2 p-2.5 rounded-lg bg-[#3a1a1a] border border-[#4a2020]">
+                    <p className="text-xs text-[var(--red)]">Erro SNMP: {ev.snmp_error}</p>
+                  </div>
+                )}
+              </Card>
             </div>
-          ) : (
-            <>
-              <p className="text-xs text-[var(--text-muted)] mb-3">
-                Clique em uma métrica numérica para ver o histórico.
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                {gridMetrics.map(m => (
-                  <MetricCard
-                    key={m.metric_definition_id}
-                    metric={m}
-                    sourceId={sourceId}
-                    period={period}
-                    expanded={expanded.has(m.metric_definition_id)}
-                    onToggle={() => toggleMetric(m.metric_definition_id)}
-                    windowFrom={chartWindowFrom}
-                    windowTill={chartWindowTill}
-                  />
+          );
+        }
+
+        if (sId === "tags") {
+          if ((ev?.groups?.length ?? 0) === 0 && (ev?.tags?.length ?? 0) === 0) return null;
+          if (isHidden) {
+            return (
+              <Card key="tags">
+                <SectionHeader {...ctrl} />
+              </Card>
+            );
+          }
+          return (
+            <Card key="tags">
+              <CardHeader><SectionHeader {...ctrl} /></CardHeader>
+              <div className="flex flex-wrap gap-1.5">
+                {ev?.groups?.map(g => (
+                  <span key={g.ref}
+                    className="text-xs px-2.5 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-muted)]">
+                    {g.name ?? g.ref}
+                  </span>
+                ))}
+                {ev?.tags?.map(t => (
+                  <span key={`${t.tag}:${t.value}`}
+                    className="text-xs px-2.5 py-1 rounded-full border text-[var(--brand)]"
+                    style={{ borderColor: `${ACCENT.cpu}40`, background: `${ACCENT.cpu}10` }}>
+                    {t.tag}{t.value ? `: ${t.value}` : ""}
+                  </span>
                 ))}
               </div>
-            </>
-          )}
-        </Card>
-      )}
+            </Card>
+          );
+        }
 
-      {/* ── Active problems ── */}
-      <Card>
-        <CardHeader>
-          <span className="text-sm font-semibold">Problemas ativos</span>
-          {activeProblems.length > 0 && (
-            <Badge variant="danger">{activeProblems.length}</Badge>
-          )}
-        </CardHeader>
-
-        {problemsQ.isLoading ? (
-          <div className="flex justify-center py-4"><Spinner /></div>
-        ) : activeProblems.length === 0 ? (
-          <div className="flex items-center gap-2 py-2">
-            <span style={{ color: "#22c55e" }}>✓</span>
-            <p className="text-xs text-[var(--text-muted)]">Nenhum problema ativo.</p>
-          </div>
-        ) : (
-          <ul className="space-y-2">
-            {activeProblems.map(p => (
-              <li key={p.monitoring_problem_id}
-                className="flex items-stretch gap-3 rounded-lg overflow-hidden
-                           border border-[var(--border)] bg-[var(--surface-2)]">
-                <SevBar sev={p.severity_class} />
-                <div className="py-2.5 pr-3 flex items-start gap-2.5 min-w-0">
-                  <Badge variant={sevVariant(p.severity_class)} className="mt-0.5 flex-shrink-0">
-                    {(p.severity_class ?? "?").toUpperCase()}
-                  </Badge>
-                  <div className="min-w-0">
-                    <p className="text-xs text-[var(--text)] leading-snug">{p.summary ?? "—"}</p>
-                    <p className="text-[10px] text-[var(--text-muted)] mt-1 font-mono">
-                      Aberto {fmtTs(p.opened_at)}
-                    </p>
-                  </div>
+        if (sId === "metrics") {
+          if (allMetrics.length === 0) return null;
+          return (
+            <Card key="metrics">
+              <CardHeader>
+                <SectionHeader {...ctrl} />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => changeHideZeros(!hideZeros)}
+                    className={[
+                      "px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border",
+                      hideZeros
+                        ? "border-[var(--brand)] text-[var(--brand)] bg-[var(--brand-bg,#1e3a5f)]"
+                        : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]",
+                    ].join(" ")}
+                  >
+                    {hideZeros ? "≠ 0" : "= 0"}
+                  </button>
+                  {!hasOverview && <PeriodPicker value={period} onChange={changePeriod}
+                    customRange={customRange} onCustomRange={setCustomRange} />}
                 </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+              </CardHeader>
+              {!isHidden && (
+                currentQ.isLoading ? (
+                  <div className="flex justify-center py-8"><Spinner /></div>
+                ) : currentQ.isError ? (
+                  <p className="text-xs text-[var(--red)]">Falha ao carregar métricas.</p>
+                ) : gridMetrics.length === 0 ? (
+                  <div className="text-xs text-[var(--text-muted)] space-y-2">
+                    <p>
+                      {allMetrics.length - overviewIds.size > 0
+                        ? "Todas as métricas estão com valor zero."
+                        : "Nenhuma métrica adicional disponível."}
+                    </p>
+                    {allMetrics.length - overviewIds.size > 0 && (
+                      <button onClick={() => changeHideZeros(false)} className="text-[var(--brand)] hover:underline">
+                        Mostrar todas
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs text-[var(--text-muted)] mb-3">
+                      Clique em uma métrica numérica para ver o histórico.
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                      {gridMetrics.map(m => (
+                        <MetricCard
+                          key={m.metric_definition_id}
+                          metric={m}
+                          sourceId={sourceId}
+                          period={period}
+                          expanded={expanded.has(m.metric_definition_id)}
+                          onToggle={() => toggleMetric(m.metric_definition_id)}
+                          windowFrom={chartWindowFrom}
+                          windowTill={chartWindowTill}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )
+              )}
+            </Card>
+          );
+        }
+
+        // sId === "problems"
+        return (
+          <Card key="problems">
+            <CardHeader>
+              <SectionHeader {...ctrl} />
+              {activeProblems.length > 0 && (
+                <Badge variant="danger">{activeProblems.length}</Badge>
+              )}
+            </CardHeader>
+            {!isHidden && (
+              problemsQ.isLoading ? (
+                <div className="flex justify-center py-4"><Spinner /></div>
+              ) : activeProblems.length === 0 ? (
+                <div className="flex items-center gap-2 py-2">
+                  <span style={{ color: "#22c55e" }}>✓</span>
+                  <p className="text-xs text-[var(--text-muted)]">Nenhum problema ativo.</p>
+                </div>
+              ) : (
+                <ul className="space-y-2">
+                  {activeProblems.map(p => (
+                    <li key={p.monitoring_problem_id}
+                      className="flex items-stretch gap-3 rounded-lg overflow-hidden
+                                 border border-[var(--border)] bg-[var(--surface-2)]">
+                      <SevBar sev={p.severity_class} />
+                      <div className="py-2.5 pr-3 flex items-start gap-2.5 min-w-0">
+                        <Badge variant={sevVariant(p.severity_class)} className="mt-0.5 flex-shrink-0">
+                          {(p.severity_class ?? "?").toUpperCase()}
+                        </Badge>
+                        <div className="min-w-0">
+                          <p className="text-xs text-[var(--text)] leading-snug">{p.summary ?? "—"}</p>
+                          <p className="text-[10px] text-[var(--text-muted)] mt-1 font-mono">
+                            Aberto {fmtTs(p.opened_at)}
+                          </p>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )
+            )}
+          </Card>
+        );
+      })}
     </div>
   );
 }
