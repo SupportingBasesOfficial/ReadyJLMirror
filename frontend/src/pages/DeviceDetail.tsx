@@ -996,7 +996,7 @@ const DEFAULT_SECTION_ORDER: SectionId[] = SECTION_DEFS.map(s => s.id);
 // ---------------------------------------------------------------------------
 
 function SectionHeader({
-  id, label, children,
+  id: _id, label, children,
   onMoveUp, onMoveDown, canMoveUp, canMoveDown,
   hidden, onToggleHidden,
 }: {
