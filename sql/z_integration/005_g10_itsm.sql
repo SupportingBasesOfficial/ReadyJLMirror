@@ -313,10 +313,11 @@ CREATE OR REPLACE FUNCTION itsm.g10_create_incident(
  p_actor_principal_id TEXT,p_logical_action_id TEXT,p_authority_snapshot JSONB
 ) RETURNS JSONB
 LANGUAGE plpgsql SECURITY DEFINER
-SET search_path=pg_catalog,itsm,alerting
+SET search_path=pg_catalog,itsm,alerting,g1
 AS $$
 DECLARE
  v_id TEXT;v_hash TEXT;v_existing itsm.incident%ROWTYPE;v_outbox TEXT;
+ v_adapter_ref TEXT;
 BEGIN
   PERFORM itsm.g10_validate_authority(p_tenant_id,p_actor_principal_id,p_authority_snapshot);
   PERFORM pg_advisory_xact_lock(hashtextextended(p_tenant_id||chr(31)||p_logical_action_id,10));
@@ -329,6 +330,12 @@ BEGIN
   PERFORM 1 FROM alerting.alert
    WHERE tenant_id=p_tenant_id AND alert_id=p_alert_id AND lifecycle_state='active';
   IF NOT FOUND THEN RAISE EXCEPTION 'g10.active_alert_required'; END IF;
+
+  SELECT itsm_adapter_instance_ref INTO v_adapter_ref
+  FROM g1.tenant_settings WHERE tenant_id=p_tenant_id;
+  IF v_adapter_ref IS NULL OR v_adapter_ref='' THEN
+    RAISE EXCEPTION 'g10.itsm_adapter_not_configured';
+  END IF;
 
   v_hash:=md5(concat_ws(chr(31),p_alert_id,p_title,COALESCE(p_description,''),p_actor_principal_id));
   v_id:='g10-incident:'||md5(p_tenant_id||chr(31)||p_logical_action_id);
@@ -353,7 +360,7 @@ BEGIN
     tenant_id,sync_outbox_id,incident_id,sync_state,attempt_number,
     adapter_instance_ref,sync_identity
   ) VALUES (
-    p_tenant_id,v_outbox,v_id,'pending',1,'fixture-neutral@1',
+    p_tenant_id,v_outbox,v_id,'pending',1,v_adapter_ref,
     'g10-sync-identity:'||md5(p_tenant_id||chr(31)||v_id)
   );
 
