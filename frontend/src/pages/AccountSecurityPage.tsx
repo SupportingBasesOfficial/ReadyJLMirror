@@ -1,17 +1,16 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   useQuery,
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
+import QRCode from "qrcode";
 import {
   ShieldCheck,
   MonitorSmartphone,
   Lock,
   Trash2,
-  Copy,
-  Check,
   Download,
   AlertTriangle,
   Bell,
@@ -31,10 +30,24 @@ type Tab = "sessions" | "mfa" | "privacy" | "push";
 
 // ── API helpers ──────────────────────────────────────────────────────────────
 
+function readCsrfCookie(): string {
+  const match = document.cookie.match(/(?:^|;\s*)jl_csrf=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const csrfHeaders: Record<string, string> =
+    method !== "GET" && method !== "HEAD"
+      ? { "x-csrf-token": readCsrfCookie() }
+      : {};
   const r = await fetch(path, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...csrfHeaders,
+      ...(init?.headers ?? {}),
+    },
     ...init,
   });
   if (!r.ok) {
@@ -149,9 +162,25 @@ interface MFAStatus {
 }
 
 interface MFASetup {
-  secret: string;
   uri: string;
   email: string;
+}
+
+function QRCodeCanvas({ uri }: { uri: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (canvasRef.current && uri) {
+      QRCode.toCanvas(canvasRef.current, uri, { width: 180, margin: 2 });
+    }
+  }, [uri]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="rounded-lg border border-[var(--border)]"
+    />
+  );
 }
 
 function MFATab() {
@@ -160,7 +189,6 @@ function MFATab() {
   const qc = useQueryClient();
   const [setup, setSetup] = useState<MFASetup | null>(null);
   const [code, setCode] = useState("");
-  const [copied, setCopied] = useState(false);
 
   const { data, isLoading } = useQuery<MFAStatus>({
     queryKey: ["account-mfa-status"],
@@ -176,7 +204,7 @@ function MFATab() {
     mutationFn: () =>
       apiFetch("/api/v1/account/mfa/verify", {
         method: "POST",
-        body: JSON.stringify({ secret: setup!.secret, code }),
+        body: JSON.stringify({ code }),
       }),
     onSuccess: () => {
       toast({ title: t("accountSecurity.mfa.verifySuccess") });
@@ -199,14 +227,6 @@ function MFATab() {
       toast({ title: t("accountSecurity.mfa.disableError"), description: e.message, variant: "destructive" });
     },
   });
-
-  const copySecret = () => {
-    if (!setup) return;
-    navigator.clipboard.writeText(setup.secret).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
 
   if (isLoading) return <div className="flex justify-center py-10"><Spinner /></div>;
 
@@ -255,22 +275,12 @@ function MFATab() {
         <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5 space-y-5">
           <div className="space-y-3">
             <p className="text-sm text-[var(--text)]">{t("accountSecurity.mfa.setupStep1")}</p>
-            <div className="rounded-md bg-[var(--surface-2)] border border-[var(--border)] p-3 font-mono text-xs break-all text-[var(--text)]">
-              {setup.uri}
+            <div className="flex justify-center">
+              <QRCodeCanvas uri={setup.uri} />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-[var(--text-muted)]">{t("accountSecurity.mfa.secret")}:</span>
-              <code className="text-xs font-mono bg-[var(--surface-2)] px-2 py-0.5 rounded border border-[var(--border)]">
-                {setup.secret}
-              </code>
-              <button
-                onClick={copySecret}
-                className="text-[var(--text-muted)] hover:text-[var(--brand)] transition-colors"
-                title={t("accountSecurity.mfa.copySecret")}
-              >
-                {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
-              </button>
-            </div>
+            <p className="text-xs text-[var(--text-muted)] text-center">
+              {t("accountSecurity.mfa.scanWithApp")}
+            </p>
           </div>
 
           <div className="space-y-3">
