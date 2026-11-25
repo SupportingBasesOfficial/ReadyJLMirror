@@ -1,0 +1,2 @@
+$sql = "SELECT msg->>'configured_provider_scope' AS scope, msg->>'missing_host_group_refs' AS missing, msg->>'visible_host_group_refs' AS visible, created_at FROM monitoring.monitoring_source_validation_evidence WHERE monitoring_source_id = 'mon-src_z_uKZbjgGAMJ_tDyqZ6CpzD-FmgxPtZJ' ORDER BY created_at DESC LIMIT 3;"
+$sql | ssh debian@200.187.67.114 "sudo docker compose -f /opt/argos/docker-compose.yml -f /opt/argos/docker-compose.prod.yml exec -T db psql -U jlmirror_owner -d jlmirror"

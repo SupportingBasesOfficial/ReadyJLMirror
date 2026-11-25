@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { useCanOperate } from "@/hooks/usePermission";
 import { ChevronLeft, MessageSquare, User, ArrowRight, Clock } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
 
 interface Incident {
   incident_id: string;
@@ -375,12 +376,10 @@ export function IncidentsPage({ tenantId }: { tenantId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-base font-semibold">{t("incidents.title")}</h1>
-          <p className="text-xs text-[var(--text-muted)]">{t("incidents.subtitle")}</p>
-        </div>
-      </div>
+      <PageHeader
+        title={t("incidents.title")}
+        description={t("incidents.subtitle")}
+      />
 
       <StateFilters active={stateFilter} onChange={setStateFilter} />
 

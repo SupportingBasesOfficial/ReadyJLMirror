@@ -6,6 +6,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { GripVertical, ChevronUp, ChevronDown } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
 import { useSession } from "@/hooks/useSession";
 import { SetupWizard } from "@/components/SetupWizard";
 
@@ -523,24 +524,19 @@ export function NOCDashboard({ tenantId }: Props) {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          <div>
-            <h2 className="text-base font-semibold">NOC Overview</h2>
-            {hasMultipleTenants && tenantName && (
-              <p className="text-xs text-[var(--text-muted)] mt-0.5">{tenantName}</p>
-            )}
-          </div>
-          <LiveDot connected={connected} />
-        </div>
-        <div className="relative" ref={dropdownRef}>
-          <button
-            onClick={() => setShowCustomize((v) => !v)}
-            className="text-xs text-[var(--text-muted)] hover:text-[var(--text)] flex items-center gap-1 px-2 py-1 rounded border border-[var(--border)] bg-[var(--surface-2)] transition-colors"
-          >
-            <GripVertical className="w-3 h-3" />
-            Personalizar
-          </button>
+      <PageHeader
+        title="NOC Overview"
+        description={hasMultipleTenants && tenantName ? tenantName : undefined}
+        badge={<LiveDot connected={connected} />}
+        actions={
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setShowCustomize((v) => !v)}
+              className="text-xs text-[var(--text-muted)] hover:text-[var(--text)] flex items-center gap-1 px-2 py-1 rounded border border-[var(--border)] bg-[var(--surface-2)] transition-colors"
+            >
+              <GripVertical className="w-3 h-3" />
+              Personalizar
+            </button>
 
           {showCustomize && (
             <div className="absolute right-0 top-8 z-20 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-lg p-4 w-72">
@@ -623,7 +619,8 @@ export function NOCDashboard({ tenantId }: Props) {
             </div>
           )}
         </div>
-      </div>
+        }
+      />
 
       {/* Stat tiles */}
       {STAT_KEYS.some((k) => cfg.visible[k]) && (
@@ -664,9 +661,16 @@ export function NOCDashboard({ tenantId }: Props) {
 
 function StatCard({ label, value, color }: { label: string; value: number | string; color: string }) {
   return (
-    <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-xl p-3">
-      <div className="text-xl font-semibold tabular-nums" style={{ color }}>{value}</div>
-      <div className="text-xs text-[var(--text-muted)] mt-0.5">{label}</div>
+    <div style={{
+      background: "var(--card-gradient)",
+      border: "1px solid var(--border)",
+      borderRadius: "var(--radius-lg)",
+      padding: "16px",
+      borderTop: `2px solid ${color}`,
+      paddingTop: "14px",
+    }}>
+      <div className="metric-number" style={{ color }}>{value}</div>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6, fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase" }}>{label}</div>
     </div>
   );
 }

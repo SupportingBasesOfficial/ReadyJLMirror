@@ -983,7 +983,7 @@ function StatusDot({ avail }: { avail?: string }) {
 const SECTION_DEFS = [
   { id: "overview",  label: "Visão Geral" },
   { id: "problems",  label: "Problemas Ativos" },
-  { id: "inventory", label: "Inventário" },
+  { id: "inventory", label: "Dados do Dispositivo" },
   { id: "tags",      label: "Grupos & Tags" },
   { id: "metrics",   label: "Todas as Métricas" },
 ] as const;
@@ -1011,29 +1011,37 @@ function SectionHeader({
   onToggleHidden: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-sm font-semibold flex-1" style={{ color: "var(--fg)" }}>{label}</span>
+    <div className="flex items-center gap-2 flex-wrap group/sec">
+      <span className="text-sm font-semibold flex-1" style={{ color: "var(--text)" }}>{label}</span>
       {children}
-      <div className="flex items-center gap-0.5 ml-auto">
+      <div className="flex items-center gap-0.5 ml-auto opacity-0 group-hover/sec:opacity-100 transition-opacity duration-150">
         <button
           onClick={onMoveUp}
           disabled={!canMoveUp}
           title="Mover seção para cima"
           className="p-1 rounded text-xs disabled:opacity-30 hover:bg-[var(--surface-2)] transition-colors"
-          style={{ color: "var(--fg-muted)" }}
-        >↑</button>
+          style={{ color: "var(--text-muted)" }}
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M3 10l5-5 5 5"/>
+          </svg>
+        </button>
         <button
           onClick={onMoveDown}
           disabled={!canMoveDown}
           title="Mover seção para baixo"
           className="p-1 rounded text-xs disabled:opacity-30 hover:bg-[var(--surface-2)] transition-colors"
-          style={{ color: "var(--fg-muted)" }}
-        >↓</button>
+          style={{ color: "var(--text-muted)" }}
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M3 6l5 5 5-5"/>
+          </svg>
+        </button>
         <button
           onClick={onToggleHidden}
           title={hidden ? "Mostrar seção" : "Ocultar seção"}
           className="p-1 rounded text-xs hover:bg-[var(--surface-2)] transition-colors"
-          style={{ color: hidden ? "var(--brand)" : "var(--fg-muted)" }}
+          style={{ color: hidden ? "var(--brand)" : "var(--text-muted)" }}
         >
           {hidden ? (
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -1257,63 +1265,50 @@ export function DeviceDetail({
     <div className="space-y-5">
 
       {/* ── Header ── */}
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <div style={{
+        background: "var(--card-gradient-elevated)",
+        border: "1px solid var(--border-2)",
+        borderRadius: "var(--radius-lg)",
+        padding: "20px 24px",
+        boxShadow: "var(--shadow-md)",
+      }}>
         {/* Breadcrumb */}
         <button
           onClick={onBack}
-          className="text-xs text-[var(--text-muted)] hover:text-[var(--brand)] transition-colors mb-3 flex items-center gap-1"
+          className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--brand)] transition-colors mb-5"
         >
-          ← Inventário
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 3L5 8l5 5"/>
+          </svg>
+          Inventário
         </button>
 
         {/* Device name + status */}
-        <div className="flex flex-wrap items-center gap-3 mb-4">
-          <StatusDot avail={agentAvail} />
-          <h2 className="text-lg font-bold text-[var(--text)] truncate">
-            {r.display_name ?? r.monitoring_resource_id}
-          </h2>
-          <Badge variant={availVariant(agentAvail)}>
-            {agentAvail === "available" ? "Online" : agentAvail === "unavailable" ? "Offline" : "Desconhecido"}
-          </Badge>
-          {inMaintenance && (
-            <Badge variant="warning">
-              Manutenção{ev?.maintenance_type === "no_data" ? " (sem coleta)" : ""}
-            </Badge>
-          )}
-          {isDisabled         && <Badge variant="muted">Desabilitado</Badge>}
-          {r.presence_state === "removed" && <Badge variant="muted">Removido</Badge>}
-        </div>
-
-        {/* Quick KPIs row */}
-        <div className="flex flex-wrap gap-4 text-xs">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[var(--text-muted)] uppercase tracking-wide text-[10px]">Problemas ativos</span>
-            <span className={`font-bold text-base tabular-nums ${activeProblems.length > 0 ? "text-[var(--red)]" : "text-[var(--text-muted)]"}`}>
-              {problemsQ.isLoading ? "…" : activeProblems.length}
-            </span>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[var(--text-muted)] uppercase tracking-wide text-[10px]">Métricas</span>
-            <span className="font-bold text-base tabular-nums text-[var(--text)]">
-              {allMetrics.length > 0 ? allMetrics.length : "…"}
-            </span>
-          </div>
-          {primaryIface?.ip && (
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[var(--text-muted)] uppercase tracking-wide text-[10px]">Endereço IP</span>
-              <span className="font-mono font-medium text-[var(--text)]">{primaryIface.ip}</span>
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <StatusDot avail={agentAvail} />
+            <div className="min-w-0">
+              <h2 className="text-2xl font-bold truncate" style={{ color: "var(--text)", letterSpacing: "-0.025em", lineHeight: 1.2 }}>
+                {r.display_name ?? r.monitoring_resource_id}
+              </h2>
+              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                <Badge variant={availVariant(agentAvail)}>
+                  {agentAvail === "available" ? "Online" : agentAvail === "unavailable" ? "Offline" : "Sem dados"}
+                </Badge>
+                {inMaintenance && (
+                  <Badge variant="warning">
+                    Manutenção{ev?.maintenance_type === "no_data" ? " (sem coleta)" : ""}
+                  </Badge>
+                )}
+                {isDisabled && <Badge variant="muted">Desabilitado</Badge>}
+                {r.presence_state === "removed" && <Badge variant="muted">Removido</Badge>}
+              </div>
             </div>
-          )}
-          {inv?.os && (
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[var(--text-muted)] uppercase tracking-wide text-[10px]">Sistema</span>
-              <span className="font-medium text-[var(--text)] truncate max-w-[160px]">{inv.os}</span>
-            </div>
-          )}
-          <div className="ml-auto flex items-center gap-2">
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
             {lastRefreshed && (
-              <span className="text-[10px] text-[var(--text-muted)] font-mono">
-                ↻ {fmtTsShort(lastRefreshed.toISOString())}
+              <span className="text-[10px] text-[var(--text-muted)] font-mono hidden sm:block">
+                {fmtTsShort(lastRefreshed.toISOString())}
               </span>
             )}
             <button
@@ -1323,9 +1318,76 @@ export function DeviceDetail({
                          text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--brand)]
                          transition-colors disabled:opacity-50 font-medium"
             >
-              {currentQ.isFetching ? <Spinner className="w-3 h-3" /> : "↻"} Atualizar
+              {currentQ.isFetching ? <Spinner className="w-3 h-3" /> : (
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M1 4.5A7 7 0 0 1 14 8M15 11.5A7 7 0 0 1 2 8"/>
+                  <polyline points="1 1 1 4.5 4.5 4.5"/>
+                  <polyline points="15 15 15 11.5 11.5 11.5"/>
+                </svg>
+              )}
+              Atualizar
             </button>
           </div>
+        </div>
+
+        {/* KPI strip */}
+        <div className="flex flex-wrap gap-2.5">
+          {/* Problems — highlighted when > 0 */}
+          <div style={{
+            background: activeProblems.length > 0
+              ? "color-mix(in srgb, #ef4444 10%, transparent)"
+              : "var(--surface-2)",
+            border: `1px solid ${activeProblems.length > 0 ? "color-mix(in srgb, #ef4444 25%, transparent)" : "var(--border)"}`,
+            borderRadius: "var(--radius-md)",
+            padding: "8px 14px",
+            minWidth: 100,
+          }}>
+            <div className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: activeProblems.length > 0 ? "#ef4444" : "var(--text-muted)" }}>
+              Problemas ativos
+            </div>
+            <div className="text-xl font-bold tabular-nums leading-none" style={{ color: activeProblems.length > 0 ? "#ef4444" : "var(--text-muted)" }}>
+              {problemsQ.isLoading ? <Spinner className="w-4 h-4" /> : activeProblems.length}
+            </div>
+          </div>
+
+          {/* Metrics count */}
+          <div style={{
+            background: "var(--surface-2)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-md)",
+            padding: "8px 14px",
+            minWidth: 80,
+          }}>
+            <div className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--text-muted)" }}>Métricas</div>
+            <div className="text-xl font-bold tabular-nums leading-none" style={{ color: "var(--text)" }}>
+              {currentQ.isLoading ? <Spinner className="w-4 h-4" /> : allMetrics.length || "—"}
+            </div>
+          </div>
+
+          {primaryIface?.ip && (
+            <div style={{
+              background: "var(--surface-2)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)",
+              padding: "8px 14px",
+            }}>
+              <div className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--text-muted)" }}>Endereço IP</div>
+              <div className="text-sm font-mono font-medium leading-none" style={{ color: "var(--text)" }}>{primaryIface.ip}</div>
+            </div>
+          )}
+
+          {inv?.os && (
+            <div style={{
+              background: "var(--surface-2)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)",
+              padding: "8px 14px",
+              maxWidth: 220,
+            }}>
+              <div className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: "var(--text-muted)" }}>Sistema</div>
+              <div className="text-sm font-medium truncate leading-none" style={{ color: "var(--text)" }}>{inv.os}</div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1592,7 +1654,7 @@ export function DeviceDetail({
         }
 
         if (sId === "metrics") {
-          if (allMetrics.length === 0) return null;
+          if (!currentQ.isLoading && allMetrics.length === 0 && currentQ.isError) return null;
           return (
             <Card key="metrics">
               <CardHeader>
@@ -1621,9 +1683,11 @@ export function DeviceDetail({
                 ) : gridMetrics.length === 0 ? (
                   <div className="text-xs text-[var(--text-muted)] space-y-2">
                     <p>
-                      {allMetrics.length - overviewIds.size > 0
-                        ? "Todas as métricas estão com valor zero."
-                        : "Nenhuma métrica adicional disponível."}
+                      {allMetrics.length === 0
+                        ? "Nenhuma métrica coletada. O agente Zabbix pode estar inativo ou sem itens configurados neste host."
+                        : allMetrics.length - overviewIds.size > 0
+                          ? "Todas as métricas estão com valor zero."
+                          : "Todas as métricas disponíveis já estão exibidas na seção Visão Geral acima."}
                     </p>
                     {allMetrics.length - overviewIds.size > 0 && (
                       <button onClick={() => changeHideZeros(false)} className="text-[var(--brand)] hover:underline">

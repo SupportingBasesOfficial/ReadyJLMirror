@@ -478,6 +478,7 @@ async def auth_logout(request: Request) -> Response:
     # Use id_token_hint as the gate (always set on OIDC login); sid may be
     # absent when Keycloak is not configured to include it in the ID token.
     # Skip for dev-bypass sessions (sid starts with "dev-sid-").
+    wants_json = "application/json" in request.headers.get("accept", "")
     if id_token_hint and not sid.startswith("dev-sid-"):
         from urllib.parse import urlencode
         logout_params: dict = {
@@ -486,11 +487,18 @@ async def auth_logout(request: Request) -> Response:
             "id_token_hint": id_token_hint,
         }
         params = urlencode(logout_params)
-        response = RedirectResponse(
-            f"{oidc.end_session_endpoint()}?{params}",
-            status_code=status.HTTP_302_FOUND)
+        logout_url = f"{oidc.end_session_endpoint()}?{params}"
+        if wants_json:
+            from fastapi.responses import JSONResponse as _JSONResponse
+            response = _JSONResponse({"redirect_url": logout_url})
+        else:
+            response = RedirectResponse(logout_url, status_code=status.HTTP_302_FOUND)
     else:
-        response = RedirectResponse("/", status_code=status.HTTP_302_FOUND)
+        if wants_json:
+            from fastapi.responses import JSONResponse as _JSONResponse
+            response = _JSONResponse({"redirect_url": "/"})
+        else:
+            response = RedirectResponse("/", status_code=status.HTTP_302_FOUND)
     _clear_auth_cookies(response)
     return response
 

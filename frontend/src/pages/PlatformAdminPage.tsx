@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
-import { X, Plus, Building2, Server, FileText, Activity, Tv2, Network, Copy, Trash2, Users, GitMerge, KeyRound, ShieldOff, ShieldCheck, Search } from "lucide-react";
+import { X, Plus, Building2, Server, FileText, Activity, Tv2, Network, Copy, Trash2, Users, GitMerge, KeyRound, ShieldOff, ShieldCheck, Search, Package, Eye, EyeOff, Archive, RotateCcw, Tag, Gauge } from "lucide-react";
 import { InfoIcon } from "@/components/ui/tooltip";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -844,6 +844,623 @@ function TenantsTab() {
             {t("platformAdmin.tenants.noOrgWarning")}
           </p>
         </Modal>
+      )}
+    </Card>
+  );
+}
+
+// ── Aba Planos (G13) ──────────────────────────────────────────────────────────
+
+interface Plan {
+  plan_id: string;
+  display_name: string;
+  description: string | null;
+  visible: boolean;
+  sort_order: number;
+  price_monthly: number | null;
+  price_currency: string;
+  state: "active" | "archived";
+  created_at: string;
+  updated_at: string;
+  capabilities: string[];
+  quotas: { quota_key: string; quota_value: number }[];
+  active_contracts: number;
+}
+
+function PlanModal({
+  plan,
+  onClose,
+}: {
+  plan: Plan | null;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const isEdit = !!plan;
+
+  const [planId, setPlanId] = useState(plan?.plan_id ?? "");
+  const [displayName, setDisplayName] = useState(plan?.display_name ?? "");
+  const [description, setDescription] = useState(plan?.description ?? "");
+  const [visible, setVisible] = useState(plan?.visible ?? true);
+  const [sortOrder, setSortOrder] = useState(String(plan?.sort_order ?? 0));
+  const [priceMonthly, setPriceMonthly] = useState(
+    plan?.price_monthly != null ? String(plan.price_monthly) : ""
+  );
+  const [priceCurrency, setPriceCurrency] = useState(plan?.price_currency ?? "BRL");
+  const [error, setError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: () => {
+      const body = {
+        display_name: displayName.trim(),
+        description: description.trim() || null,
+        visible,
+        sort_order: parseInt(sortOrder) || 0,
+        price_monthly: priceMonthly ? parseFloat(priceMonthly) : null,
+        price_currency: priceCurrency.trim() || "BRL",
+      };
+      if (isEdit) {
+        return api.patch(`/api/v1/platform/plans/${plan!.plan_id}`, body);
+      }
+      return api.post("/api/v1/platform/plans", {
+        ...body,
+        plan_id: planId.trim(),
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["platform-plans"] });
+      toast({ title: isEdit ? t("plans.updatedToast") : t("plans.createdToast") });
+      onClose();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-5 w-full max-w-lg space-y-4">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold">
+            {isEdit ? t("plans.editTitle") : t("plans.createTitle")}
+          </span>
+          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)]">
+            <X size={15} />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          {!isEdit && (
+            <div>
+              <label className="block text-xs text-[var(--text-muted)] mb-1">
+                {t("plans.fieldId")}
+              </label>
+              <input
+                value={planId}
+                onChange={(e) => setPlanId(e.target.value)}
+                placeholder="ex: starter, pro, enterprise"
+                className="w-full text-sm bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 focus:outline-none focus:border-[var(--brand)]"
+              />
+              <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                {t("plans.fieldIdHint")}
+              </p>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">
+              {t("plans.fieldName")}
+            </label>
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder={t("plans.fieldNamePlaceholder")}
+              className="w-full text-sm bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 focus:outline-none focus:border-[var(--brand)]"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-[var(--text-muted)] mb-1">
+              {t("plans.fieldDesc")}
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+              placeholder={t("plans.fieldDescPlaceholder")}
+              className="w-full text-sm bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 focus:outline-none focus:border-[var(--brand)] resize-none"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-[var(--text-muted)] mb-1">
+                {t("plans.fieldPrice")}
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={priceMonthly}
+                onChange={(e) => setPriceMonthly(e.target.value)}
+                placeholder="0.00"
+                className="w-full text-sm bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 focus:outline-none focus:border-[var(--brand)]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[var(--text-muted)] mb-1">
+                {t("plans.fieldCurrency")}
+              </label>
+              <input
+                value={priceCurrency}
+                onChange={(e) => setPriceCurrency(e.target.value)}
+                maxLength={3}
+                placeholder="BRL"
+                className="w-full text-sm bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 focus:outline-none focus:border-[var(--brand)]"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-[var(--text-muted)] mb-1">
+                {t("plans.fieldOrder")}
+              </label>
+              <input
+                type="number"
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value)}
+                className="w-full text-sm bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 focus:outline-none focus:border-[var(--brand)]"
+              />
+            </div>
+            <div className="flex items-end pb-0.5">
+              <label className="flex items-center gap-2 text-xs text-[var(--text)] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={visible}
+                  onChange={(e) => setVisible(e.target.checked)}
+                  className="rounded"
+                />
+                {t("plans.fieldVisible")}
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <p className="text-xs text-red-500">{error}</p>
+        )}
+
+        <div className="flex gap-2 justify-end">
+          <Button size="sm" variant="secondary" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => save.mutate()}
+            disabled={save.isPending || !displayName.trim() || (!isEdit && !planId.trim())}
+          >
+            {save.isPending ? <Spinner size={12} /> : (isEdit ? t("common.save") : t("common.create"))}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlanDetail({
+  plan,
+  onClose,
+}: {
+  plan: Plan;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [newCap, setNewCap] = useState("");
+  const [newQuotaKey, setNewQuotaKey] = useState("");
+  const [newQuotaVal, setNewQuotaVal] = useState("-1");
+  const [capError, setCapError] = useState<string | null>(null);
+  const [quotaError, setQuotaError] = useState<string | null>(null);
+
+  const addCap = useMutation({
+    mutationFn: () =>
+      api.post(`/api/v1/platform/plans/${plan.plan_id}/capabilities`, {
+        capability: newCap.trim().toLowerCase(),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["platform-plans"] });
+      setNewCap("");
+      setCapError(null);
+      toast({ title: t("plans.capAdded") });
+    },
+    onError: (e: Error) => setCapError(e.message),
+  });
+
+  const removeCap = useMutation({
+    mutationFn: (cap: string) =>
+      api.delete(`/api/v1/platform/plans/${plan.plan_id}/capabilities/${encodeURIComponent(cap)}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["platform-plans"] });
+      toast({ title: t("plans.capRemoved") });
+    },
+  });
+
+  const setQuota = useMutation({
+    mutationFn: () =>
+      api.post(`/api/v1/platform/plans/${plan.plan_id}/quotas`, {
+        quota_key: newQuotaKey.trim().toLowerCase(),
+        quota_value: parseInt(newQuotaVal),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["platform-plans"] });
+      setNewQuotaKey("");
+      setNewQuotaVal("-1");
+      setQuotaError(null);
+      toast({ title: t("plans.quotaSet") });
+    },
+    onError: (e: Error) => setQuotaError(e.message),
+  });
+
+  const removeQuota = useMutation({
+    mutationFn: (key: string) =>
+      api.delete(`/api/v1/platform/plans/${plan.plan_id}/quotas/${encodeURIComponent(key)}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["platform-plans"] });
+      toast({ title: t("plans.quotaRemoved") });
+    },
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-5 w-full max-w-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="text-sm font-semibold">{plan.display_name}</span>
+            <span className="ml-2 text-[10px] text-[var(--text-muted)] font-mono">{plan.plan_id}</span>
+          </div>
+          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)]">
+            <X size={15} />
+          </button>
+        </div>
+
+        {plan.description && (
+          <p className="text-xs text-[var(--text-muted)] whitespace-pre-wrap leading-relaxed">
+            {plan.description}
+          </p>
+        )}
+
+        {/* Capabilities */}
+        <div>
+          <div className="flex items-center gap-1.5 mb-2">
+            <Tag size={12} className="text-[var(--text-muted)]" />
+            <span className="text-xs font-medium">{t("plans.capabilities")}</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {plan.capabilities.length === 0 && (
+              <span className="text-xs text-[var(--text-muted)]">{t("plans.noCaps")}</span>
+            )}
+            {plan.capabilities.map((cap) => (
+              <span
+                key={cap}
+                className="inline-flex items-center gap-1 text-[11px] bg-[var(--bg)] border border-[var(--border)] rounded-full px-2.5 py-0.5"
+              >
+                {cap}
+                <button
+                  onClick={() => removeCap.mutate(cap)}
+                  className="text-[var(--text-muted)] hover:text-red-500 ml-0.5"
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={newCap}
+              onChange={(e) => setNewCap(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && newCap.trim() && addCap.mutate()}
+              placeholder={t("plans.capPlaceholder")}
+              className="flex-1 text-xs bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-1.5 focus:outline-none focus:border-[var(--brand)]"
+            />
+            <Button
+              size="sm"
+              onClick={() => addCap.mutate()}
+              disabled={!newCap.trim() || addCap.isPending}
+            >
+              <Plus size={12} />
+            </Button>
+          </div>
+          {capError && <p className="text-[10px] text-red-500 mt-1">{capError}</p>}
+        </div>
+
+        {/* Quotas */}
+        <div>
+          <div className="flex items-center gap-1.5 mb-2">
+            <Gauge size={12} className="text-[var(--text-muted)]" />
+            <span className="text-xs font-medium">{t("plans.quotas")}</span>
+          </div>
+          {plan.quotas.length > 0 && (
+            <table className="w-full text-xs mb-3">
+              <thead>
+                <tr className="border-b border-[var(--border)]">
+                  <th className="text-left text-[var(--text-muted)] font-normal py-1 pr-4">
+                    {t("plans.quotaKey")}
+                  </th>
+                  <th className="text-left text-[var(--text-muted)] font-normal py-1 pr-4">
+                    {t("plans.quotaValue")}
+                  </th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {plan.quotas.map((q) => (
+                  <tr key={q.quota_key} className="border-b border-[var(--border)]">
+                    <td className="py-1.5 pr-4 font-mono text-[11px]">{q.quota_key}</td>
+                    <td className="py-1.5 pr-4">
+                      {q.quota_value === -1 ? (
+                        <span className="text-[var(--text-muted)]">{t("plans.unlimited")}</span>
+                      ) : (
+                        q.quota_value.toLocaleString("pt-BR")
+                      )}
+                    </td>
+                    <td className="py-1.5 text-right">
+                      <button
+                        onClick={() => removeQuota.mutate(q.quota_key)}
+                        className="text-[var(--text-muted)] hover:text-red-500"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {plan.quotas.length === 0 && (
+            <p className="text-xs text-[var(--text-muted)] mb-3">{t("plans.noQuotas")}</p>
+          )}
+          <div className="flex gap-2">
+            <input
+              value={newQuotaKey}
+              onChange={(e) => setNewQuotaKey(e.target.value)}
+              placeholder={t("plans.quotaKeyPlaceholder")}
+              className="flex-1 text-xs bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-1.5 focus:outline-none focus:border-[var(--brand)]"
+            />
+            <input
+              value={newQuotaVal}
+              onChange={(e) => setNewQuotaVal(e.target.value)}
+              type="number"
+              min={-1}
+              placeholder="-1"
+              className="w-24 text-xs bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-1.5 focus:outline-none focus:border-[var(--brand)]"
+            />
+            <Button
+              size="sm"
+              onClick={() => setQuota.mutate()}
+              disabled={!newQuotaKey.trim() || setQuota.isPending}
+            >
+              <Plus size={12} />
+            </Button>
+          </div>
+          <p className="text-[10px] text-[var(--text-muted)] mt-1">{t("plans.quotaHint")}</p>
+          {quotaError && <p className="text-[10px] text-red-500 mt-1">{quotaError}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlansTab() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState<Plan | null>(null);
+  const [detail, setDetail] = useState<Plan | null>(null);
+
+  const { data: plans = [], isLoading, error } = useQuery<Plan[]>({
+    queryKey: ["platform-plans"],
+    queryFn: () => api.get("/api/v1/platform/plans").then((r) => r.data),
+  });
+
+  const toggleVisible = useMutation({
+    mutationFn: (plan: Plan) =>
+      api.patch(`/api/v1/platform/plans/${plan.plan_id}`, {
+        visible: !plan.visible,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["platform-plans"] });
+      toast({ title: t("plans.visibilityToggled") });
+    },
+  });
+
+  const archivePlan = useMutation({
+    mutationFn: (plan: Plan) =>
+      api.post(`/api/v1/platform/plans/${plan.plan_id}/archive`),
+    onSuccess: (_, plan) => {
+      qc.invalidateQueries({ queryKey: ["platform-plans"] });
+      toast({ title: t("plans.archivedToast", { name: plan.display_name }) });
+    },
+  });
+
+  const restorePlan = useMutation({
+    mutationFn: (plan: Plan) =>
+      api.post(`/api/v1/platform/plans/${plan.plan_id}/restore`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["platform-plans"] });
+      toast({ title: t("plans.restoredToast") });
+    },
+  });
+
+  const active = plans.filter((p) => p.state === "active");
+  const archived = plans.filter((p) => p.state === "archived");
+
+  if (isLoading) return <Spinner />;
+  if (error)
+    return (
+      <p className="text-xs text-red-500">{t("plans.loadError")}</p>
+    );
+
+  const renderPlanCard = (plan: Plan) => (
+    <div
+      key={plan.plan_id}
+      className={[
+        "border rounded-xl p-4 space-y-3 transition-opacity",
+        plan.state === "archived" ? "opacity-60" : "",
+        "border-[var(--border)] bg-[var(--card-gradient)]",
+      ].join(" ")}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold truncate">
+              {plan.display_name}
+            </span>
+            {plan.state === "archived" && (
+              <Badge variant="secondary">{t("plans.archived")}</Badge>
+            )}
+            {plan.state === "active" && !plan.visible && (
+              <Badge variant="secondary">{t("plans.hidden")}</Badge>
+            )}
+            {plan.active_contracts > 0 && (
+              <Badge>
+                {t("plans.activeContracts", { count: plan.active_contracts })}
+              </Badge>
+            )}
+          </div>
+          <span className="text-[10px] text-[var(--text-muted)] font-mono">
+            {plan.plan_id}
+          </span>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {plan.state === "active" && (
+            <>
+              <button
+                onClick={() => toggleVisible.mutate(plan)}
+                title={plan.visible ? t("plans.hide") : t("plans.show")}
+                className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--bg)]"
+              >
+                {plan.visible ? <Eye size={13} /> : <EyeOff size={13} />}
+              </button>
+              <button
+                onClick={() => setEditing(plan)}
+                title={t("common.edit")}
+                className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--bg)]"
+              >
+                <FileText size={13} />
+              </button>
+              <button
+                onClick={() => archivePlan.mutate(plan)}
+                title={t("plans.archive")}
+                className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--bg)]"
+              >
+                <Archive size={13} />
+              </button>
+            </>
+          )}
+          {plan.state === "archived" && (
+            <button
+              onClick={() => restorePlan.mutate(plan)}
+              title={t("plans.restore")}
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--brand)] hover:bg-[var(--bg)]"
+            >
+              <RotateCcw size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {plan.description && (
+        <p className="text-[11px] text-[var(--text-muted)] line-clamp-2 leading-relaxed">
+          {plan.description}
+        </p>
+      )}
+
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1">
+          {plan.capabilities.slice(0, 5).map((cap) => (
+            <span
+              key={cap}
+              className="text-[10px] bg-[var(--bg)] border border-[var(--border)] rounded-full px-2 py-0.5"
+            >
+              {cap}
+            </span>
+          ))}
+          {plan.capabilities.length > 5 && (
+            <span className="text-[10px] text-[var(--text-muted)]">
+              +{plan.capabilities.length - 5}
+            </span>
+          )}
+          {plan.capabilities.length === 0 && (
+            <span className="text-[10px] text-[var(--text-muted)]">
+              {t("plans.noCaps")}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {plan.price_monthly != null && (
+            <span className="text-xs font-medium">
+              {plan.price_currency}{" "}
+              {plan.price_monthly.toLocaleString("pt-BR", {
+                minimumFractionDigits: 2,
+              })}
+              <span className="text-[var(--text-muted)] font-normal">/mês</span>
+            </span>
+          )}
+          <button
+            onClick={() => setDetail(plan)}
+            className="text-[10px] text-[var(--brand)] hover:underline"
+          >
+            {t("plans.manageDetail")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Package size={14} />
+          <span className="text-sm font-semibold">{t("plans.header")}</span>
+          <Badge variant="secondary">{active.length}</Badge>
+        </div>
+        <Button size="sm" onClick={() => setShowCreate(true)}>
+          <Plus size={13} /> {t("plans.createBtn")}
+        </Button>
+      </CardHeader>
+
+      {active.length === 0 && archived.length === 0 && (
+        <p className="text-xs text-[var(--text-muted)] py-4 text-center">
+          {t("plans.empty")}
+        </p>
+      )}
+
+      <div className="space-y-3">
+        {active.map(renderPlanCard)}
+      </div>
+
+      {archived.length > 0 && (
+        <div className="mt-5">
+          <p className="text-[10px] text-[var(--text-muted)] mb-2 flex items-center gap-1">
+            <Archive size={10} /> {t("plans.archivedSection")}
+          </p>
+          <div className="space-y-3">
+            {archived.map(renderPlanCard)}
+          </div>
+        </div>
+      )}
+
+      {(showCreate || editing) && (
+        <PlanModal
+          plan={editing}
+          onClose={() => { setShowCreate(false); setEditing(null); }}
+        />
+      )}
+      {detail && (
+        <PlanDetail plan={detail} onClose={() => setDetail(null)} />
       )}
     </Card>
   );
@@ -2496,7 +3113,7 @@ function TeiaTab() {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
-type Tab = "orgs" | "tenants" | "contracts" | "health" | "tv" | "teia" | "relationships" | "users";
+type Tab = "orgs" | "tenants" | "plans" | "contracts" | "health" | "tv" | "teia" | "relationships" | "users";
 
 export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
   const { t } = useTranslation();
@@ -2508,6 +3125,7 @@ export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string })
     { id: "tenants", label: t("platformAdmin.tabs.tenants"), icon: <Server size={14} /> },
     { id: "relationships", label: t("platformAdmin.tabs.relationships"), icon: <GitMerge size={14} /> },
     { id: "users", label: t("platformAdmin.tabs.users"), icon: <Users size={14} /> },
+    { id: "plans", label: t("platformAdmin.tabs.plans"), icon: <Package size={14} /> },
     { id: "contracts", label: t("platformAdmin.tabs.contracts"), icon: <FileText size={14} /> },
     { id: "health", label: t("platformAdmin.tabs.health"), icon: <Activity size={14} /> },
     { id: "tv", label: t("platformAdmin.tabs.tv"), icon: <Tv2 size={14} /> },
@@ -2549,6 +3167,7 @@ export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string })
 
       {activeTab === "orgs" && <OrgsTab />}
       {activeTab === "tenants" && <TenantsTab />}
+      {activeTab === "plans" && <PlansTab />}
       {activeTab === "contracts" && <ContractsTab />}
       {activeTab === "health" && <HealthTab />}
       {activeTab === "tv" && <TVModeTab />}

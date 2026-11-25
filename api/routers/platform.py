@@ -9,6 +9,7 @@ is the privilege; all mutations emit durable audit evidence.
 from __future__ import annotations
 
 import asyncio
+import re as _re
 import secrets
 
 import httpx
@@ -1280,3 +1281,347 @@ async def reset_user_password(
     response.headers["Cache-Control"] = "no-store"
     return {"principal_id": user_id, "temp_password": new_pw,
             "must_change_password": True}
+
+
+# ── Plan Catalog (G13 — Record #69, 2026-11-25) ────────────────────────────
+
+_PLAN_ID_RE = _re.compile(r"^[a-z0-9][a-z0-9\-]{0,48}[a-z0-9]$")
+
+
+class PlanCreate(BaseModel):
+    plan_id: str
+    display_name: str
+    description: str | None = None
+    visible: bool = True
+    sort_order: int = 0
+    price_monthly: float | None = None
+    price_currency: str = "BRL"
+
+
+class PlanUpdate(BaseModel):
+    display_name: str | None = None
+    description: str | None = None
+    visible: bool | None = None
+    sort_order: int | None = None
+    price_monthly: float | None = None
+    price_currency: str | None = None
+
+
+class PlanCapabilityBody(BaseModel):
+    capability: str
+
+
+class PlanQuotaBody(BaseModel):
+    quota_key: str
+    quota_value: int  # -1 = ilimitado
+
+
+@router.get("/plans")
+async def list_plans(request: Request) -> list[dict]:
+    """Lista planos. Platform admin vê todos; autenticados veem só visible + active."""
+    ctx = getattr(request.state, "jlmirror_context", None)
+    if ctx is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    async with db_connection() as conn:
+        is_admin = await access.principal_is_platform_admin(
+            conn, ctx["principal_id"])
+        where = ("" if is_admin
+                 else "WHERE p.state = 'active' AND p.visible = TRUE")
+        cur = await conn.execute(
+            f"""
+            SELECT p.plan_id, p.display_name, p.description,
+                   p.visible, p.sort_order, p.price_monthly,
+                   p.price_currency, p.state,
+                   p.created_at, p.updated_at,
+                   COALESCE(json_agg(DISTINCT pc.capability)
+                       FILTER (WHERE pc.capability IS NOT NULL), '[]') AS capabilities,
+                   COALESCE(
+                       json_agg(json_build_object(
+                           'quota_key', pq.quota_key,
+                           'quota_value', pq.quota_value)
+                       ) FILTER (WHERE pq.quota_key IS NOT NULL), '[]') AS quotas,
+                   (SELECT count(*) FROM g1.contracts c
+                    WHERE c.plan_ref = p.plan_id AND c.state = 'active'
+                   ) AS active_contracts
+              FROM g1.plans p
+              LEFT JOIN g1.plan_capabilities pc ON pc.plan_id = p.plan_id
+              LEFT JOIN g1.plan_quotas pq ON pq.plan_id = p.plan_id
+            {where}
+             GROUP BY p.plan_id
+             ORDER BY p.sort_order, p.plan_id
+            """)
+        return [
+            {
+                "plan_id": r[0],
+                "display_name": r[1],
+                "description": r[2],
+                "visible": r[3],
+                "sort_order": r[4],
+                "price_monthly": float(r[5]) if r[5] is not None else None,
+                "price_currency": r[6],
+                "state": r[7],
+                "created_at": r[8].isoformat(),
+                "updated_at": r[9].isoformat(),
+                "capabilities": r[10],
+                "quotas": r[11],
+                "active_contracts": int(r[12]),
+            }
+            for r in await cur.fetchall()
+        ]
+
+
+@router.post("/plans", status_code=201)
+async def create_plan(request: Request, body: PlanCreate) -> dict:
+    if not _PLAN_ID_RE.match(body.plan_id):
+        raise HTTPException(
+            status_code=422,
+            detail="plan_id deve ser um slug minúsculo (a-z, 0-9, hífens, 2-50 chars)")
+    if body.price_monthly is not None and body.price_monthly < 0:
+        raise HTTPException(status_code=422,
+                            detail="price_monthly deve ser >= 0")
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        try:
+            await conn.execute(
+                """
+                INSERT INTO g1.plans
+                    (plan_id, display_name, description, visible,
+                     sort_order, price_monthly, price_currency)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (body.plan_id, body.display_name, body.description,
+                 body.visible, body.sort_order, body.price_monthly,
+                 body.price_currency))
+        except Exception as exc:
+            if "duplicate" in str(exc).lower() or "unique" in str(exc).lower():
+                raise HTTPException(status_code=409,
+                                    detail=f"plan_id '{body.plan_id}' já existe")
+            raise
+        await record_audit_event(
+            conn, "platform",
+            action="platform.plan.created",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="plan", subject_id=body.plan_id,
+            detail={"display_name": body.display_name,
+                    "visible": body.visible,
+                    "price_monthly": body.price_monthly,
+                    "price_currency": body.price_currency})
+        await conn.commit()
+    return {"plan_id": body.plan_id}
+
+
+@router.patch("/plans/{plan_id}")
+async def update_plan(request: Request, plan_id: str,
+                      body: PlanUpdate) -> dict:
+    actor = await _require_platform_admin(request)
+    sets: list[str] = []
+    params: list = []
+    if body.display_name is not None:
+        sets.append("display_name = %s")
+        params.append(body.display_name)
+    if body.description is not None:
+        sets.append("description = %s")
+        params.append(body.description)
+    if body.visible is not None:
+        sets.append("visible = %s")
+        params.append(body.visible)
+    if body.sort_order is not None:
+        sets.append("sort_order = %s")
+        params.append(body.sort_order)
+    if body.price_monthly is not None:
+        if body.price_monthly < 0:
+            raise HTTPException(status_code=422,
+                                detail="price_monthly deve ser >= 0")
+        sets.append("price_monthly = %s")
+        params.append(body.price_monthly)
+    if body.price_currency is not None:
+        sets.append("price_currency = %s")
+        params.append(body.price_currency)
+    if not sets:
+        raise HTTPException(status_code=422, detail="nada para atualizar")
+    sets.append("updated_at = now()")
+    params.append(plan_id)
+    async with db_tenant_connection("platform") as conn:
+        cur = await conn.execute(
+            f"UPDATE g1.plans SET {', '.join(sets)} WHERE plan_id = %s",
+            tuple(params))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="plano não encontrado")
+        await record_audit_event(
+            conn, "platform",
+            action="platform.plan.updated",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="plan", subject_id=plan_id,
+            detail={k: v for k, v in body.model_dump().items()
+                    if v is not None})
+        await conn.commit()
+    return {"plan_id": plan_id}
+
+
+@router.post("/plans/{plan_id}/archive")
+async def archive_plan(request: Request, plan_id: str) -> dict:
+    """Arquiva um plano. Contratos existentes continuam; ficam marcados como
+    'plano descontinuado' na UI. Não bloqueia — Mauricio decide migrar depois."""
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        cur_count = await conn.execute(
+            "SELECT count(*) FROM g1.contracts WHERE plan_ref = %s AND state = 'active'",
+            (plan_id,))
+        row = await cur_count.fetchone()
+        active_contracts = int(row[0])
+        cur = await conn.execute(
+            "UPDATE g1.plans SET state = 'archived', updated_at = now() "
+            "WHERE plan_id = %s AND state = 'active'",
+            (plan_id,))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404,
+                                detail="plano não encontrado ou já arquivado")
+        await record_audit_event(
+            conn, "platform",
+            action="platform.plan.archived",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="plan", subject_id=plan_id,
+            detail={"active_contracts_at_archive": active_contracts})
+        await conn.commit()
+    return {"plan_id": plan_id, "state": "archived",
+            "active_contracts": active_contracts}
+
+
+@router.post("/plans/{plan_id}/restore")
+async def restore_plan(request: Request, plan_id: str) -> dict:
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        cur = await conn.execute(
+            "UPDATE g1.plans SET state = 'active', updated_at = now() "
+            "WHERE plan_id = %s AND state = 'archived'",
+            (plan_id,))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404,
+                                detail="plano não encontrado ou não está arquivado")
+        await record_audit_event(
+            conn, "platform",
+            action="platform.plan.restored",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="plan", subject_id=plan_id,
+            detail={})
+        await conn.commit()
+    return {"plan_id": plan_id, "state": "active"}
+
+
+@router.post("/plans/{plan_id}/capabilities", status_code=201)
+async def add_plan_capability(request: Request, plan_id: str,
+                               body: PlanCapabilityBody) -> dict:
+    cap = body.capability.strip().lower()
+    if not cap or len(cap) > 100:
+        raise HTTPException(status_code=422,
+                            detail="capability obrigatória (máx 100 chars)")
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        # Verifica se o plano existe
+        cur = await conn.execute(
+            "SELECT 1 FROM g1.plans WHERE plan_id = %s", (plan_id,))
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="plano não encontrado")
+        await conn.execute(
+            "INSERT INTO g1.plan_capabilities (plan_id, capability) "
+            "VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (plan_id, cap))
+        await conn.execute(
+            "UPDATE g1.plans SET updated_at = now() WHERE plan_id = %s",
+            (plan_id,))
+        await record_audit_event(
+            conn, "platform",
+            action="platform.plan.capability_added",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="plan", subject_id=plan_id,
+            detail={"capability": cap})
+        await conn.commit()
+    return {"plan_id": plan_id, "capability": cap}
+
+
+@router.delete("/plans/{plan_id}/capabilities/{capability}")
+async def remove_plan_capability(request: Request, plan_id: str,
+                                  capability: str) -> dict:
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        cur = await conn.execute(
+            "DELETE FROM g1.plan_capabilities "
+            "WHERE plan_id = %s AND capability = %s",
+            (plan_id, capability))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404,
+                                detail="capability não encontrada no plano")
+        await conn.execute(
+            "UPDATE g1.plans SET updated_at = now() WHERE plan_id = %s",
+            (plan_id,))
+        await record_audit_event(
+            conn, "platform",
+            action="platform.plan.capability_removed",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="plan", subject_id=plan_id,
+            detail={"capability": capability})
+        await conn.commit()
+    return {"plan_id": plan_id, "capability": capability, "removed": True}
+
+
+@router.post("/plans/{plan_id}/quotas", status_code=201)
+async def set_plan_quota(request: Request, plan_id: str,
+                          body: PlanQuotaBody) -> dict:
+    key = body.quota_key.strip().lower()
+    if not key or len(key) > 100:
+        raise HTTPException(status_code=422,
+                            detail="quota_key obrigatória (máx 100 chars)")
+    if body.quota_value != -1 and body.quota_value < 0:
+        raise HTTPException(
+            status_code=422,
+            detail="quota_value deve ser -1 (ilimitado) ou >= 0")
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        cur = await conn.execute(
+            "SELECT 1 FROM g1.plans WHERE plan_id = %s", (plan_id,))
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="plano não encontrado")
+        await conn.execute(
+            """
+            INSERT INTO g1.plan_quotas (plan_id, quota_key, quota_value)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (plan_id, quota_key)
+            DO UPDATE SET quota_value = EXCLUDED.quota_value
+            """,
+            (plan_id, key, body.quota_value))
+        await conn.execute(
+            "UPDATE g1.plans SET updated_at = now() WHERE plan_id = %s",
+            (plan_id,))
+        await record_audit_event(
+            conn, "platform",
+            action="platform.plan.quota_set",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="plan", subject_id=plan_id,
+            detail={"quota_key": key, "quota_value": body.quota_value})
+        await conn.commit()
+    return {"plan_id": plan_id, "quota_key": key,
+            "quota_value": body.quota_value}
+
+
+@router.delete("/plans/{plan_id}/quotas/{quota_key}")
+async def remove_plan_quota(request: Request, plan_id: str,
+                             quota_key: str) -> dict:
+    actor = await _require_platform_admin(request)
+    async with db_tenant_connection("platform") as conn:
+        cur = await conn.execute(
+            "DELETE FROM g1.plan_quotas WHERE plan_id = %s AND quota_key = %s",
+            (plan_id, quota_key))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404,
+                                detail="quota não encontrada no plano")
+        await conn.execute(
+            "UPDATE g1.plans SET updated_at = now() WHERE plan_id = %s",
+            (plan_id,))
+        await record_audit_event(
+            conn, "platform",
+            action="platform.plan.quota_removed",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="plan", subject_id=plan_id,
+            detail={"quota_key": quota_key})
+        await conn.commit()
+    return {"plan_id": plan_id, "quota_key": quota_key, "removed": True}

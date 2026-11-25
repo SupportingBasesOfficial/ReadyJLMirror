@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { PageHeader } from "@/components/ui/page-header";
 import { AlertDetail } from "./AlertDetail";
 
 interface RawAlert {
@@ -246,25 +247,27 @@ export function AlertsPage({ tenantId }: { tenantId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <h2 className="text-base font-semibold">{t("alerts.title")}</h2>
-        <div className="flex gap-1.5 flex-wrap">
-          {(["active", "all"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setAndSaveFilter(f)}
-              className={[
-                "px-3 py-1 rounded-full text-xs cursor-pointer border transition-colors",
-                filter === f
-                  ? "border-[var(--brand)] text-[var(--brand)] bg-[var(--surface-2)]"
-                  : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--text-muted)]",
-              ].join(" ")}
-            >
-              {f === "active" ? t("alerts.filterActive") : t("alerts.filterAll")}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageHeader
+        title={t("alerts.title")}
+        actions={
+          <div className="flex gap-1.5 flex-wrap">
+            {(["active", "all"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setAndSaveFilter(f)}
+                className={[
+                  "px-3 py-1 rounded-full text-xs cursor-pointer border transition-colors",
+                  filter === f
+                    ? "border-[var(--brand)] text-[var(--brand)] bg-[var(--surface-2)]"
+                    : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--text-muted)]",
+                ].join(" ")}
+              >
+                {f === "active" ? t("alerts.filterActive") : t("alerts.filterAll")}
+              </button>
+            ))}
+          </div>
+        }
+      />
 
       {/* Severity filter */}
       <div className="flex gap-1.5 flex-wrap items-center">

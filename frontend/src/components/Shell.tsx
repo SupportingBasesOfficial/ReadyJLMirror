@@ -295,89 +295,211 @@ export function Shell() {
   }
 
   if (s.state === "unauthenticated") {
+    const healthDots = Array.from({ length: 60 }, (_, i) => {
+      if (i === 15) return { color: "#F87171", opacity: 1 };
+      if (i === 7 || i === 33 || i === 51) return { color: "#FBBF24", opacity: 0.95 };
+      return { color: "#1BA898", opacity: 0.3 + (i % 7) * 0.1 };
+    });
     return (
-      <div style={{
-        minHeight: "100vh", display: "flex", flexDirection: "column",
-        alignItems: "center", justifyContent: "center",
-        background: "radial-gradient(ellipse 80% 60% at 50% -10%, #0d2420 0%, #07100E 65%)",
-        position: "relative", overflow: "hidden",
-      }}>
-        {/* Subtle grid */}
-        <div style={{
-          position: "absolute", inset: 0, opacity: 0.04, pointerEvents: "none",
-          backgroundImage: "linear-gradient(#1E302C 1px, transparent 1px), linear-gradient(90deg, #1E302C 1px, transparent 1px)",
-          backgroundSize: "48px 48px",
-        }} />
+      <>
+        <style>{`
+          @keyframes argos-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.6); }
+            60% { box-shadow: 0 0 0 5px rgba(74,222,128,0); }
+          }
+          @keyframes argos-scan {
+            0% { top: 0; opacity: 0.5; }
+            100% { top: 100%; opacity: 0; }
+          }
+          .argos-landing {
+            min-height: 100vh;
+            background: #060D0B;
+            display: grid;
+            grid-template-columns: 55fr 45fr;
+            position: relative;
+            overflow: hidden;
+          }
+          @media (max-width: 860px) {
+            .argos-landing { grid-template-columns: 1fr; }
+            .argos-right-col { display: none !important; }
+            .argos-left-col {
+              padding: 52px 32px !important;
+              align-items: center !important;
+            }
+            .argos-headline { font-size: 36px !important; }
+            .argos-desc { max-width: 100% !important; }
+            .argos-cta-wrap { max-width: 100% !important; }
+          }
+        `}</style>
 
-        <div style={{ position: "relative", zIndex: 1, maxWidth: 440, width: "100%", padding: "0 24px" }}>
-          {/* Logo */}
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 36, justifyContent: "center" }}>
-            <svg viewBox="0 0 100 100" width={46} height={46} style={{ borderRadius: 12, flexShrink: 0 }}>
-              <rect width="100" height="100" rx="22" fill="#1b3f82"/>
-              <line x1="16" y1="24" x2="44" y2="24" stroke="white" strokeWidth="8.5" strokeLinecap="round"/>
-              <path d="M 35,24 L 35,66 Q 35,80 23,80 Q 11,80 11,67" stroke="white" strokeWidth="8.5" strokeLinecap="round" fill="none"/>
-              <polyline points="55,24 55,78 83,78" stroke="white" strokeWidth="8.5" strokeLinecap="round" fill="none"/>
-            </svg>
-            <div>
-              <div style={{ fontSize: 28, fontWeight: 700, color: "#1BA898", letterSpacing: "-0.5px", lineHeight: 1 }}>Argos</div>
-              <div style={{ fontSize: 11, color: "#4d6660", letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 3 }}>by JL Informática</div>
+        <div className="argos-landing">
+          <div style={{
+            position: "absolute", inset: 0, pointerEvents: "none",
+            background: "radial-gradient(ellipse 50% 70% at 10% 50%, rgba(27,168,152,0.07) 0%, transparent 65%)",
+          }} />
+          <div style={{
+            position: "absolute", inset: 0, pointerEvents: "none", opacity: 0.025,
+            backgroundImage: "linear-gradient(#1BA898 1px, transparent 1px), linear-gradient(90deg, #1BA898 1px, transparent 1px)",
+            backgroundSize: "44px 44px",
+          }} />
+
+          {/* LEFT */}
+          <div className="argos-left-col" style={{
+            display: "flex", flexDirection: "column", justifyContent: "center",
+            padding: "64px 56px 64px 72px", position: "relative", zIndex: 1,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 52 }}>
+              <svg viewBox="0 0 100 100" width={40} height={40} style={{ borderRadius: 10, flexShrink: 0 }}>
+                <rect width="100" height="100" rx="22" fill="#1b3f82"/>
+                <line x1="16" y1="24" x2="44" y2="24" stroke="white" strokeWidth="8.5" strokeLinecap="round"/>
+                <path d="M 35,24 L 35,66 Q 35,80 23,80 Q 11,80 11,67" stroke="white" strokeWidth="8.5" strokeLinecap="round" fill="none"/>
+                <polyline points="55,24 55,78 83,78" stroke="white" strokeWidth="8.5" strokeLinecap="round" fill="none"/>
+              </svg>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#1BA898", letterSpacing: "-0.3px", lineHeight: 1 }}>Argos</div>
+                <div style={{ fontSize: 10, color: "#2D4D45", letterSpacing: "0.12em", marginTop: 3 }}>JL INFORMÁTICA</div>
+              </div>
             </div>
-          </div>
 
-          {/* Tagline */}
-          <div style={{ textAlign: "center", marginBottom: 32 }}>
-            <h2 style={{ fontSize: 22, fontWeight: 600, color: "#e6e8ec", margin: "0 0 10px", lineHeight: 1.3 }}>
-              Visibilidade total.<br/>Resposta imediata.
-            </h2>
-            <p style={{ color: "#7a9490", fontSize: 14, margin: 0, lineHeight: 1.6 }}>
-              Monitoramento unificado, alertas inteligentes e gestão<br/>de operações para MSPs e equipes de TI.
+            <h1 className="argos-headline" style={{
+              fontSize: "clamp(36px, 3.6vw, 56px)",
+              fontWeight: 700,
+              color: "#E8EDEB",
+              lineHeight: 1.07,
+              letterSpacing: "-0.03em",
+              margin: "0 0 20px",
+            }}>
+              Visibilidade total.<br/>
+              <span style={{ color: "#1BA898" }}>Resposta imediata.</span>
+            </h1>
+
+            <p className="argos-desc" style={{
+              fontSize: 15, color: "#4E6D66", lineHeight: 1.7,
+              margin: "0 0 36px", maxWidth: 400,
+            }}>
+              Monitoramento unificado, alertas inteligentes e gestão
+              de operações para MSPs e equipes de TI.
+            </p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 44 }}>
+              {[
+                "Monitoramento de infraestrutura e aplicações em tempo real",
+                "Alertas inteligentes com roteamento e escalonamento automático",
+                "ITSM integrado — incidentes, SLA e base de conhecimento",
+              ].map((text, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <div style={{
+                    width: 5, height: 5, borderRadius: "50%",
+                    background: "#1BA898", flexShrink: 0, marginTop: 7,
+                  }} />
+                  <span style={{ fontSize: 13.5, color: "#5A7870", lineHeight: 1.5 }}>{text}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="argos-cta-wrap" style={{ maxWidth: 300 }}>
+              <a href="/auth/login" style={{ textDecoration: "none", display: "block" }}>
+                <Button style={{ width: "100%", height: 48, fontSize: 15 }}>
+                  Entrar na plataforma
+                </Button>
+              </a>
+              {s.environment === "development" && (
+                <a href="/auth/dev-login" style={{ fontSize: 12, color: "#2D4D45", marginTop: 10, display: "block" }}>
+                  {t("auth.devSignIn")}
+                </a>
+              )}
+            </div>
+
+            <p style={{ marginTop: 52, fontSize: 11, color: "#1E3330" }}>
+              © 2026 JL Informática — Uso restrito a clientes e colaboradores
             </p>
           </div>
 
-          {/* Features */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 32, justifyContent: "center", flexWrap: "wrap" }}>
-            {[
-              { dot: "#1BA898", label: "Monitoramento" },
-              { dot: "#6fdc8c", label: "Alertas" },
-              { dot: "#9d8cf5", label: "Automação" },
-              { dot: "#e6b450", label: "ITSM" },
-            ].map(f => (
-              <div key={f.label} style={{
-                display: "flex", alignItems: "center", gap: 7,
-                background: "#0F1C19", border: "1px solid #1E302C",
-                borderRadius: 20, padding: "5px 13px",
-                fontSize: 12, color: "#7a9490",
-              }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: f.dot, flexShrink: 0, display: "inline-block" }} />
-                {f.label}
-              </div>
-            ))}
-          </div>
-
-          {/* Login card */}
-          <div style={{
-            background: "#0F1C19", border: "1px solid #1E302C",
-            borderRadius: 16, padding: "28px 32px", textAlign: "center",
-            boxShadow: "0 24px 64px rgba(0,0,0,0.5)",
+          {/* RIGHT */}
+          <div className="argos-right-col" style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "64px 72px 64px 24px", position: "relative", zIndex: 1,
           }}>
-            <a href="/auth/login" style={{ textDecoration: "none", display: "block" }}>
-              <Button className="w-full" style={{ fontSize: 15 }}>Entrar na plataforma</Button>
-            </a>
-            {s.environment === "development" && (
-              <div style={{ marginTop: 10 }}>
-                <a href="/auth/dev-login" style={{ fontSize: 12, color: "#4d6660" }}>
-                  {t("auth.devSignIn")}
-                </a>
-              </div>
-            )}
-          </div>
+            <div style={{
+              background: "#0A1714",
+              border: "1px solid #162E28",
+              borderRadius: 20,
+              padding: "28px 28px 24px",
+              width: "100%",
+              maxWidth: 360,
+              position: "relative",
+              overflow: "hidden",
+              boxShadow: "inset 0 1px 0 rgba(27,168,152,0.07), 0 40px 100px rgba(0,0,0,0.6)",
+            }}>
+              <div style={{
+                position: "absolute",
+                left: 0, right: 0, height: 1,
+                background: "linear-gradient(90deg, transparent 0%, rgba(27,168,152,0.3) 50%, transparent 100%)",
+                animation: "argos-scan 5s linear infinite",
+                pointerEvents: "none",
+              }} />
 
-          {/* Footer */}
-          <p style={{ textAlign: "center", marginTop: 24, fontSize: 11, color: "#4d6660", margin: "24px 0 0" }}>
-            © 2026 JL Informática &mdash; Uso restrito a clientes e colaboradores
-          </p>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 22 }}>
+                <div style={{
+                  width: 7, height: 7, borderRadius: "50%", background: "#4ADE80",
+                  flexShrink: 0, animation: "argos-pulse 2.5s ease-in-out infinite",
+                }} />
+                <span style={{ fontSize: 11, color: "#4ADE80", letterSpacing: "0.1em", fontWeight: 500 }}>SISTEMA AO VIVO</span>
+                <span style={{ marginLeft: "auto", fontSize: 10, color: "#1E3330" }}>nov 2026</span>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 22 }}>
+                {[
+                  { label: "Dispositivos", value: "2.847", sub: "online agora", color: "#1BA898" },
+                  { label: "Alertas ativos", value: "3", sub: "requerem atenção", color: "#F87171" },
+                  { label: "Resposta P95", value: "142ms", sub: "média global", color: "#E8EDEB" },
+                  { label: "Uptime médio", value: "99,98%", sub: "últimos 30 dias", color: "#4ADE80" },
+                ].map((m) => (
+                  <div key={m.label} style={{
+                    background: "#0C1A16",
+                    border: "1px solid #162E28",
+                    borderRadius: 10, padding: "12px 14px",
+                  }}>
+                    <div style={{ fontSize: 10, color: "#2D4D45", marginBottom: 5, letterSpacing: "0.04em" }}>{m.label}</div>
+                    <div style={{
+                      fontSize: 22, fontWeight: 700, color: m.color,
+                      letterSpacing: "-0.02em", lineHeight: 1,
+                    }}>{m.value}</div>
+                    <div style={{ fontSize: 10, color: "#2D4D45", marginTop: 4 }}>{m.sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 10, color: "#1E3330", marginBottom: 8, letterSpacing: "0.08em" }}>SAÚDE DA FROTA</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: "3px" }}>
+                  {healthDots.map((dot, i) => (
+                    <div key={i} style={{
+                      paddingBottom: "100%",
+                      borderRadius: 2,
+                      background: dot.color,
+                      opacity: dot.opacity,
+                    }} />
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 14 }}>
+                {[
+                  { color: "#1BA898", label: "56 saudáveis" },
+                  { color: "#FBBF24", label: "3 atenção" },
+                  { color: "#F87171", label: "1 crítico" },
+                ].map((l) => (
+                  <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: 1, background: l.color, flexShrink: 0, display: "inline-block", opacity: 0.9 }} />
+                    <span style={{ fontSize: 10, color: "#2D4D45" }}>{l.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -397,25 +519,209 @@ export function Shell() {
     if (memberships.length === 0) {
       return <OnboardingPage principalId={s.principal_id!} />;
     }
+
+    const roleIcon = (role?: string) => {
+      if (!role) return Building2;
+      if (role === "platform") return ShieldCheck;
+      if (role.includes("msp")) return Network;
+      if (role.includes("admin")) return Shield;
+      return Building2;
+    };
+
+    const roleLabel = (role?: string) => {
+      if (!role) return "membro";
+      const map: Record<string, string> = {
+        platform: "Plataforma",
+        msp_admin: "MSP Admin",
+        msp_operator: "MSP Operador",
+        tenant_admin: "Admin",
+        operator: "Operador",
+        viewer: "Visualizador",
+      };
+      return map[role] ?? role;
+    };
+
+    const envFromId = (id: string) => {
+      if (id.includes("dev") || id.includes("test") || id.includes("ci")) return "dev";
+      if (id.includes("staging") || id.includes("hml")) return "hml";
+      return "prod";
+    };
+
+    const envColor: Record<string, string> = {
+      dev:  "#FBBF24",
+      hml:  "#60A5FA",
+      prod: "#4ADE80",
+    };
+
+    const pendingId = selectTenant.isPending ? (selectTenant.variables as string | undefined) : undefined;
+
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-8 min-w-[320px] max-w-md">
-          <h2 className="text-base font-semibold mb-4">{t("auth.selectWorkspace")}</h2>
-          <div className="space-y-2">
-            {memberships.map((t) => (
-              <button
-                key={t.tenant_id}
-                onClick={() => selectTenant.mutate(t.tenant_id)}
-                className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg
-                  bg-[var(--surface-2)] border border-[var(--border)]
-                  hover:border-[var(--brand)] text-left cursor-pointer transition-colors"
-              >
-                <span className="text-sm font-medium">{t.display_name ?? t.tenant_id}</span>
-                <span className="text-xs text-[var(--text-muted)]">{t.role ?? ""}</span>
-              </button>
-            ))}
+      <div style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "var(--bg)",
+        padding: "24px 16px",
+        position: "relative",
+        overflow: "hidden",
+      }}>
+        {/* Grid */}
+        <div style={{
+          position: "fixed", inset: 0, opacity: 0.025, pointerEvents: "none",
+          backgroundImage: "linear-gradient(#1BA898 1px, transparent 1px), linear-gradient(90deg, #1BA898 1px, transparent 1px)",
+          backgroundSize: "44px 44px",
+        }} />
+        {/* Glow */}
+        <div style={{
+          position: "fixed", inset: 0, pointerEvents: "none",
+          background: "radial-gradient(ellipse 60% 70% at 50% 40%, rgba(27,168,152,0.07) 0%, transparent 70%)",
+        }} />
+
+        <div style={{
+          position: "relative", zIndex: 1,
+          width: "100%", maxWidth: 440,
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 16,
+          padding: "36px 32px",
+          boxShadow: "0 8px 40px rgba(0,0,0,0.6)",
+        }}>
+          {/* Logo */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28, justifyContent: "center" }}>
+            <svg viewBox="0 0 100 100" width="36" height="36" style={{ borderRadius: 9, flexShrink: 0 }}>
+              <rect width="100" height="100" rx="22" fill="#1b3f82"/>
+              <line x1="16" y1="24" x2="44" y2="24" stroke="white" strokeWidth="8.5" strokeLinecap="round"/>
+              <path d="M 35,24 L 35,66 Q 35,80 23,80 Q 11,80 11,67" stroke="white" strokeWidth="8.5" strokeLinecap="round" fill="none"/>
+              <polyline points="55,24 55,78 83,78" stroke="white" strokeWidth="8.5" strokeLinecap="round" fill="none"/>
+            </svg>
+            <div style={{ lineHeight: 1 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "var(--brand)", letterSpacing: "-0.3px" }}>Argos</div>
+              <div style={{ fontSize: 9, color: "var(--text-dim)", letterSpacing: "0.12em", marginTop: 3, textTransform: "uppercase" }}>JL Informática</div>
+            </div>
+          </div>
+
+          {/* Greeting */}
+          {s.display_name && (
+            <div style={{ textAlign: "center", marginBottom: 20 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>Olá, {s.display_name.split(" ")[0]}</div>
+              {s.email && <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>{s.email}</div>}
+            </div>
+          )}
+
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <div style={{
+              fontSize: 13, fontWeight: 600, color: "var(--text)",
+              marginBottom: 4,
+            }}>
+              {memberships.length === 1 ? "1 workspace disponível" : `${memberships.length} workspaces disponíveis`}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              Selecione o ambiente que deseja acessar
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {memberships.map((m) => {
+              const Icon = roleIcon(m.role);
+              const env = envFromId(m.tenant_id);
+              const isLoading = pendingId === m.tenant_id;
+              const envLabel: Record<string, string> = { dev: "Desenvolvimento", hml: "Homologação", prod: "Produção" };
+              return (
+                <button
+                  key={m.tenant_id}
+                  onClick={() => selectTenant.mutate(m.tenant_id)}
+                  disabled={selectTenant.isPending}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "13px 14px",
+                    borderRadius: 10,
+                    background: "var(--surface-2)",
+                    border: `1px solid ${isLoading ? "var(--brand)" : "var(--border)"}`,
+                    cursor: selectTenant.isPending ? "wait" : "pointer",
+                    textAlign: "left",
+                    transition: "border-color 0.15s, background 0.15s",
+                    opacity: selectTenant.isPending && !isLoading ? 0.5 : 1,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!selectTenant.isPending) {
+                      (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--brand)";
+                      (e.currentTarget as HTMLButtonElement).style.background = "var(--surface-hover, var(--surface-2))";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isLoading) (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border)";
+                    (e.currentTarget as HTMLButtonElement).style.background = "var(--surface-2)";
+                  }}
+                >
+                  {/* Env color stripe */}
+                  <div style={{
+                    width: 3, height: 36, borderRadius: 2, flexShrink: 0,
+                    background: envColor[env], opacity: 0.8,
+                  }} />
+
+                  {/* Icon */}
+                  <div style={{
+                    width: 34, height: 34, borderRadius: 8, flexShrink: 0,
+                    background: "var(--border)", display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <Icon size={15} color="var(--brand)" />
+                  </div>
+
+                  {/* Text */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {m.display_name ?? m.tenant_id}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                      {envLabel[env]} · {roleLabel(m.role)}
+                    </div>
+                  </div>
+
+                  {/* Right side */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                    {isLoading ? (
+                      <div style={{
+                        width: 14, height: 14, border: "2px solid var(--border)",
+                        borderTopColor: "var(--brand)", borderRadius: "50%",
+                        animation: "spin 0.7s linear infinite",
+                      }} />
+                    ) : (
+                      <span style={{
+                        fontSize: 10, fontWeight: 700,
+                        color: envColor[env],
+                        background: `${envColor[env]}18`,
+                        borderRadius: 4, padding: "3px 7px",
+                        letterSpacing: "0.08em", textTransform: "uppercase",
+                      }}>
+                        {env}
+                      </span>
+                    )}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ marginTop: 24, textAlign: "center" }}>
+            <button
+              onClick={() => logout()}
+              style={{ fontSize: 12, color: "var(--text-dim)", background: "none", border: "none", cursor: "pointer" }}
+              onMouseEnter={(e) => ((e.target as HTMLButtonElement).style.color = "var(--text-muted)")}
+              onMouseLeave={(e) => ((e.target as HTMLButtonElement).style.color = "var(--text-dim)")}
+            >
+              Sair da conta
+            </button>
           </div>
         </div>
+
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -691,7 +997,7 @@ export function Shell() {
                           style={active ? {
                             background: "color-mix(in srgb, var(--brand) 12%, transparent)",
                             color: "var(--brand)",
-                            boxShadow: collapsed ? undefined : "inset 2px 0 0 var(--brand)",
+                            boxShadow: collapsed ? "0 0 0 1.5px var(--brand)" : "inset 2px 0 0 var(--brand)",
                           } : {
                             color: "var(--text-muted)",
                           }}
@@ -799,17 +1105,15 @@ export function Shell() {
                 <ShieldCheck size={13} />
               </button>
             )}
-            {!collapsed && (
-              <button
-                type="button"
-                title="Sair"
-                onClick={() => logout()}
-                className="p-1 rounded-md hover:bg-[var(--surface-2)] transition-colors"
-                style={{ color: "var(--text-muted)" }}
-              >
-                <LogOut size={13} />
-              </button>
-            )}
+            <button
+              type="button"
+              title="Sair"
+              onClick={() => logout()}
+              className="p-1 rounded-md hover:bg-[var(--surface-2)] transition-colors flex-shrink-0"
+              style={{ color: "var(--text-muted)" }}
+            >
+              <LogOut size={13} />
+            </button>
           </div>
 
         </div>
@@ -818,8 +1122,13 @@ export function Shell() {
       {/* Main area */}
       <div className="flex flex-col flex-1 min-w-0">
         {/* Topbar */}
-        <header className="flex items-center justify-between px-5 py-2.5 bg-[var(--surface)] border-b border-[var(--border)] sticky top-0 z-10 h-[52px]">
-          <h1 className="text-sm font-medium truncate flex-1 min-w-0 mr-2" style={{ color: "var(--text)" }}>
+        <header className="flex items-center justify-between px-5 py-2.5 sticky top-0 z-10 h-[52px]"
+          style={{
+            background: "linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 95%, var(--bg)) 100%)",
+            borderBottom: "1px solid var(--border)",
+            boxShadow: "0 1px 0 color-mix(in srgb, var(--brand) 8%, transparent)",
+          }}>
+          <h1 className="text-sm font-semibold truncate flex-1 min-w-0 mr-2" style={{ color: "var(--text)", letterSpacing: "-0.01em" }}>
             {currentLabel}
           </h1>
           <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -912,6 +1221,7 @@ export function Shell() {
 
         {/* Main content */}
         <main className="flex-1 p-5 overflow-auto min-w-0">
+          <div className="max-w-[1440px] mx-auto w-full min-h-full">
           {/* key=tenant_id forces full remount on tenant switch — prevents stale data flash */}
           <div key={s.tenant_id} className="contents">
           {view === "noc" && <NOCDashboard tenantId={s.tenant_id!} />}
@@ -960,6 +1270,7 @@ export function Shell() {
           {view === "tenant-settings" && <TenantSettingsPage tenantId={s.tenant_id!} />}
           {view === "apm" && <APMPage tenantId={s.tenant_id!} />}
           {view === "client-portal" && <ClientPortalPage />}
+          </div>
           </div>
         </main>
       </div>

@@ -1,22 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..700;1,14..32,300..700&display=swap');
 @import "tailwindcss";
 
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
 :root {
-  --bg: #07100E;
-  --surface: #0F1C19;
+  /* Surfaces */
+  --bg:        #07100E;
+  --surface:   #0F1C19;
   --surface-2: #162621;
-  --border: #1E302C;
-  --text: #e6e8ec;
-  --text-muted: #7a9490;
-  --text-dim: #4d6660;
-  --brand: #1BA898;
-  --brand-hover: #0D6258;
-  --green: #6fdc8c;
-  --yellow: #e6b450;
-  --red: #ff6b6b;
-  --orange: #f08080;
-  --purple: #9d8cf5;
+  --surface-3: #1A2E29;
+
+  /* Borders */
+  --border:    #1E302C;
+  --border-2:  #263D38;
+
+  /* Text */
+  --text:       #E8EDEB;
+  --text-muted: #7A9490;
+  --text-dim:   #4D6660;
+
+  /* Brand */
+  --brand:       #1BA898;
+  --brand-hover: #17937F;
+  --brand-muted: color-mix(in srgb, #1BA898 15%, transparent);
+
+  /* Semantic */
+  --success:        #4ADE80;
+  --success-bg:     #0C2518;
+  --success-border: #163A22;
+  --warning:        #FBBF24;
+  --warning-bg:     #261C0A;
+  --warning-border: #3D2D0E;
+  --danger:         #F87171;
+  --danger-bg:      #250E0E;
+  --danger-border:  #3D1414;
+  --info:           #60A5FA;
+  --info-bg:        #0D1A2E;
+  --info-border:    #162540;
+
+  /* Legacy aliases (keep existing code working) */
+  --green:  #4ADE80;
+  --yellow: #FBBF24;
+  --red:    #F87171;
+  --orange: #FB923C;
+  --purple: #A78BFA;
+
+  /* Radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md:  0 4px 12px rgba(0,0,0,0.5);
+  --shadow-lg:  0 8px 32px rgba(0,0,0,0.6);
+  --shadow-brand: 0 0 0 3px color-mix(in srgb, var(--brand) 25%, transparent);
+
+  /* Transitions */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Surface hover */
+  --surface-hover: #1A2E29;
+
+  /* Card gradients */
+  --card-gradient: linear-gradient(160deg, #122019 0%, #0D1A17 100%);
+  --card-gradient-elevated: linear-gradient(160deg, #162621 0%, #0F1C19 100%);
 }
 
+/* ── Base ──────────────────────────────────────────────────────────────────── */
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -30,9 +83,12 @@ html, body, #root {
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
 a {
@@ -40,5 +96,98 @@ a {
   text-decoration: none;
 }
 a:hover {
+  color: var(--brand-hover);
   text-decoration: underline;
+}
+
+/* ── Focus visible (acessibilidade global) ─────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+* { scrollbar-width: thin; scrollbar-color: var(--border-2) transparent; }
+
+/* ── Form elements global base ─────────────────────────────────────────────── */
+input, select, textarea {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 7px 11px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  width: 100%;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-dim);
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 15%, transparent);
+}
+
+input:disabled, select:disabled, textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%234D6660' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+  cursor: pointer;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+/* ── Skeleton animation ────────────────────────────────────────────────────── */
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Utils ─────────────────────────────────────────────────────────────────── */
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* ── Metric numbers (dashboard stat tiles) ─────────────────────────────────── */
+.metric-number {
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Card gradient surfaces ────────────────────────────────────────────────── */
+.card-surface {
+  background: var(--card-gradient);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.card-surface-elevated {
+  background: var(--card-gradient-elevated);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
 }
