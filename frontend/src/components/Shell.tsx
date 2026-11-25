@@ -296,24 +296,86 @@ export function Shell() {
 
   if (s.state === "unauthenticated") {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-10 min-w-[320px] max-w-md text-center shadow-xl">
-          <h1 className="text-xl font-semibold mb-1">
-            <span className="text-[var(--brand)]">Argos</span>
-          </h1>
-          <p className="text-[var(--text-muted)] text-sm mb-6">
-            {t("auth.subtitle")}
-          </p>
-          <a href="/auth/login" className="no-underline">
-            <Button className="w-full">{t("common.signIn")}</Button>
-          </a>
-          {s.environment === "development" && (
-            <div className="mt-3">
-              <a href="/auth/dev-login" className="text-xs text-[var(--text-muted)] hover:text-[var(--brand)]">
-                {t("auth.devSignIn")}
-              </a>
+      <div style={{
+        minHeight: "100vh", display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        background: "radial-gradient(ellipse 80% 60% at 50% -10%, #0d2420 0%, #07100E 65%)",
+        position: "relative", overflow: "hidden",
+      }}>
+        {/* Subtle grid */}
+        <div style={{
+          position: "absolute", inset: 0, opacity: 0.04, pointerEvents: "none",
+          backgroundImage: "linear-gradient(#1E302C 1px, transparent 1px), linear-gradient(90deg, #1E302C 1px, transparent 1px)",
+          backgroundSize: "48px 48px",
+        }} />
+
+        <div style={{ position: "relative", zIndex: 1, maxWidth: 440, width: "100%", padding: "0 24px" }}>
+          {/* Logo */}
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 36, justifyContent: "center" }}>
+            <svg viewBox="0 0 100 100" width={46} height={46} style={{ borderRadius: 12, flexShrink: 0 }}>
+              <rect width="100" height="100" rx="22" fill="#1b3f82"/>
+              <line x1="16" y1="24" x2="44" y2="24" stroke="white" strokeWidth="8.5" strokeLinecap="round"/>
+              <path d="M 35,24 L 35,66 Q 35,80 23,80 Q 11,80 11,67" stroke="white" strokeWidth="8.5" strokeLinecap="round" fill="none"/>
+              <polyline points="55,24 55,78 83,78" stroke="white" strokeWidth="8.5" strokeLinecap="round" fill="none"/>
+            </svg>
+            <div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: "#1BA898", letterSpacing: "-0.5px", lineHeight: 1 }}>Argos</div>
+              <div style={{ fontSize: 11, color: "#4d6660", letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 3 }}>by JL Informática</div>
             </div>
-          )}
+          </div>
+
+          {/* Tagline */}
+          <div style={{ textAlign: "center", marginBottom: 32 }}>
+            <h2 style={{ fontSize: 22, fontWeight: 600, color: "#e6e8ec", margin: "0 0 10px", lineHeight: 1.3 }}>
+              Visibilidade total.<br/>Resposta imediata.
+            </h2>
+            <p style={{ color: "#7a9490", fontSize: 14, margin: 0, lineHeight: 1.6 }}>
+              Monitoramento unificado, alertas inteligentes e gestão<br/>de operações para MSPs e equipes de TI.
+            </p>
+          </div>
+
+          {/* Features */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 32, justifyContent: "center", flexWrap: "wrap" }}>
+            {[
+              { dot: "#1BA898", label: "Monitoramento" },
+              { dot: "#6fdc8c", label: "Alertas" },
+              { dot: "#9d8cf5", label: "Automação" },
+              { dot: "#e6b450", label: "ITSM" },
+            ].map(f => (
+              <div key={f.label} style={{
+                display: "flex", alignItems: "center", gap: 7,
+                background: "#0F1C19", border: "1px solid #1E302C",
+                borderRadius: 20, padding: "5px 13px",
+                fontSize: 12, color: "#7a9490",
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: f.dot, flexShrink: 0, display: "inline-block" }} />
+                {f.label}
+              </div>
+            ))}
+          </div>
+
+          {/* Login card */}
+          <div style={{
+            background: "#0F1C19", border: "1px solid #1E302C",
+            borderRadius: 16, padding: "28px 32px", textAlign: "center",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.5)",
+          }}>
+            <a href="/auth/login" style={{ textDecoration: "none", display: "block" }}>
+              <Button className="w-full" style={{ fontSize: 15 }}>Entrar na plataforma</Button>
+            </a>
+            {s.environment === "development" && (
+              <div style={{ marginTop: 10 }}>
+                <a href="/auth/dev-login" style={{ fontSize: 12, color: "#4d6660" }}>
+                  {t("auth.devSignIn")}
+                </a>
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <p style={{ textAlign: "center", marginTop: 24, fontSize: 11, color: "#4d6660", margin: "24px 0 0" }}>
+            © 2026 JL Informática &mdash; Uso restrito a clientes e colaboradores
+          </p>
         </div>
       </div>
     );
