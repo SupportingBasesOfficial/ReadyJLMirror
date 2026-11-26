@@ -41,6 +41,7 @@
     "logs": "Logs",
     "webhooks": "Webhooks",
     "contracts": "Contracts",
+    "capacity": "Capacity",
     "client_portal": "Client Portal",
     "feature_flags": "Feature Flags",
     "tenant_settings": "Tenant Settings",
