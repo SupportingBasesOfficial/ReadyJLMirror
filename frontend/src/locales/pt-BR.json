@@ -44,6 +44,7 @@
     "backup": "Backup",
     "firewall": "Firewall",
     "k8s": "Kubernetes",
+    "correlation": "Correlação",
     "client_portal": "Portal do Cliente",
     "kb": "Base de Conhecimento",
     "groups": {

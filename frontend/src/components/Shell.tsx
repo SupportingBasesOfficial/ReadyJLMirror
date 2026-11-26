@@ -65,6 +65,7 @@ import { CapacityPage } from "@/pages/CapacityPage";
 import { BackupPage } from "@/pages/BackupPage";
 import { FirewallPage } from "@/pages/FirewallPage";
 import { K8sPage } from "@/pages/K8sPage";
+import { CorrelationPage } from "@/pages/CorrelationPage";
 import { ClientPortalPage } from "@/pages/ClientPortalPage";
 import { HelpDeskPage } from "@/pages/HelpDeskPage";
 import { BillingPage } from "@/pages/BillingPage";
@@ -128,6 +129,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   backup: "/backup",
   firewall: "/firewall",
   k8s: "/k8s",
+  correlation: "/correlation",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -768,6 +770,7 @@ export function Shell() {
         { id: "alerts", label: t("nav.alerts"), icon: Bell, description: "Alertas ativos" },
         { id: "incidents", label: t("nav.incidents"), icon: Siren, description: "Gestão de incidentes" },
         { id: "policies", label: t("nav.policies"), icon: Shield, description: "Regras de alerta" },
+        { id: "correlation" as View, label: t("nav.correlation", "Correlação"), icon: GitMerge, description: "Agrupamento e correlação de alertas" },
         ...((has("tenant:admin") || s.is_platform_admin) && flagEnabled("module_executive") ? [
           { id: "executive" as View, label: t("nav.executive"), icon: TrendingUp, description: "KPIs executivos da plataforma" },
         ] : []),
@@ -1301,6 +1304,7 @@ export function Shell() {
           {view === "backup" && <BackupPage tenantId={s.tenant_id!} />}
           {view === "firewall" && <FirewallPage tenantId={s.tenant_id!} />}
           {view === "k8s" && <K8sPage tenantId={s.tenant_id!} />}
+          {view === "correlation" && <CorrelationPage tenantId={s.tenant_id!} />}
           {view === "client-portal" && <ClientPortalPage />}
           </div>
           </div>
