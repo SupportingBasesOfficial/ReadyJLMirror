@@ -51,6 +51,24 @@ interface Anomaly {
   unit: string;
 }
 
+interface AnomalyFP {
+  fp_id: string;
+  resource_id: string;
+  metric_id: string;
+  note: string;
+  marked_at: string;
+  marked_by: string;
+}
+
+interface AnomalyConfig {
+  config_id: string;
+  resource_id: string;
+  metric_id: string;
+  enabled: boolean;
+  threshold: number | null;
+  updated_at: string;
+}
+
 interface AnomalyResult {
   window_hours: number;
   threshold: number;
@@ -298,8 +316,12 @@ function FindingsTab({ tenantId }: { tenantId: string }) {
 
 function AnomaliesTab({ tenantId }: { tenantId: string }) {
   const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const canOperate = useCanOperate();
   const [windowHours, setWindowHours] = useState(24);
   const [threshold, setThreshold] = useState(2.5);
+  const [showFP, setShowFP] = useState(false);
 
   const q = useQuery({
     queryKey: ["aiops-anomalies", tenantId, windowHours, threshold],
@@ -310,7 +332,46 @@ function AnomaliesTab({ tenantId }: { tenantId: string }) {
     refetchInterval: 180_000,
   });
 
-  const anomalies = q.data?.anomalies ?? [];
+  const fpQ = useQuery<AnomalyFP[]>({
+    queryKey: ["aiops-anomaly-fp", tenantId],
+    queryFn: () => api.get<AnomalyFP[]>("/api/v1/aiops/anomalies/false-positives"),
+  });
+
+  const configQ = useQuery<AnomalyConfig[]>({
+    queryKey: ["aiops-anomaly-configs", tenantId],
+    queryFn: () => api.get<AnomalyConfig[]>("/api/v1/aiops/anomalies/configs"),
+  });
+
+  const fpMap = new Map((fpQ.data ?? []).map(fp => [`${fp.resource_id}::${fp.metric_id}`, fp]));
+  const configMap = new Map((configQ.data ?? []).map(c => [`${c.resource_id}::${c.metric_id}`, c]));
+
+  const markFPMut = useMutation({
+    mutationFn: (body: { resource_id: string; metric_id: string }) =>
+      api.post("/api/v1/aiops/anomalies/false-positives", { ...body, note: "" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["aiops-anomaly-fp"] }); toast({ title: "Falso positivo marcado" }); },
+    onError: () => toast({ title: "Erro ao marcar falso positivo", variant: "destructive" }),
+  });
+
+  const clearFPMut = useMutation({
+    mutationFn: ({ resource_id, metric_id }: { resource_id: string; metric_id: string }) =>
+      api.delete(`/api/v1/aiops/anomalies/false-positives/${resource_id}/${metric_id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["aiops-anomaly-fp"] }); toast({ title: "Marcação removida" }); },
+    onError: () => toast({ title: "Erro ao remover marcação", variant: "destructive" }),
+  });
+
+  const configMut = useMutation({
+    mutationFn: ({ resource_id, metric_id, enabled, threshold: thr }: { resource_id: string; metric_id: string; enabled: boolean; threshold: number | null }) =>
+      api.put(`/api/v1/aiops/anomalies/config/${resource_id}/${metric_id}`, { enabled, threshold: thr }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["aiops-anomaly-configs"] }),
+    onError: () => toast({ title: "Erro ao salvar config", variant: "destructive" }),
+  });
+
+  const anomalies = (q.data?.anomalies ?? []).filter(a => {
+    const cfg = configMap.get(`${a.resource_id}::${a.metric_id}`);
+    if (cfg && !cfg.enabled) return false;
+    if (!showFP && fpMap.has(`${a.resource_id}::${a.metric_id}`)) return false;
+    return true;
+  });
 
   return (
     <div className="space-y-3">
@@ -339,10 +400,20 @@ function AnomaliesTab({ tenantId }: { tenantId: string }) {
             ))}
           </select>
         </label>
-        {q.isFetching && <Spinner className="w-3 h-3" />}
+        <label className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] cursor-pointer">
+          <input type="checkbox" checked={showFP} onChange={e => setShowFP(e.target.checked)} className="w-3 h-3" />
+          Exibir FPs
+        </label>
+        <button
+          onClick={() => q.refetch()}
+          disabled={q.isFetching}
+          className="text-xs px-2.5 py-0.5 rounded border border-[var(--border)] hover:border-[var(--brand)] transition-colors disabled:opacity-50"
+        >
+          {q.isFetching ? "..." : "Scan agora"}
+        </button>
         {q.data && (
           <span className="text-[10px] text-[var(--text-muted)] ml-auto">
-            {q.data.count} {t("aiops.anomalies.detected")}
+            {anomalies.length} / {q.data.count} {t("aiops.anomalies.detected")}
           </span>
         )}
       </div>
@@ -368,32 +439,90 @@ function AnomaliesTab({ tenantId }: { tenantId: string }) {
                 <th className="text-right px-3 py-2 font-medium">{t("aiops.anomalies.mean")}</th>
                 <th className="text-right px-3 py-2 font-medium">{t("aiops.anomalies.zscore")}</th>
                 <th className="text-left px-3 py-2 font-medium">{t("aiops.anomalies.detectedAt")}</th>
+                {canOperate && <th className="px-3 py-2 font-medium text-center">Ações</th>}
               </tr>
             </thead>
             <tbody>
-              {anomalies.map((a, i) => (
-                <tr
-                  key={`${a.resource_id}-${a.metric_id}-${i}`}
-                  className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-2)] transition-colors"
-                >
-                  <td className="px-3 py-2 font-medium text-[var(--text)]">{a.resource_name}</td>
-                  <td className="px-3 py-2 text-[var(--text-secondary)]">
-                    {a.metric_name}
-                    {a.unit && <span className="ml-1 text-[10px] text-[var(--text-muted)]">{a.unit}</span>}
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono text-[var(--text)]">{fmtNum(a.value)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-[var(--text-muted)]">{fmtNum(a.mean)}</td>
-                  <td className="px-3 py-2 text-right">
-                    <span className={[
-                      "font-mono font-semibold",
-                      a.z_score > 4 ? "text-[var(--red)]" : a.z_score > 3 ? "text-[var(--orange,#f97316)]" : "text-[var(--yellow,#eab308)]",
-                    ].join(" ")}>
-                      {fmtNum(a.z_score, 2)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-[var(--text-muted)] whitespace-nowrap">{fmtTs(a.observed_at)}</td>
-                </tr>
-              ))}
+              {anomalies.map((a, i) => {
+                const key = `${a.resource_id}::${a.metric_id}`;
+                const isFP = fpMap.has(key);
+                const cfg = configMap.get(key);
+                return (
+                  <tr
+                    key={`${key}-${i}`}
+                    className={[
+                      "border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-2)] transition-colors",
+                      isFP ? "opacity-60" : "",
+                    ].join(" ")}
+                  >
+                    <td className="px-3 py-2 font-medium text-[var(--text)]">
+                      {a.resource_name}
+                      {cfg && !cfg.enabled && (
+                        <span className="ml-1.5 text-[10px] px-1 rounded bg-[var(--surface-2)] text-[var(--text-muted)]">desativ.</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-[var(--text-secondary)]">
+                      {a.metric_name}
+                      {a.unit && <span className="ml-1 text-[10px] text-[var(--text-muted)]">{a.unit}</span>}
+                      {cfg?.threshold && (
+                        <span className="ml-1.5 text-[10px] text-[var(--text-muted)]">Z&gt;{cfg.threshold}</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-[var(--text)]">{fmtNum(a.value)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-[var(--text-muted)]">{fmtNum(a.mean)}</td>
+                    <td className="px-3 py-2 text-right">
+                      <span className={[
+                        "font-mono font-semibold",
+                        a.z_score > 4 ? "text-[var(--red)]" : a.z_score > 3 ? "text-[var(--orange,#f97316)]" : "text-[var(--yellow,#eab308)]",
+                      ].join(" ")}>
+                        {fmtNum(a.z_score, 2)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-[var(--text-muted)] whitespace-nowrap">{fmtTs(a.observed_at)}</td>
+                    {canOperate && (
+                      <td className="px-3 py-2 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          {isFP ? (
+                            <button
+                              onClick={() => clearFPMut.mutate({ resource_id: a.resource_id, metric_id: a.metric_id })}
+                              disabled={clearFPMut.isPending}
+                              className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border)] hover:border-[var(--brand)] transition-colors"
+                            >
+                              Limpar FP
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => markFPMut.mutate({ resource_id: a.resource_id, metric_id: a.metric_id })}
+                              disabled={markFPMut.isPending}
+                              className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border)] hover:border-amber-500 text-amber-600 transition-colors"
+                            >
+                              Falso+
+                            </button>
+                          )}
+                          <button
+                            onClick={() => configMut.mutate({
+                              resource_id: a.resource_id,
+                              metric_id: a.metric_id,
+                              enabled: cfg ? !cfg.enabled : false,
+                              threshold: cfg?.threshold ?? null,
+                            })}
+                            disabled={configMut.isPending}
+                            title={cfg && !cfg.enabled ? "Habilitar detecção" : "Desabilitar detecção"}
+                            className={[
+                              "text-[10px] px-1.5 py-0.5 rounded border transition-colors",
+                              cfg && !cfg.enabled
+                                ? "border-green-500 text-green-600 hover:bg-green-500/10"
+                                : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--brand)]",
+                            ].join(" ")}
+                          >
+                            {cfg && !cfg.enabled ? "Habilitar" : "Desativ."}
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

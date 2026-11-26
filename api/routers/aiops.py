@@ -644,3 +644,230 @@ async def list_prediction_outcomes(request: Request) -> list[dict]:
         }
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Anomaly False-Positive marking
+# ---------------------------------------------------------------------------
+
+class MarkFalsePositive(BaseModel):
+    resource_id: str
+    metric_id: str
+    note: Optional[str] = ""
+
+
+def _require_operate(ctx: dict):
+    return ctx["tenant_id"], ctx.get("principal_id", "unknown")
+
+
+@router.post("/anomalies/false-positives", status_code=status.HTTP_201_CREATED)
+async def mark_anomaly_false_positive(
+    request: Request, body: MarkFalsePositive
+) -> dict:
+    from shared import access
+    from shared.db import db_connection
+
+    ctx = _get_context(request)
+    tenant_id, principal_id = _require_operate(ctx)
+
+    async with db_connection() as pconn:
+        perms = await access.effective_permissions(pconn, principal_id, tenant_id)
+    if "monitoring:operate" not in perms and "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="monitoring:operate required")
+
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(
+            """
+            INSERT INTO aiops.anomaly_false_positive
+                (tenant_id, resource_id, metric_id, note, marked_by)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, resource_id, metric_id) DO UPDATE
+               SET note      = EXCLUDED.note,
+                   marked_at = now(),
+                   marked_by = EXCLUDED.marked_by
+            RETURNING fp_id
+            """,
+            (tenant_id, body.resource_id, body.metric_id, body.note or "", principal_id),
+        )
+        row = await cur.fetchone()
+        await record_audit_event(
+            conn, tenant_id,
+            action="aiops.anomaly.false_positive_marked",
+            actor_kind="principal", actor_id=principal_id,
+            subject_type="anomaly_fp", subject_id=str(row[0]),
+            detail={"resource_id": body.resource_id, "metric_id": body.metric_id},
+        )
+        await conn.commit()
+
+    return {"fp_id": str(row[0]), "resource_id": body.resource_id, "metric_id": body.metric_id}
+
+
+@router.delete("/anomalies/false-positives/{resource_id}/{metric_id}",
+               status_code=status.HTTP_204_NO_CONTENT)
+async def clear_anomaly_false_positive(
+    request: Request, resource_id: str, metric_id: str
+) -> None:
+    from shared import access
+    from shared.db import db_connection
+
+    ctx = _get_context(request)
+    tenant_id, principal_id = _require_operate(ctx)
+
+    async with db_connection() as pconn:
+        perms = await access.effective_permissions(pconn, principal_id, tenant_id)
+    if "monitoring:operate" not in perms and "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="monitoring:operate required")
+
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(
+            "DELETE FROM aiops.anomaly_false_positive "
+            "WHERE tenant_id=%s AND resource_id=%s AND metric_id=%s",
+            (tenant_id, resource_id, metric_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="false positive not found")
+        await conn.commit()
+
+
+@router.get("/anomalies/false-positives")
+async def list_anomaly_false_positives(request: Request) -> list[dict]:
+    ctx = _get_context(request)
+    tenant_id = ctx["tenant_id"]
+
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(
+            """
+            SELECT fp_id, resource_id, metric_id, note, marked_at, marked_by
+              FROM aiops.anomaly_false_positive
+             WHERE tenant_id = %s
+             ORDER BY marked_at DESC
+            """,
+            (tenant_id,),
+        )
+        rows = await cur.fetchall()
+
+    return [
+        {
+            "fp_id":       str(r[0]),
+            "resource_id": r[1],
+            "metric_id":   r[2],
+            "note":        r[3],
+            "marked_at":   r[4].isoformat(),
+            "marked_by":   r[5],
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Anomaly Config — per-resource/metric threshold + enable/disable
+# ---------------------------------------------------------------------------
+
+class AnomalyConfigUpdate(BaseModel):
+    enabled: bool = True
+    threshold: Optional[float] = None
+
+
+@router.put("/anomalies/config/{resource_id}/{metric_id}")
+async def upsert_anomaly_config(
+    request: Request,
+    resource_id: str,
+    metric_id: str,
+    body: AnomalyConfigUpdate,
+) -> dict:
+    from shared import access
+    from shared.db import db_connection
+
+    ctx = _get_context(request)
+    tenant_id, principal_id = _require_operate(ctx)
+
+    async with db_connection() as pconn:
+        perms = await access.effective_permissions(pconn, principal_id, tenant_id)
+    if "monitoring:operate" not in perms and "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="monitoring:operate required")
+
+    if body.threshold is not None and not (1.0 <= body.threshold <= 10.0):
+        raise HTTPException(status_code=422, detail="threshold must be between 1.0 and 10.0")
+
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(
+            """
+            INSERT INTO aiops.anomaly_config
+                (tenant_id, resource_id, metric_id, enabled, threshold, updated_by)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, resource_id, metric_id) DO UPDATE
+               SET enabled    = EXCLUDED.enabled,
+                   threshold  = EXCLUDED.threshold,
+                   updated_at = now(),
+                   updated_by = EXCLUDED.updated_by
+            RETURNING config_id, enabled, threshold, updated_at
+            """,
+            (tenant_id, resource_id, metric_id, body.enabled, body.threshold, principal_id),
+        )
+        row = await cur.fetchone()
+        await conn.commit()
+
+    return {
+        "config_id":   str(row[0]),
+        "resource_id": resource_id,
+        "metric_id":   metric_id,
+        "enabled":     row[1],
+        "threshold":   float(row[2]) if row[2] is not None else None,
+        "updated_at":  row[3].isoformat(),
+    }
+
+
+@router.delete("/anomalies/config/{resource_id}/{metric_id}",
+               status_code=status.HTTP_204_NO_CONTENT)
+async def reset_anomaly_config(
+    request: Request, resource_id: str, metric_id: str
+) -> None:
+    from shared import access
+    from shared.db import db_connection
+
+    ctx = _get_context(request)
+    tenant_id, principal_id = _require_operate(ctx)
+
+    async with db_connection() as pconn:
+        perms = await access.effective_permissions(pconn, principal_id, tenant_id)
+    if "monitoring:operate" not in perms and "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="monitoring:operate required")
+
+    async with db_tenant_connection(tenant_id) as conn:
+        await conn.execute(
+            "DELETE FROM aiops.anomaly_config "
+            "WHERE tenant_id=%s AND resource_id=%s AND metric_id=%s",
+            (tenant_id, resource_id, metric_id),
+        )
+        await conn.commit()
+
+
+@router.get("/anomalies/configs")
+async def list_anomaly_configs(request: Request) -> list[dict]:
+    ctx = _get_context(request)
+    tenant_id = ctx["tenant_id"]
+
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(
+            """
+            SELECT config_id, resource_id, metric_id, enabled, threshold, updated_at, updated_by
+              FROM aiops.anomaly_config
+             WHERE tenant_id = %s
+             ORDER BY updated_at DESC
+            """,
+            (tenant_id,),
+        )
+        rows = await cur.fetchall()
+
+    return [
+        {
+            "config_id":   str(r[0]),
+            "resource_id": r[1],
+            "metric_id":   r[2],
+            "enabled":     r[3],
+            "threshold":   float(r[4]) if r[4] is not None else None,
+            "updated_at":  r[5].isoformat(),
+            "updated_by":  r[6],
+        }
+        for r in rows
+    ]
