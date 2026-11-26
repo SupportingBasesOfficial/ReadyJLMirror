@@ -51,6 +51,7 @@
     "sql_console": "SQL Console",
     "chatops": "ChatOps",
     "patches": "Patches",
+    "assets": "Assets",
     "client_portal": "Client Portal",
     "feature_flags": "Feature Flags",
     "tenant_settings": "Tenant Settings",

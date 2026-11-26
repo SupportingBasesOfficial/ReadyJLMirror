@@ -90,6 +90,7 @@ from api.routers import (
     sql_console,
     chatops,
     patches,
+    assets,
 )
 
 logger = logging.getLogger(__name__)
@@ -613,6 +614,7 @@ app.include_router(data_transfer.router)
 app.include_router(sql_console.router)
 app.include_router(chatops.router)
 app.include_router(patches.router)
+app.include_router(assets.router)
 
 
 @app.get("/metrics", tags=["health"])
