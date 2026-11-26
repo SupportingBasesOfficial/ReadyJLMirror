@@ -48,6 +48,7 @@
     "discovery": "Discovery",
     "data_transfer": "Transferência de Dados",
     "sql_console": "SQL Console",
+    "chatops": "ChatOps",
     "client_portal": "Portal do Cliente",
     "kb": "Base de Conhecimento",
     "groups": {

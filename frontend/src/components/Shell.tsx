@@ -12,7 +12,7 @@ import {
   MessageSquare, PhoneCall, Users, UserPlus, KeyRound,
   ScrollText, BookOpen, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Building2, ShieldCheck, Network, Radio, CalendarClock,
-  LayoutGrid, Globe, Bug, TrendingUp, GitCompare, ToggleLeft, Gauge, ShieldAlert, FileText, HardDrive, ArrowLeftRight, Terminal,
+  LayoutGrid, Globe, Bug, TrendingUp, GitCompare, ToggleLeft, Gauge, ShieldAlert, FileText, HardDrive, ArrowLeftRight, Terminal, Hash,
 } from "lucide-react";
 import { api, logout } from "@/api/client";
 import { AlertsPage } from "@/pages/AlertsPage";
@@ -69,6 +69,7 @@ import { CorrelationPage } from "@/pages/CorrelationPage";
 import { DiscoveryPage } from "@/pages/DiscoveryPage";
 import { DataTransferPage } from "@/pages/DataTransferPage";
 import { SqlConsolePage } from "@/pages/SqlConsolePage";
+import { ChatOpsPage } from "@/pages/ChatOpsPage";
 import { ClientPortalPage } from "@/pages/ClientPortalPage";
 import { HelpDeskPage } from "@/pages/HelpDeskPage";
 import { BillingPage } from "@/pages/BillingPage";
@@ -136,6 +137,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   discovery: "/discovery",
   data_transfer: "/data-transfer",
   sql_console: "/sql-console",
+  chatops: "/chatops",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -838,6 +840,7 @@ export function Shell() {
         { id: "channels" as View, label: t("nav.channels"), icon: MessageSquare, description: "Canais de notificação" },
         { id: "escalation" as View, label: t("nav.escalation"), icon: PhoneCall, description: "Políticas de escalonamento" },
         ...(flagEnabled("module_oncall") ? [{ id: "oncall" as View, label: t("nav.oncall"), icon: CalendarClock, description: "Escalas de on-call" }] : []),
+        { id: "chatops" as View, label: t("nav.chatops", "ChatOps"), icon: Hash, description: "Slack/Teams — workspaces, canais e comandos" },
       ],
     }] : []),
     ...((has("tenant:admin") || has("audit:read")) ? [{
@@ -1317,6 +1320,7 @@ export function Shell() {
           {view === "discovery" && <DiscoveryPage tenantId={s.tenant_id!} />}
           {view === "data_transfer" && <DataTransferPage tenantId={s.tenant_id!} />}
           {view === "sql_console" && <SqlConsolePage tenantId={s.tenant_id!} />}
+          {view === "chatops" && <ChatOpsPage tenantId={s.tenant_id!} />}
           {view === "client-portal" && <ClientPortalPage />}
           </div>
           </div>
