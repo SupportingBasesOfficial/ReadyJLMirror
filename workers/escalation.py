@@ -25,6 +25,8 @@ from email.mime.text import MIMEText
 
 import psycopg
 
+from shared.smtp_crypto import decrypt_password
+
 logger = logging.getLogger(__name__)
 
 _APP_ROLE    = "jlmirror_g23_esc_app_invoker"
@@ -71,7 +73,7 @@ def _smtp_config_for_tenant(conn: psycopg.Connection, tenant_id: str) -> dict:
         cur = conn.execute(
             """
             SELECT smtp_host, smtp_port, smtp_user, smtp_password,
-                   smtp_from_email, smtp_tls
+                   smtp_from_email, smtp_tls, smtp_password_encrypted
               FROM g1.tenant_settings
              WHERE tenant_id = %s
             """,
@@ -80,12 +82,13 @@ def _smtp_config_for_tenant(conn: psycopg.Connection, tenant_id: str) -> dict:
         row = cur.fetchone()
         conn.rollback()
         if row and row[0]:
-            host, port, user, pwd, from_email, use_tls = row
+            host, port, user, pwd_stored, from_email, use_tls, pwd_enc = row
+            pwd = decrypt_password(pwd_stored or "", bool(pwd_enc))
             return {
                 "smtp_host":    host or "",
                 "smtp_port":    int(port or 587),
                 "smtp_user":    user or "",
-                "smtp_password": pwd or "",
+                "smtp_password": pwd,
                 "from_address": from_email or user or "",
                 "tls_mode":     "starttls" if use_tls else "plain",
             }

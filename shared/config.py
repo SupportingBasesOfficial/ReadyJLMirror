@@ -161,6 +161,12 @@ class Settings:
         default_factory=lambda: _env("AUTOMATION_CRED_ENC_KEY", "")
     )
 
+    # SMTP password at-rest encryption (Fernet key, URL-safe base64, 32 bytes).
+    # Empty in dev = plaintext storage. Required in production for new settings.
+    smtp_password_enc_key: str = field(
+        default_factory=lambda: _env("SMTP_PASSWORD_ENC_KEY", "")
+    )
+
     # Worker
     worker_poll_interval_seconds: int = field(
         default_factory=lambda: int(_env("WORKER_POLL_INTERVAL_SECONDS", "5"))

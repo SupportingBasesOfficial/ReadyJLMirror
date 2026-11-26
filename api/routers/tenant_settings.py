@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from shared import access
 from shared.audit import record_audit_event
 from shared.db import db_connection, db_tenant_connection
+from shared.smtp_crypto import decrypt_password, encrypt_password
 
 router = APIRouter(prefix="/api/v1/tenant-settings", tags=["tenant-settings"])
 
@@ -91,6 +92,11 @@ async def update_settings(request: Request, body: SettingsUpdate) -> dict:
     if not data:
         raise HTTPException(status_code=400, detail="no fields to update")
 
+    if "smtp_password" in data:
+        stored, was_enc = encrypt_password(data["smtp_password"])
+        data["smtp_password"] = stored
+        data["smtp_password_encrypted"] = was_enc
+
     set_clause = ", ".join(f"{k} = %s" for k in data)
 
     async with db_tenant_connection(tenant) as conn:
@@ -125,7 +131,7 @@ async def test_smtp(request: Request, body: SmtpTestBody) -> dict:
     async with db_tenant_connection(tenant) as conn:
         cur = await conn.execute(
             "SELECT smtp_host, smtp_port, smtp_user, smtp_password, "
-            "smtp_from_name, smtp_from_email, smtp_tls "
+            "smtp_from_name, smtp_from_email, smtp_tls, smtp_password_encrypted "
             "FROM g1.tenant_settings WHERE tenant_id = %s",
             (tenant,),
         )
@@ -134,7 +140,11 @@ async def test_smtp(request: Request, body: SmtpTestBody) -> dict:
     if row is None or not row[0]:
         raise HTTPException(status_code=400, detail="SMTP not configured")
 
-    host, port, user, password, from_name, from_email, use_tls = row
+    host, port, user, pwd_stored, from_name, from_email, use_tls, pwd_enc = row
+    try:
+        password = decrypt_password(pwd_stored or "", bool(pwd_enc))
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"SMTP password decryption error: {exc}") from exc
     try:
         msg = email.mime.text.MIMEText("Este é um email de teste do JLMirror.")
         msg["Subject"] = "Teste SMTP — JLMirror"

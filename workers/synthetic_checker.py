@@ -21,6 +21,8 @@ from urllib.parse import urlparse
 import httpx
 import psycopg
 
+from shared.smtp_crypto import decrypt_password
+
 logger = logging.getLogger("workers.synthetic_checker")
 
 _ALERT_THRESHOLD = 2  # consecutive failures before alerting
@@ -81,7 +83,7 @@ def _smtp_config(conn: psycopg.Connection, tenant_id: str) -> dict:
         cur = conn.execute(
             """
             SELECT smtp_host, smtp_port, smtp_user, smtp_password,
-                   smtp_from_email, smtp_tls
+                   smtp_from_email, smtp_tls, smtp_password_encrypted
               FROM g1.tenant_settings WHERE tenant_id = %s
             """,
             (tenant_id,),
@@ -89,10 +91,11 @@ def _smtp_config(conn: psycopg.Connection, tenant_id: str) -> dict:
         row = cur.fetchone()
         conn.rollback()
         if row and row[0]:
-            host, port, user, pwd, from_email, use_tls = row
+            host, port, user, pwd_stored, from_email, use_tls, pwd_enc = row
+            pwd = decrypt_password(pwd_stored or "", bool(pwd_enc))
             return {
                 "host": host or "", "port": int(port or 587),
-                "user": user or "", "password": pwd or "",
+                "user": user or "", "password": pwd,
                 "from_addr": from_email or user or "",
                 "tls_mode": "starttls" if use_tls else "plain",
             }
