@@ -86,6 +86,7 @@ from api.routers import (
     k8s,
     correlation,
     discovery,
+    data_transfer,
 )
 
 logger = logging.getLogger(__name__)
@@ -605,6 +606,7 @@ app.include_router(firewall.router)
 app.include_router(k8s.router)
 app.include_router(correlation.router)
 app.include_router(discovery.router)
+app.include_router(data_transfer.router)
 
 
 @app.get("/metrics", tags=["health"])

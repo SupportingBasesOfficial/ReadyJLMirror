@@ -46,6 +46,7 @@
     "k8s": "Kubernetes",
     "correlation": "Correlação",
     "discovery": "Discovery",
+    "data_transfer": "Transferência de Dados",
     "client_portal": "Portal do Cliente",
     "kb": "Base de Conhecimento",
     "groups": {

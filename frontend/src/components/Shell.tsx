@@ -12,7 +12,7 @@ import {
   MessageSquare, PhoneCall, Users, UserPlus, KeyRound,
   ScrollText, BookOpen, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Building2, ShieldCheck, Network, Radio, CalendarClock,
-  LayoutGrid, Globe, Bug, TrendingUp, GitCompare, ToggleLeft, Gauge, ShieldAlert, FileText, HardDrive,
+  LayoutGrid, Globe, Bug, TrendingUp, GitCompare, ToggleLeft, Gauge, ShieldAlert, FileText, HardDrive, ArrowLeftRight,
 } from "lucide-react";
 import { api, logout } from "@/api/client";
 import { AlertsPage } from "@/pages/AlertsPage";
@@ -67,6 +67,7 @@ import { FirewallPage } from "@/pages/FirewallPage";
 import { K8sPage } from "@/pages/K8sPage";
 import { CorrelationPage } from "@/pages/CorrelationPage";
 import { DiscoveryPage } from "@/pages/DiscoveryPage";
+import { DataTransferPage } from "@/pages/DataTransferPage";
 import { ClientPortalPage } from "@/pages/ClientPortalPage";
 import { HelpDeskPage } from "@/pages/HelpDeskPage";
 import { BillingPage } from "@/pages/BillingPage";
@@ -132,6 +133,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   k8s: "/k8s",
   correlation: "/correlation",
   discovery: "/discovery",
+  data_transfer: "/data-transfer",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -824,6 +826,7 @@ export function Shell() {
         ...(has("monitoring:operate") ? [{ id: "firewall" as View, label: t("nav.firewall", "Firewall"), icon: ShieldCheck, description: "Regras, deploy SSH e versionamento" }] : []),
         ...(has("monitoring:operate") ? [{ id: "k8s" as View, label: t("nav.k8s", "Kubernetes"), icon: Network, description: "Clusters, recursos e sync" }] : []),
         ...(has("monitoring:operate") ? [{ id: "discovery" as View, label: t("nav.discovery", "Discovery"), icon: Radio, description: "Auto-discovery SNMP e ping" }] : []),
+        { id: "data_transfer" as View, label: t("nav.data_transfer", "Transferência de Dados"), icon: ArrowLeftRight, description: "Export, import e templates CSV/XLSX/JSON" },
         { id: "status_page" as View, label: t("nav.status_page"), icon: Globe, description: "Status público do tenant" },
       ],
     },
@@ -1309,6 +1312,7 @@ export function Shell() {
           {view === "k8s" && <K8sPage tenantId={s.tenant_id!} />}
           {view === "correlation" && <CorrelationPage tenantId={s.tenant_id!} />}
           {view === "discovery" && <DiscoveryPage tenantId={s.tenant_id!} />}
+          {view === "data_transfer" && <DataTransferPage tenantId={s.tenant_id!} />}
           {view === "client-portal" && <ClientPortalPage />}
           </div>
           </div>

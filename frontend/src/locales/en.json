@@ -47,6 +47,7 @@
     "k8s": "Kubernetes",
     "correlation": "Correlation",
     "discovery": "Discovery",
+    "data_transfer": "Data Transfer",
     "client_portal": "Client Portal",
     "feature_flags": "Feature Flags",
     "tenant_settings": "Tenant Settings",
