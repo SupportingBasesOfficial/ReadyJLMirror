@@ -42,11 +42,21 @@ def g10fx():
             (TENANT,))
         suspended = [r[0] for r in cur.fetchall()]
         _seed_monitoring(conn, TENANT, src, rid, pid)
+        conn.execute(
+            "INSERT INTO g1.tenant_settings (tenant_id, itsm_adapter_instance_ref)"
+            " VALUES (%s, %s)"
+            " ON CONFLICT (tenant_id) DO UPDATE"
+            "   SET itsm_adapter_instance_ref = EXCLUDED.itsm_adapter_instance_ref",
+            (TENANT, "fixture-neutral@1"))
         conn.commit()
         yield {"source": src, "problem": pid, "policy": pol,
                "resource": rid, "conn": conn}
         conn.execute(
             "SELECT set_config('jlmirror.tenant_id',%s,false)",
+            (TENANT,))
+        conn.execute(
+            "UPDATE g1.tenant_settings SET itsm_adapter_instance_ref = NULL"
+            " WHERE tenant_id = %s",
             (TENANT,))
         # alerts pinned by incidents can never be deleted —
         # resolve + disable so leftovers stay inert.
