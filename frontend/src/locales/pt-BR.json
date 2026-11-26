@@ -98,6 +98,12 @@
     "quotaRemoved": "Quota removida",
     "unlimited": "Ilimitado"
   },
+  "quota": {
+    "exceeded_title": "Limite do plano atingido",
+    "exceeded_devices": "Você atingiu o limite de dispositivos do seu plano ({{limit}} dispositivos). Faça upgrade ou remova dispositivos existentes.",
+    "exceeded_users": "Você atingiu o limite de usuários do seu plano ({{limit}} usuários). Faça upgrade ou remova usuários existentes.",
+    "exceeded_generic": "Limite do plano atingido para {{quota_key}} (limite: {{limit}}, atual: {{current}}). Contate seu administrador para fazer upgrade."
+  },
   "common": {
     "save": "Salvar",
     "cancel": "Cancelar",

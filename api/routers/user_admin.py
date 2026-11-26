@@ -21,6 +21,7 @@ from shared import access
 from shared.audit import record_audit_event
 from shared.db import db_connection, db_tenant_connection
 from shared import keycloak_admin as kc
+from shared import quota as quota_enforcement
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,24 @@ async def create_user(request: Request, body: UserCreate) -> dict:
         raise HTTPException(422, detail=f"role must be one of {ROLES}")
     if not body.email or "@" not in body.email:
         raise HTTPException(422, detail="valid email required")
+
+    async with db_connection() as quota_conn:
+        cur = await quota_conn.execute(
+            """
+            SELECT COUNT(*)
+              FROM g1.principals p
+              JOIN g1.tenant_memberships tm
+                ON tm.principal_id = p.principal_id
+             WHERE tm.tenant_id = %s
+               AND p.active = TRUE
+               AND p.kind = 'oidc_user'
+            """,
+            (tenant,),
+        )
+        user_count = (await cur.fetchone())[0]
+        await quota_enforcement.check_quota(
+            quota_conn, tenant, "max_users", user_count
+        )
 
     temp_password = kc.generate_temp_password()
     display_name = f"{body.first_name} {body.last_name}".strip()

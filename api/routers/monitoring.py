@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from shared.config import settings
 from shared.audit import record_audit_event
 from shared.db import db_tenant_connection
+from shared import quota as quota_enforcement
 from shared.monitoring_repo import (
     create_zabbix_source,
     decode_cursor,
@@ -328,6 +329,16 @@ async def create_source(body: SourceCreateRequest, request: Request) -> SourceRe
     key = body.idempotency_key or f"idem-{secrets.token_urlsafe(16)}"
     try:
         async with db_tenant_connection(tenant_id) as conn:
+            cur = await conn.execute(
+                "SELECT COUNT(*) FROM monitoring.monitoring_source "
+                "WHERE tenant_id = %s",
+                (tenant_id,),
+            )
+            source_count = (await cur.fetchone())[0]
+            await quota_enforcement.check_quota(
+                conn, tenant_id, "max_devices", source_count
+            )
+
             result = await create_zabbix_source(
                 conn,
                 tenant_id=tenant_id,
