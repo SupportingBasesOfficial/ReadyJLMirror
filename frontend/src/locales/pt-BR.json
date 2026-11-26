@@ -47,6 +47,7 @@
     "correlation": "Correlação",
     "discovery": "Discovery",
     "data_transfer": "Transferência de Dados",
+    "sql_console": "SQL Console",
     "client_portal": "Portal do Cliente",
     "kb": "Base de Conhecimento",
     "groups": {

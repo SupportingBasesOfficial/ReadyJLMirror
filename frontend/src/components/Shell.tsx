@@ -12,7 +12,7 @@ import {
   MessageSquare, PhoneCall, Users, UserPlus, KeyRound,
   ScrollText, BookOpen, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Building2, ShieldCheck, Network, Radio, CalendarClock,
-  LayoutGrid, Globe, Bug, TrendingUp, GitCompare, ToggleLeft, Gauge, ShieldAlert, FileText, HardDrive, ArrowLeftRight,
+  LayoutGrid, Globe, Bug, TrendingUp, GitCompare, ToggleLeft, Gauge, ShieldAlert, FileText, HardDrive, ArrowLeftRight, Terminal,
 } from "lucide-react";
 import { api, logout } from "@/api/client";
 import { AlertsPage } from "@/pages/AlertsPage";
@@ -68,6 +68,7 @@ import { K8sPage } from "@/pages/K8sPage";
 import { CorrelationPage } from "@/pages/CorrelationPage";
 import { DiscoveryPage } from "@/pages/DiscoveryPage";
 import { DataTransferPage } from "@/pages/DataTransferPage";
+import { SqlConsolePage } from "@/pages/SqlConsolePage";
 import { ClientPortalPage } from "@/pages/ClientPortalPage";
 import { HelpDeskPage } from "@/pages/HelpDeskPage";
 import { BillingPage } from "@/pages/BillingPage";
@@ -134,6 +135,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   correlation: "/correlation",
   discovery: "/discovery",
   data_transfer: "/data-transfer",
+  sql_console: "/sql-console",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -847,6 +849,7 @@ export function Shell() {
           { id: "apikeys" as View, label: t("nav.apikeys"), icon: KeyRound, description: "Chaves de integração" },
           { id: "bugs" as View, label: t("nav.bugs"), icon: Bug, description: "Bugs reportados pelos usuários" },
           { id: "billing" as View, label: t("nav.billing", "Faturamento"), icon: DollarSign, description: "Faturas e uso do período atual" },
+          { id: "sql_console" as View, label: t("nav.sql_console", "SQL Console"), icon: Terminal, description: "Consultas ad-hoc — apenas SELECT" },
         ] : []),
         ...(has("audit:read") ? [{ id: "audit" as View, label: t("nav.audit"), icon: ScrollText, description: "Logs de auditoria" }] : []),
       ],
@@ -1313,6 +1316,7 @@ export function Shell() {
           {view === "correlation" && <CorrelationPage tenantId={s.tenant_id!} />}
           {view === "discovery" && <DiscoveryPage tenantId={s.tenant_id!} />}
           {view === "data_transfer" && <DataTransferPage tenantId={s.tenant_id!} />}
+          {view === "sql_console" && <SqlConsolePage tenantId={s.tenant_id!} />}
           {view === "client-portal" && <ClientPortalPage />}
           </div>
           </div>

@@ -48,6 +48,7 @@
     "correlation": "Correlation",
     "discovery": "Discovery",
     "data_transfer": "Data Transfer",
+    "sql_console": "SQL Console",
     "client_portal": "Client Portal",
     "feature_flags": "Feature Flags",
     "tenant_settings": "Tenant Settings",
