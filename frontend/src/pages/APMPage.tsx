@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Gauge, TrendingUp, AlertCircle, Clock, BarChart2 } from "lucide-react";
+import { Gauge, TrendingUp, AlertCircle, Clock, BarChart2, Search } from "lucide-react";
 import { api } from "@/api/client";
 
 interface ApmSummary {
@@ -34,6 +35,18 @@ interface ApmOverview {
   summary: ApmSummary;
   endpoints: ApmEndpoint[];
   hourly: ApmHourly[];
+}
+
+interface ApmRequest {
+  id: number;
+  recorded_at: string;
+  tenant_id: string | null;
+  principal_id: string | null;
+  method: string;
+  path: string;
+  status_code: number;
+  duration_ms: number;
+  trace_id: string | null;
 }
 
 const METHOD_COLORS: Record<string, string> = {
@@ -96,11 +109,22 @@ function latencyColor(ms: number): string {
 
 export function APMPage({ tenantId }: { tenantId: string }) {
   const { t } = useTranslation();
+  const [traceInput, setTraceInput] = useState("");
+  const [submittedTrace, setSubmittedTrace] = useState("");
 
   const { data, isLoading, isError } = useQuery<ApmOverview>({
     queryKey: ["apm-overview", tenantId],
     queryFn: () => api.get<ApmOverview>("/api/v1/apm/overview"),
     refetchInterval: 60_000,
+  });
+
+  const traceQuery = useQuery<ApmRequest[]>({
+    queryKey: ["apm-requests", tenantId, submittedTrace],
+    queryFn: () =>
+      api.get<ApmRequest[]>(
+        `/api/v1/apm/requests?trace_id=${encodeURIComponent(submittedTrace)}&limit=50`,
+      ),
+    enabled: submittedTrace.length > 0,
   });
 
   if (isLoading) {
@@ -241,6 +265,100 @@ export function APMPage({ tenantId }: { tenantId: string }) {
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      {/* Trace search */}
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-4 space-y-3">
+        <div className="flex items-center gap-2 mb-1">
+          <Search size={14} className="text-[var(--text-muted)]" />
+          <span className="text-sm font-medium">{t("apm.traceSearch", "Busca por Trace ID")}</span>
+        </div>
+        <form
+          onSubmit={(e) => { e.preventDefault(); setSubmittedTrace(traceInput.trim()); }}
+          className="flex gap-2"
+        >
+          <input
+            type="text"
+            value={traceInput}
+            onChange={(e) => setTraceInput(e.target.value)}
+            placeholder={t("apm.traceInputPlaceholder", "Cole o Trace ID (X-Correlation-Id)…")}
+            className="flex-1 text-xs px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--brand)]"
+          />
+          <button
+            type="submit"
+            className="px-3 py-1.5 text-xs rounded-lg bg-[var(--brand)] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+            disabled={!traceInput.trim()}
+          >
+            {t("apm.search", "Buscar")}
+          </button>
+          {submittedTrace && (
+            <button
+              type="button"
+              onClick={() => { setSubmittedTrace(""); setTraceInput(""); }}
+              className="px-3 py-1.5 text-xs rounded-lg border border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--surface-2)] transition-colors"
+            >
+              {t("common.clear", "Limpar")}
+            </button>
+          )}
+        </form>
+
+        {submittedTrace && (
+          traceQuery.isLoading ? (
+            <div className="text-xs text-[var(--text-muted)] py-2">{t("common.loading")}</div>
+          ) : !traceQuery.data?.length ? (
+            <div className="text-xs text-[var(--text-muted)] py-2">
+              {t("apm.traceNotFound", "Nenhum request encontrado para este trace ID.")}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-[var(--text-muted)] border-b border-[var(--border)]">
+                    <th className="text-left py-2 pr-3 font-medium">{t("apm.time", "Horário")}</th>
+                    <th className="text-left py-2 pr-3 font-medium">{t("apm.method", "Método")}</th>
+                    <th className="text-left py-2 pr-3 font-medium">{t("apm.path", "Path")}</th>
+                    <th className="text-right py-2 pr-3 font-medium">{t("apm.status", "Status")}</th>
+                    <th className="text-right py-2 font-medium">{t("apm.latency", "Latência")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {traceQuery.data.map((r) => (
+                    <tr key={r.id} className="border-b border-[var(--border)] last:border-0">
+                      <td className="py-1.5 pr-3 text-[var(--text-muted)] whitespace-nowrap font-mono">
+                        {new Date(r.recorded_at).toLocaleTimeString()}
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <span
+                          className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                          style={{
+                            background: `color-mix(in srgb, ${METHOD_COLORS[r.method] ?? "var(--text-muted)"} 15%, transparent)`,
+                            color: METHOD_COLORS[r.method] ?? "var(--text-muted)",
+                          }}
+                        >
+                          {r.method}
+                        </span>
+                      </td>
+                      <td className="py-1.5 pr-3 font-mono text-[var(--text-muted)] max-w-[260px] truncate">
+                        {r.path}
+                      </td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">
+                        <span style={{ color: r.status_code >= 500 ? "var(--red, #ef4444)" : r.status_code >= 400 ? "var(--yellow, #eab308)" : "var(--green, #22c55e)" }}>
+                          {r.status_code}
+                        </span>
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums" style={{ color: latencyColor(r.duration_ms) }}>
+                        {r.duration_ms} ms
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-[10px] text-[var(--text-muted)] mt-2">
+                {traceQuery.data.length} {t("apm.requestsFound", "request(s) — trace")} <span className="font-mono">{submittedTrace}</span>
+              </p>
+            </div>
+          )
         )}
       </div>
 

@@ -154,6 +154,63 @@ async def get_apm_overview(request: Request) -> dict:
     }
 
 
+@router.get("/requests")
+async def list_requests(
+    request: Request,
+    trace_id: str | None = None,
+    path: str | None = None,
+    min_status: int | None = None,
+    max_status: int | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """List individual APM request records with optional filters.
+
+    Supports filtering by trace_id (correlation_id from BFF), path prefix,
+    and HTTP status code range. Max 200 rows; newest first.
+    Tenant-scoped (platform_admin sees all).
+    """
+    ctx = _get_context(request)
+    tenant_id: str | None = ctx.get("tenant_id")
+    is_pa: bool = bool(ctx.get("is_platform_admin", False))
+    limit = min(max(1, limit), 200)
+
+    clauses: list[str] = []
+    params: list = []
+    if not is_pa:
+        clauses.append("tenant_id = %s")
+        params.append(tenant_id)
+    if trace_id:
+        clauses.append("trace_id = %s")
+        params.append(trace_id)
+    if path:
+        clauses.append("path ILIKE %s")
+        params.append(f"%{path}%")
+    if min_status is not None:
+        clauses.append("status_code >= %s")
+        params.append(min_status)
+    if max_status is not None:
+        clauses.append("status_code <= %s")
+        params.append(max_status)
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+
+    async with db_connection() as conn:
+        rows = await _fetchall(conn, f"""
+            SELECT id, recorded_at, tenant_id, principal_id,
+                   method, path, status_code, duration_ms, trace_id
+              FROM g1.apm_request_log
+             {where}
+             ORDER BY recorded_at DESC
+             LIMIT %s
+        """, tuple(params))
+
+    for r in rows:
+        if r.get("recorded_at") is not None:
+            r["recorded_at"] = r["recorded_at"].isoformat()
+    return rows
+
+
 @router.delete("/purge")
 async def purge_old_logs(request: Request) -> dict:
     """Remove records older than 7 days. Intended for the scheduled worker."""

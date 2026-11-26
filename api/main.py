@@ -436,15 +436,16 @@ async def verify_context(request: Request, call_next):
 async def _apm_write(
     method: str, path: str, status_code: int, duration_ms: float,
     tenant_id: Optional[str], principal_id: Optional[str],
+    trace_id: Optional[str] = None,
 ) -> None:
     try:
         async with asyncio.timeout(5.0):
             async with db_connection() as conn:
                 await conn.execute(
                     "INSERT INTO g1.apm_request_log"
-                    " (method, path, status_code, duration_ms, tenant_id, principal_id)"
-                    " VALUES (%s, %s, %s, %s, %s, %s)",
-                    (method, path, status_code, duration_ms, tenant_id, principal_id),
+                    " (method, path, status_code, duration_ms, tenant_id, principal_id, trace_id)"
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    (method, path, status_code, duration_ms, tenant_id, principal_id, trace_id),
                 )
                 await conn.commit()
     except Exception:
@@ -465,6 +466,7 @@ async def apm_middleware(request: Request, call_next) -> Response:
             round(duration_ms, 2),
             ctx.get("tenant_id") if ctx else None,
             ctx.get("principal_id") if ctx else None,
+            ctx.get("correlation_id") if ctx else None,
         ))
     return response
 
