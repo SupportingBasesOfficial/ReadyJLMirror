@@ -38,6 +38,7 @@
     "tenant_settings": "Configurações do Tenant",
     "apm": "APM",
     "logs": "Logs",
+    "webhooks": "Webhooks",
     "client_portal": "Portal do Cliente",
     "kb": "Base de Conhecimento",
     "groups": {

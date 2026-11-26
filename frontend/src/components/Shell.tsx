@@ -59,6 +59,7 @@ import { TenantSettingsPage } from "@/pages/TenantSettingsPage";
 import { APMPage } from "@/pages/APMPage";
 import { SecurityAuditPage } from "@/pages/SecurityAuditPage";
 import { LogsPage } from "@/pages/LogsPage";
+import { WebhooksPage } from "@/pages/WebhooksPage";
 import { ClientPortalPage } from "@/pages/ClientPortalPage";
 import { HelpDeskPage } from "@/pages/HelpDeskPage";
 import { BillingPage } from "@/pages/BillingPage";
@@ -116,6 +117,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   helpdesk: "/helpdesk",
   billing: "/billing",
   logs: "/logs",
+  webhooks: "/webhooks",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -790,6 +792,7 @@ export function Shell() {
         { id: "teia" as View, label: t("nav.teia"), icon: Network, description: "Mapa relacional do tenant" },
         ...(flagEnabled("module_synthetic") ? [{ id: "synthetic" as View, label: t("nav.synthetic"), icon: Radio, description: "Checks HTTP periódicos" }] : []),
         ...(has("monitoring:operate") ? [{ id: "alertmanager" as View, label: t("nav.alertmanager"), icon: Webhook, description: "Regras Prometheus" }] : []),
+        ...(has("monitoring:operate") ? [{ id: "webhooks" as View, label: t("nav.webhooks", "Webhooks"), icon: Webhook, description: "Webhooks de saída HMAC-SHA256" }] : []),
       ],
     },
     {
@@ -1277,6 +1280,7 @@ export function Shell() {
           {view === "apm" && <APMPage tenantId={s.tenant_id!} />}
           {view === "security-audit" && <SecurityAuditPage tenantId={s.tenant_id!} />}
           {view === "logs" && <LogsPage tenantId={s.tenant_id!} />}
+          {view === "webhooks" && <WebhooksPage tenantId={s.tenant_id!} />}
           {view === "client-portal" && <ClientPortalPage />}
           </div>
           </div>

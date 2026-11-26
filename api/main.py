@@ -78,6 +78,7 @@ from api.routers import (
     tenant,
     user_admin,
     logs,
+    webhooks,
 )
 
 logger = logging.getLogger(__name__)
@@ -589,6 +590,7 @@ app.include_router(client_portal.router)
 app.include_router(helpdesk.router)
 app.include_router(user_admin.router)
 app.include_router(logs.router)
+app.include_router(webhooks.router)
 
 
 @app.get("/metrics", tags=["health"])
