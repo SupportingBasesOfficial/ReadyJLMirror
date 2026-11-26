@@ -44,6 +44,7 @@
     "capacity": "Capacity",
     "backup": "Backup",
     "firewall": "Firewall",
+    "k8s": "Kubernetes",
     "client_portal": "Client Portal",
     "feature_flags": "Feature Flags",
     "tenant_settings": "Tenant Settings",
