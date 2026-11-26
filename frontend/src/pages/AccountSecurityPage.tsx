@@ -166,6 +166,15 @@ interface MFASetup {
   email: string;
 }
 
+interface RecoveryCodesStatus {
+  remaining: number;
+}
+
+interface RecoveryCodesGenerated {
+  codes: string[];
+  count: number;
+}
+
 function QRCodeCanvas({ uri }: { uri: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -189,10 +198,29 @@ function MFATab() {
   const qc = useQueryClient();
   const [setup, setSetup] = useState<MFASetup | null>(null);
   const [code, setCode] = useState("");
+  const [generatedCodes, setGeneratedCodes] = useState<string[] | null>(null);
 
   const { data, isLoading } = useQuery<MFAStatus>({
     queryKey: ["account-mfa-status"],
     queryFn: () => apiFetch("/api/v1/account/mfa/status"),
+  });
+
+  const { data: rcStatus } = useQuery<RecoveryCodesStatus>({
+    queryKey: ["account-mfa-recovery-status"],
+    queryFn: () => apiFetch("/api/v1/account/mfa/recovery-codes"),
+    enabled: data?.totp_enabled ?? false,
+  });
+
+  const generateCodes = useMutation({
+    mutationFn: () =>
+      apiFetch<RecoveryCodesGenerated>("/api/v1/account/mfa/recovery-codes/generate", { method: "POST" }),
+    onSuccess: (d) => {
+      setGeneratedCodes(d.codes);
+      qc.invalidateQueries({ queryKey: ["account-mfa-recovery-status"] });
+    },
+    onError: (e: Error) => {
+      toast({ title: "Erro ao gerar recovery codes", description: e.message, variant: "destructive" });
+    },
   });
 
   const beginSetup = useMutation({
@@ -303,6 +331,74 @@ function MFATab() {
               {t("accountSecurity.mfa.verify")}
             </Button>
           </div>
+        </div>
+      )}
+
+      {/* Recovery codes — only shown when TOTP is enabled */}
+      {enabled && (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Códigos de recuperação</p>
+              <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                {rcStatus !== undefined
+                  ? `${rcStatus.remaining} código${rcStatus.remaining !== 1 ? "s" : ""} disponível${rcStatus.remaining !== 1 ? "s" : ""}`
+                  : "Carregando…"}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={generateCodes.isPending}
+              onClick={() => {
+                if (
+                  generatedCodes === null ||
+                  window.confirm("Isso invalidará todos os códigos anteriores. Continuar?")
+                ) {
+                  generateCodes.mutate();
+                }
+              }}
+            >
+              {generateCodes.isPending ? <Spinner className="mr-2 h-3 w-3" /> : null}
+              {generatedCodes ? "Gerar novos" : "Gerar códigos"}
+            </Button>
+          </div>
+
+          {generatedCodes && (
+            <div className="space-y-3">
+              <div className="rounded-md bg-amber-500/10 border border-amber-500/30 p-3 flex gap-2">
+                <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Salve esses códigos em um local seguro. Eles são mostrados apenas uma vez.
+                  Cada código só pode ser usado uma vez para remover o MFA caso você perca o dispositivo.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {generatedCodes.map((c) => (
+                  <code
+                    key={c}
+                    className="text-xs font-mono px-3 py-1.5 rounded bg-[var(--surface-2)] border border-[var(--border)] text-center tracking-wider select-all"
+                  >
+                    {c}
+                  </code>
+                ))}
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs text-[var(--text-muted)]"
+                onClick={() => setGeneratedCodes(null)}
+              >
+                Fechar — confirmei que salvei os códigos
+              </Button>
+            </div>
+          )}
+
+          {!generatedCodes && rcStatus?.remaining === 0 && (
+            <p className="text-xs text-[var(--text-muted)]">
+              Nenhum código disponível. Gere códigos de recuperação para poder acessar sua conta se perder o dispositivo TOTP.
+            </p>
+          )}
         </div>
       )}
     </div>
