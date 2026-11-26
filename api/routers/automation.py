@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from shared import access
 from shared.db import db_connection, db_tenant_connection
+from shared.ssh_crypto import encrypt_key
 from shared.ssrf import validate_outbound_url
 
 router = APIRouter(prefix="/api/v1/automation", tags=["automation"])
@@ -364,17 +365,20 @@ async def create_credential(request: Request, body: CreateCredential) -> dict:
     if not key_pem.startswith("-----BEGIN"):
         raise HTTPException(status_code=422, detail="key_pem must be a PEM-encoded private key")
 
+    stored_pem, was_encrypted = encrypt_key(key_pem)
+
     credential_id = f"cred:{uuid.uuid4()}"
     async with db_tenant_connection(tenant_id) as conn:
         try:
             await conn.execute(
                 """
                 INSERT INTO g1.automation_credential
-                    (credential_id, tenant_id, label, username, key_pem, known_hosts)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                    (credential_id, tenant_id, label, username, key_pem,
+                     known_hosts, key_pem_encrypted)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
-                (credential_id, tenant_id, label, username, key_pem,
-                 body.known_hosts),
+                (credential_id, tenant_id, label, username, stored_pem,
+                 body.known_hosts, was_encrypted),
             )
             await conn.commit()
         except Exception as exc:

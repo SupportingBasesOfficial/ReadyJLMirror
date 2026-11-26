@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 
 import psycopg
 
+from shared.ssh_crypto import decrypt_key
 from shared.ssrf import validate_outbound_url
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ def _execute_ssh_command(config: dict, ctx: dict,
 
     # Fetch credential from DB
     cur = conn.execute(
-        "SELECT username, key_pem, known_hosts "
+        "SELECT username, key_pem, known_hosts, key_pem_encrypted "
         "FROM g1.automation_credential "
         "WHERE credential_id=%s AND tenant_id=%s",
         (credential_id, ctx["tenant_id"]),
@@ -90,7 +91,11 @@ def _execute_ssh_command(config: dict, ctx: dict,
     if cred_row is None:
         return "failed", f"credential not found: {credential_id}"
 
-    username, key_pem, known_hosts_text = cred_row
+    username, key_pem_stored, known_hosts_text, key_pem_enc = cred_row
+    try:
+        key_pem = decrypt_key(key_pem_stored, bool(key_pem_enc))
+    except ValueError as exc:
+        return "failed", f"SSH key decryption error: {exc}"
 
     # Load private key
     try:
