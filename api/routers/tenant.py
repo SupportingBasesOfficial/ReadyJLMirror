@@ -30,6 +30,19 @@ def _tenant_ctx(request: Request) -> tuple[str, str]:
     return ctx["tenant_id"], ctx["principal_id"]
 
 
+async def _require_admin(request: Request) -> tuple[str, str]:
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
+    principal_id = ctx.get("principal_id")
+    tenant_id = ctx.get("tenant_id")
+    if not principal_id or not tenant_id:
+        raise HTTPException(status_code=403, detail="tenant context required")
+    async with db_connection() as conn:
+        perms = await access.effective_permissions(conn, principal_id, tenant_id)
+    if "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="tenant:admin required")
+    return tenant_id, principal_id
+
+
 @router.get("/members")
 async def list_members(request: Request) -> list[dict]:
     tenant, _ = _tenant_ctx(request)
@@ -58,7 +71,7 @@ class MemberCreate(BaseModel):
 
 @router.post("/members", status_code=201)
 async def add_member(request: Request, body: MemberCreate) -> dict:
-    tenant, actor = _tenant_ctx(request)
+    tenant, actor = await _require_admin(request)
     if body.role not in ROLES and not body.role.startswith("custom:"):
         raise HTTPException(
             status_code=422,
@@ -103,7 +116,7 @@ class MemberRoleUpdate(BaseModel):
 async def update_member_role(
     request: Request, membership_id: str, body: MemberRoleUpdate
 ) -> dict:
-    tenant, actor = _tenant_ctx(request)
+    tenant, actor = await _require_admin(request)
     if body.role not in ROLES and not body.role.startswith("custom:"):
         raise HTTPException(
             status_code=422,
@@ -138,7 +151,7 @@ async def update_member_role(
 
 @router.post("/members/{membership_id}/revoke")
 async def revoke_member(request: Request, membership_id: str) -> dict:
-    tenant, actor = _tenant_ctx(request)
+    tenant, actor = await _require_admin(request)
     async with db_tenant_connection(tenant) as conn:
         cur = await conn.execute(
             """
@@ -189,7 +202,7 @@ class RoleCreate(BaseModel):
 
 @router.post("/roles", status_code=201)
 async def create_role(request: Request, body: RoleCreate) -> dict:
-    tenant, actor = _tenant_ctx(request)
+    tenant, actor = await _require_admin(request)
     from shared import access
     invalid = [p for p in body.permissions if p not in access.PERMISSIONS]
     if invalid:
@@ -219,7 +232,7 @@ async def create_role(request: Request, body: RoleCreate) -> dict:
 
 @router.post("/roles/{role_name}/retire")
 async def retire_role(request: Request, role_name: str) -> dict:
-    tenant, actor = _tenant_ctx(request)
+    tenant, actor = await _require_admin(request)
     async with db_tenant_connection(tenant) as conn:
         cur = await conn.execute(
             """

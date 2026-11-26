@@ -17,6 +17,7 @@ from shared import access
 from shared.audit import record_audit_event
 from shared.db import db_connection, db_tenant_connection
 from shared.smtp_crypto import decrypt_password, encrypt_password
+from shared.ssrf import validate_outbound_url
 
 router = APIRouter(prefix="/api/v1/tenant-settings", tags=["tenant-settings"])
 
@@ -141,6 +142,9 @@ async def test_smtp(request: Request, body: SmtpTestBody) -> dict:
         raise HTTPException(status_code=400, detail="SMTP not configured")
 
     host, port, user, pwd_stored, from_name, from_email, use_tls, pwd_enc = row
+    ssrf_err = validate_outbound_url(f"https://{host}/")
+    if ssrf_err:
+        raise HTTPException(status_code=422, detail=f"smtp_host blocked: {ssrf_err}")
     try:
         password = decrypt_password(pwd_stored or "", bool(pwd_enc))
     except ValueError as exc:
