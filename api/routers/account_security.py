@@ -193,8 +193,9 @@ async def mfa_verify_and_enable(body: MFAVerifyBody, request: Request) -> dict:
         raise HTTPException(status_code=400, detail="MFA setup expired — restart setup")
 
     t = int(time.time())
+    code = body.code.strip()
     valid = any(
-        _totp(secret, t - delta) == body.code.strip()
+        hmac.compare_digest(_totp(secret, t - delta), code)
         for delta in (-30, 0, 30)
     )
     if not valid:
