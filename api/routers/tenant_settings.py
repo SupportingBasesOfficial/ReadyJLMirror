@@ -122,6 +122,63 @@ async def update_settings(request: Request, body: SettingsUpdate) -> dict:
     return await get_settings(request)
 
 
+@router.get("/usage")
+async def get_usage(request: Request) -> dict:
+    tenant, _ = await _require_admin(request)
+    async with db_tenant_connection(tenant) as conn:
+        cur = await conn.execute(
+            "SELECT COUNT(*) FROM monitoring.monitoring_source WHERE tenant_id = %s",
+            (tenant,),
+        )
+        devices = (await cur.fetchone())[0]
+
+        cur = await conn.execute(
+            """
+            SELECT COUNT(*) FROM g1.principals p
+              JOIN g1.tenant_memberships tm ON tm.principal_id = p.principal_id
+             WHERE tm.tenant_id = %s AND p.active = TRUE
+            """,
+            (tenant,),
+        )
+        users = (await cur.fetchone())[0]
+
+        cur = await conn.execute(
+            """
+            SELECT COUNT(*) FROM g1.automation_run
+             WHERE tenant_id = %s AND started_at >= now() - interval '30 days'
+            """,
+            (tenant,),
+        )
+        runs_30d = (await cur.fetchone())[0]
+
+        cur = await conn.execute(
+            "SELECT COUNT(*) FROM g1.client_companies WHERE msp_tenant_id = %s",
+            (tenant,),
+        )
+        companies = (await cur.fetchone())[0]
+
+        cur = await conn.execute(
+            """
+            SELECT pq.quota_key, pq.quota_value
+              FROM g1.tenants t
+              JOIN g1.commercial_accounts ca ON ca.organization_id = t.organization_id
+              JOIN g1.contracts c ON c.account_id = ca.account_id AND c.state = 'active'
+              JOIN g1.plan_quotas pq ON pq.plan_id = c.plan_ref
+             WHERE t.tenant_id = %s
+               AND pq.quota_key IN ('max_devices', 'max_users')
+            """,
+            (tenant,),
+        )
+        quotas = {r[0]: r[1] for r in await cur.fetchall()}
+
+    return {
+        "devices":          {"current": devices,   "limit": quotas.get("max_devices", -1)},
+        "users":            {"current": users,     "limit": quotas.get("max_users",   -1)},
+        "automation_runs_30d": {"current": runs_30d, "limit": -1},
+        "client_companies": {"current": companies, "limit": -1},
+    }
+
+
 class SmtpTestBody(BaseModel):
     to_email: str
 

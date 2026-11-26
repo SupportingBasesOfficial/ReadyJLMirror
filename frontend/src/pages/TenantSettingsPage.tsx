@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { api } from "@/api/client";
 // api.get / api.put / api.post — object with named method calls
-import { Settings2, Mail, Bell, Palette, Send, CheckCircle, XCircle } from "lucide-react";
+import { Settings2, Mail, Bell, Palette, Send, CheckCircle, XCircle, LayoutGrid, BarChart3 } from "lucide-react";
 import { PageInfoButton } from "@/components/PageInfoButton";
 
 interface TenantSettings {
@@ -40,7 +40,39 @@ const TIMEZONES = [
 
 const DATE_FORMATS = ["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"];
 
-type Tab = "branding" | "smtp" | "preferences";
+type Tab = "branding" | "smtp" | "preferences" | "modules" | "uso";
+
+interface FeatureFlag {
+  flag_id: string;
+  flag_key: string;
+  enabled: boolean;
+  description: string;
+}
+
+interface UsageStat { current: number; limit: number; }
+interface UsageData {
+  devices: UsageStat;
+  users: UsageStat;
+  automation_runs_30d: UsageStat;
+  client_companies: UsageStat;
+}
+
+const MODULE_LABELS: Record<string, string> = {
+  module_aiops:         "AIOps",
+  module_finops:        "FinOps",
+  module_synthetic:     "Monitoramento Sintético",
+  module_oncall:        "Gestão de Plantão",
+  module_kb:            "Base de Conhecimento",
+  module_drift:         "Config Drift",
+  module_executive:     "Executive Dashboard",
+  module_reports:       "Relatórios",
+  module_automation:    "Automação",
+  module_sla:           "SLA",
+  module_maintenance:   "Manutenção",
+  module_chatops:       "ChatOps (beta)",
+  module_push:          "Push Notifications (beta)",
+  module_client_portal: "Portal do Cliente (beta)",
+};
 
 interface Props { tenantId: string }
 
@@ -91,6 +123,28 @@ export function TenantSettingsPage({ tenantId }: Props) {
     onSuccess: (res: { success: boolean; error?: string }) => setSmtpTestResult(res),
   });
 
+  // --- Modules (feature flags) ---
+  const { data: flagsData } = useQuery<FeatureFlag[]>({
+    queryKey: ["feature-flags", tenantId],
+    queryFn: () => api.get<FeatureFlag[]>("/api/v1/feature-flags"),
+    enabled: tab === "modules",
+  });
+  const moduleFlags = (flagsData ?? []).filter(f => f.flag_key.startsWith("module_"));
+
+  const flagMut = useMutation({
+    mutationFn: ({ key, enabled }: { key: string; enabled: boolean }) =>
+      api.put(`/api/v1/feature-flags/${key}`, { enabled }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["feature-flags"] }),
+    onError: () => showToast(false, "Erro ao salvar módulo"),
+  });
+
+  // --- Usage stats ---
+  const { data: usage } = useQuery<UsageData>({
+    queryKey: ["tenant-settings-usage", tenantId],
+    queryFn: () => api.get<UsageData>("/api/v1/tenant-settings/usage"),
+    enabled: tab === "uso",
+  });
+
   // --- Local form state ---
   const [brandForm, setBrandForm] = useState({ brand_name: "", brand_color: "#6366f1", logo_url: "" });
   const [smtpForm, setSmtpForm] = useState<TenantSettings>({});
@@ -122,9 +176,11 @@ export function TenantSettingsPage({ tenantId }: Props) {
   }
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: "branding", label: t("tenantSettings.tabs.branding"), icon: <Palette size={14} /> },
-    { id: "smtp", label: t("tenantSettings.tabs.smtp"), icon: <Mail size={14} /> },
-    { id: "preferences", label: t("tenantSettings.tabs.preferences"), icon: <Bell size={14} /> },
+    { id: "branding",     label: t("tenantSettings.tabs.branding"),     icon: <Palette size={14} /> },
+    { id: "smtp",         label: t("tenantSettings.tabs.smtp"),         icon: <Mail size={14} /> },
+    { id: "preferences",  label: t("tenantSettings.tabs.preferences"),  icon: <Bell size={14} /> },
+    { id: "modules",      label: t("tenantSettings.tabs.modules", "Módulos"),    icon: <LayoutGrid size={14} /> },
+    { id: "uso",          label: t("tenantSettings.tabs.uso", "Uso"),           icon: <BarChart3 size={14} /> },
   ];
 
   if (isLoading) return <div className="p-8 text-sm text-[var(--text-muted)]">{t("common.loading")}</div>;
@@ -329,6 +385,79 @@ export function TenantSettingsPage({ tenantId }: Props) {
           >
             {settingsMut.isPending ? t("common.saving") : t("tenantSettings.prefs.save")}
           </button>
+        </div>
+      )}
+
+      {/* Modules Tab */}
+      {tab === "modules" && (
+        <div className="space-y-3">
+          <p className="text-xs text-[var(--text-muted)]">Ative ou desative módulos para este tenant. Módulos desativados ficam ocultos na navegação.</p>
+          {moduleFlags.length === 0 && (
+            <p className="text-xs text-[var(--text-muted)]">{t("common.loading")}</p>
+          )}
+          {moduleFlags.map(flag => (
+            <label key={flag.flag_key} className="flex items-center justify-between cursor-pointer py-2 border-b border-[var(--border)] last:border-0">
+              <div>
+                <span className="text-sm font-medium">{MODULE_LABELS[flag.flag_key] ?? flag.flag_key}</span>
+                {flag.description && (
+                  <p className="text-xs text-[var(--text-muted)]">{flag.description}</p>
+                )}
+              </div>
+              <button
+                role="switch"
+                aria-checked={flag.enabled}
+                onClick={() => flagMut.mutate({ key: flag.flag_key, enabled: !flag.enabled })}
+                disabled={flagMut.isPending}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
+                  flag.enabled ? "bg-[var(--brand,#6366f1)]" : "bg-[var(--border)]"
+                }`}
+              >
+                <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
+                  flag.enabled ? "translate-x-4" : "translate-x-1"
+                }`} />
+              </button>
+            </label>
+          ))}
+        </div>
+      )}
+
+      {/* Uso Tab */}
+      {tab === "uso" && (
+        <div className="space-y-4">
+          <p className="text-xs text-[var(--text-muted)]">Resumo de uso do tenant. Limites com -1 indicam ilimitado.</p>
+          {!usage && <p className="text-xs text-[var(--text-muted)]">{t("common.loading")}</p>}
+          {usage && (() => {
+            const stats: { label: string; stat: UsageStat; suffix?: string }[] = [
+              { label: "Dispositivos monitorados", stat: usage.devices },
+              { label: "Usuários ativos", stat: usage.users },
+              { label: "Execuções de automação (30 dias)", stat: usage.automation_runs_30d },
+              { label: "Empresas clientes (MSP)", stat: usage.client_companies },
+            ];
+            return (
+              <div className="grid grid-cols-2 gap-3">
+                {stats.map(({ label, stat }) => (
+                  <div key={label} className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4 space-y-1">
+                    <p className="text-xs text-[var(--text-muted)]">{label}</p>
+                    <p className="text-2xl font-semibold tabular-nums">{stat.current}</p>
+                    {stat.limit !== -1 && (
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs text-[var(--text-muted)]">
+                          <span>Limite: {stat.limit}</span>
+                          <span>{Math.round((stat.current / stat.limit) * 100)}%</span>
+                        </div>
+                        <div className="h-1.5 w-full rounded-full bg-[var(--border)] overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-[var(--brand,#6366f1)]"
+                            style={{ width: `${Math.min(100, Math.round((stat.current / stat.limit) * 100))}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
