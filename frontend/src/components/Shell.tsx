@@ -66,6 +66,7 @@ import { BackupPage } from "@/pages/BackupPage";
 import { FirewallPage } from "@/pages/FirewallPage";
 import { K8sPage } from "@/pages/K8sPage";
 import { CorrelationPage } from "@/pages/CorrelationPage";
+import { DiscoveryPage } from "@/pages/DiscoveryPage";
 import { ClientPortalPage } from "@/pages/ClientPortalPage";
 import { HelpDeskPage } from "@/pages/HelpDeskPage";
 import { BillingPage } from "@/pages/BillingPage";
@@ -130,6 +131,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   firewall: "/firewall",
   k8s: "/k8s",
   correlation: "/correlation",
+  discovery: "/discovery",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -821,6 +823,7 @@ export function Shell() {
         ...(has("monitoring:operate") ? [{ id: "backup" as View, label: t("nav.backup", "Backup"), icon: HardDrive, description: "Jobs de backup e snapshots" }] : []),
         ...(has("monitoring:operate") ? [{ id: "firewall" as View, label: t("nav.firewall", "Firewall"), icon: ShieldCheck, description: "Regras, deploy SSH e versionamento" }] : []),
         ...(has("monitoring:operate") ? [{ id: "k8s" as View, label: t("nav.k8s", "Kubernetes"), icon: Network, description: "Clusters, recursos e sync" }] : []),
+        ...(has("monitoring:operate") ? [{ id: "discovery" as View, label: t("nav.discovery", "Discovery"), icon: Radio, description: "Auto-discovery SNMP e ping" }] : []),
         { id: "status_page" as View, label: t("nav.status_page"), icon: Globe, description: "Status público do tenant" },
       ],
     },
@@ -1305,6 +1308,7 @@ export function Shell() {
           {view === "firewall" && <FirewallPage tenantId={s.tenant_id!} />}
           {view === "k8s" && <K8sPage tenantId={s.tenant_id!} />}
           {view === "correlation" && <CorrelationPage tenantId={s.tenant_id!} />}
+          {view === "discovery" && <DiscoveryPage tenantId={s.tenant_id!} />}
           {view === "client-portal" && <ClientPortalPage />}
           </div>
           </div>

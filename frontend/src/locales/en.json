@@ -46,6 +46,7 @@
     "firewall": "Firewall",
     "k8s": "Kubernetes",
     "correlation": "Correlation",
+    "discovery": "Discovery",
     "client_portal": "Client Portal",
     "feature_flags": "Feature Flags",
     "tenant_settings": "Tenant Settings",

@@ -45,6 +45,7 @@
     "firewall": "Firewall",
     "k8s": "Kubernetes",
     "correlation": "Correlação",
+    "discovery": "Discovery",
     "client_portal": "Portal do Cliente",
     "kb": "Base de Conhecimento",
     "groups": {
