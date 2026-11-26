@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from pydantic import BaseModel
+from typing import Optional
 
 from shared.audit import record_audit_event
 from shared.db import db_tenant_connection
@@ -503,3 +505,142 @@ async def capacity_overview(
         "at_risk": at_risk,
         "items":   items,
     }
+
+
+# ---------------------------------------------------------------------------
+# Prediction Lifecycle — mitigated / occurred / false_positive
+# ---------------------------------------------------------------------------
+
+_OUTCOMES = {"mitigated", "occurred", "false_positive"}
+
+
+class RecordOutcome(BaseModel):
+    resource_id: str
+    metric_id: str
+    outcome: str
+    note: Optional[str] = ""
+
+
+@router.post("/predictions/outcomes", status_code=status.HTTP_201_CREATED)
+async def record_prediction_outcome(
+    request: Request, body: RecordOutcome
+) -> dict:
+    """Record or update the lifecycle outcome for a predicted resource/metric pair.
+
+    Uses INSERT … ON CONFLICT DO UPDATE so calling again updates in place.
+    Only principals with monitoring:operate or tenant:admin may record outcomes.
+    """
+    from shared import access
+    from shared.db import db_connection
+
+    ctx = _get_context(request)
+    tenant_id = ctx["tenant_id"]
+    principal_id = ctx.get("principal_id", "unknown")
+
+    if body.outcome not in _OUTCOMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"outcome must be one of {sorted(_OUTCOMES)}",
+        )
+    if not body.resource_id or not body.metric_id:
+        raise HTTPException(status_code=422, detail="resource_id and metric_id are required")
+
+    async with db_connection() as pconn:
+        perms = await access.effective_permissions(pconn, principal_id, tenant_id)
+    if "monitoring:operate" not in perms and "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="monitoring:operate required")
+
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(
+            """
+            INSERT INTO aiops.prediction_outcome
+                (tenant_id, resource_id, metric_id, outcome, note, recorded_by)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, resource_id, metric_id) DO UPDATE
+               SET outcome = EXCLUDED.outcome,
+                   note = EXCLUDED.note,
+                   recorded_at = now(),
+                   recorded_by = EXCLUDED.recorded_by
+            RETURNING outcome_id
+            """,
+            (tenant_id, body.resource_id, body.metric_id,
+             body.outcome, body.note or "", principal_id),
+        )
+        row = await cur.fetchone()
+        await record_audit_event(
+            conn, tenant_id,
+            action="aiops.prediction.outcome_recorded",
+            actor_kind="principal", actor_id=principal_id,
+            subject_type="prediction_outcome", subject_id=str(row[0]),
+            detail={"outcome": body.outcome, "resource_id": body.resource_id},
+        )
+        await conn.commit()
+
+    return {
+        "outcome_id": str(row[0]),
+        "resource_id": body.resource_id,
+        "metric_id": body.metric_id,
+        "outcome": body.outcome,
+    }
+
+
+@router.delete("/predictions/outcomes/{resource_id}/{metric_id}",
+               status_code=status.HTTP_204_NO_CONTENT)
+async def clear_prediction_outcome(
+    request: Request, resource_id: str, metric_id: str
+) -> None:
+    """Remove a recorded outcome, returning the prediction to 'active' state."""
+    from shared import access
+    from shared.db import db_connection
+
+    ctx = _get_context(request)
+    tenant_id = ctx["tenant_id"]
+    principal_id = ctx.get("principal_id", "unknown")
+
+    async with db_connection() as pconn:
+        perms = await access.effective_permissions(pconn, principal_id, tenant_id)
+    if "monitoring:operate" not in perms and "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="monitoring:operate required")
+
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(
+            "DELETE FROM aiops.prediction_outcome "
+            "WHERE tenant_id=%s AND resource_id=%s AND metric_id=%s",
+            (tenant_id, resource_id, metric_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="outcome not found")
+        await conn.commit()
+
+
+@router.get("/predictions/outcomes")
+async def list_prediction_outcomes(request: Request) -> list[dict]:
+    """List all recorded prediction outcomes for the current tenant."""
+    ctx = _get_context(request)
+    tenant_id = ctx["tenant_id"]
+
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(
+            """
+            SELECT outcome_id, resource_id, metric_id, outcome,
+                   note, recorded_at, recorded_by
+              FROM aiops.prediction_outcome
+             WHERE tenant_id = %s
+             ORDER BY recorded_at DESC
+            """,
+            (tenant_id,),
+        )
+        rows = await cur.fetchall()
+
+    return [
+        {
+            "outcome_id":  str(r[0]),
+            "resource_id": r[1],
+            "metric_id":   r[2],
+            "outcome":     r[3],
+            "note":        r[4],
+            "recorded_at": r[5].isoformat(),
+            "recorded_by": r[6],
+        }
+        for r in rows
+    ]

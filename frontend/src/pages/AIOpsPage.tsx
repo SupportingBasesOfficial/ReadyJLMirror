@@ -10,6 +10,16 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 
+interface PredictionOutcome {
+  outcome_id: string;
+  resource_id: string;
+  metric_id: string;
+  outcome: "mitigated" | "occurred" | "false_positive";
+  note: string;
+  recorded_at: string;
+  recorded_by: string;
+}
+
 // ---------------------------------------------------------------------------
 // Shared types
 // ---------------------------------------------------------------------------
@@ -392,8 +402,23 @@ function AnomaliesTab({ tenantId }: { tenantId: string }) {
   );
 }
 
+const OUTCOME_LABELS: Record<string, string> = {
+  mitigated: "Mitigado",
+  occurred: "Ocorreu",
+  false_positive: "Falso positivo",
+};
+
+const OUTCOME_VARIANTS: Record<string, "success" | "danger" | "muted"> = {
+  mitigated: "success",
+  occurred: "danger",
+  false_positive: "muted",
+};
+
 function PredictionsTab({ tenantId }: { tenantId: string }) {
   const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const canOperate = useCanOperate();
   const [horizonHours, setHorizonHours] = useState(72);
 
   const q = useQuery({
@@ -403,6 +428,37 @@ function PredictionsTab({ tenantId }: { tenantId: string }) {
         `/api/v1/aiops/predictions?horizon_hours=${horizonHours}`
       ),
     refetchInterval: 300_000,
+  });
+
+  const outcomesQ = useQuery<PredictionOutcome[]>({
+    queryKey: ["aiops-prediction-outcomes", tenantId],
+    queryFn: () =>
+      api.get("/api/v1/aiops/predictions/outcomes").then((r) => r.data),
+    refetchInterval: 300_000,
+  });
+
+  const outcomesMap = new Map<string, PredictionOutcome>(
+    (outcomesQ.data ?? []).map((o) => [`${o.resource_id}::${o.metric_id}`, o])
+  );
+
+  const recordMut = useMutation({
+    mutationFn: (body: { resource_id: string; metric_id: string; outcome: string }) =>
+      api.post("/api/v1/aiops/predictions/outcomes", body),
+    onSuccess: () => {
+      toast("Desfecho registrado.", "success");
+      qc.invalidateQueries({ queryKey: ["aiops-prediction-outcomes", tenantId] });
+    },
+    onError: () => toast("Erro ao registrar desfecho.", "error"),
+  });
+
+  const clearMut = useMutation({
+    mutationFn: ({ resource_id, metric_id }: { resource_id: string; metric_id: string }) =>
+      api.delete(`/api/v1/aiops/predictions/outcomes/${encodeURIComponent(resource_id)}/${encodeURIComponent(metric_id)}`),
+    onSuccess: () => {
+      toast("Desfecho removido.", "success");
+      qc.invalidateQueries({ queryKey: ["aiops-prediction-outcomes", tenantId] });
+    },
+    onError: () => toast("Erro ao remover desfecho.", "error"),
   });
 
   const predictions = q.data?.predictions ?? [];
@@ -443,37 +499,77 @@ function PredictionsTab({ tenantId }: { tenantId: string }) {
         </Card>
       ) : (
         <div className="space-y-2">
-          {predictions.map((p, i) => (
-            <Card key={`${p.resource_id}-${p.metric_id}-${i}`} className="p-4">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--text)]">{p.resource_name}</p>
-                  <p className="text-xs text-[var(--text-secondary)]">
-                    {p.metric_name}
-                    {p.unit && <span className="ml-1 text-[10px] text-[var(--text-muted)]">{p.unit}</span>}
-                  </p>
+          {predictions.map((p, i) => {
+            const key = `${p.resource_id}::${p.metric_id}`;
+            const outcome = outcomesMap.get(key);
+            return (
+              <Card key={`${p.resource_id}-${p.metric_id}-${i}`} className="p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[var(--text)]">{p.resource_name}</p>
+                    <p className="text-xs text-[var(--text-secondary)]">
+                      {p.metric_name}
+                      {p.unit && <span className="ml-1 text-[10px] text-[var(--text-muted)]">{p.unit}</span>}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                    {outcome ? (
+                      <Badge variant={OUTCOME_VARIANTS[outcome.outcome]}>
+                        {OUTCOME_LABELS[outcome.outcome]}
+                      </Badge>
+                    ) : p.predicted_critical_at ? (
+                      <Badge variant="danger">
+                        {t("aiops.predictions.critical")} {fmtTs(p.predicted_critical_at)}
+                      </Badge>
+                    ) : (
+                      <Badge variant="warning">
+                        {p.hours_to_critical !== null
+                          ? `~${Math.round(p.hours_to_critical)}h`
+                          : t("aiops.predictions.trending")}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
-                <div className="text-right flex-shrink-0">
-                  {p.predicted_critical_at ? (
-                    <Badge variant="danger">
-                      {t("aiops.predictions.critical")} {fmtTs(p.predicted_critical_at)}
-                    </Badge>
-                  ) : (
-                    <Badge variant="warning">
-                      {p.hours_to_critical !== null
-                        ? `~${Math.round(p.hours_to_critical)}h`
-                        : t("aiops.predictions.trending")}
-                    </Badge>
-                  )}
+                <div className="mt-2 flex flex-wrap gap-4 text-[10px] text-[var(--text-muted)]">
+                  <span>{t("aiops.predictions.current")} <span className="font-mono text-[var(--text)]">{fmtNum(p.current_value)}%</span></span>
+                  <span>{t("aiops.predictions.slopeHour")} <span className="font-mono text-[var(--text)]">{fmtNum(p.slope_per_hour, 3)}</span></span>
+                  <span>R² <span className="font-mono text-[var(--text)]">{fmtNum(p.confidence, 3)}</span></span>
                 </div>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-4 text-[10px] text-[var(--text-muted)]">
-                <span>{t("aiops.predictions.current")} <span className="font-mono text-[var(--text)]">{fmtNum(p.current_value)}%</span></span>
-                <span>{t("aiops.predictions.slopeHour")} <span className="font-mono text-[var(--text)]">{fmtNum(p.slope_per_hour, 3)}</span></span>
-                <span>R² <span className="font-mono text-[var(--text)]">{fmtNum(p.confidence, 3)}</span></span>
-              </div>
-            </Card>
-          ))}
+                {canOperate && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {outcome ? (
+                      <button
+                        onClick={() => clearMut.mutate({ resource_id: p.resource_id, metric_id: p.metric_id })}
+                        disabled={clearMut.isPending}
+                        className="text-[10px] text-[var(--text-muted)] underline disabled:opacity-40"
+                      >
+                        Limpar desfecho
+                      </button>
+                    ) : (
+                      <>
+                        {(["mitigated", "occurred", "false_positive"] as const).map((o) => (
+                          <button
+                            key={o}
+                            onClick={() => recordMut.mutate({ resource_id: p.resource_id, metric_id: p.metric_id, outcome: o })}
+                            disabled={recordMut.isPending}
+                            className={`text-[10px] px-2 py-0.5 rounded border transition-colors disabled:opacity-40 ${
+                              o === "mitigated"
+                                ? "border-[var(--green)] text-[var(--green)] hover:bg-[var(--green)] hover:text-white"
+                                : o === "occurred"
+                                ? "border-[var(--red)] text-[var(--red)] hover:bg-[var(--red)] hover:text-white"
+                                : "border-[var(--muted)] text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--fg)]"
+                            }`}
+                          >
+                            {OUTCOME_LABELS[o]}
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>
