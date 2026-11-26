@@ -63,6 +63,7 @@ import { WebhooksPage } from "@/pages/WebhooksPage";
 import { ContractsPage } from "@/pages/ContractsPage";
 import { CapacityPage } from "@/pages/CapacityPage";
 import { BackupPage } from "@/pages/BackupPage";
+import { FirewallPage } from "@/pages/FirewallPage";
 import { ClientPortalPage } from "@/pages/ClientPortalPage";
 import { HelpDeskPage } from "@/pages/HelpDeskPage";
 import { BillingPage } from "@/pages/BillingPage";
@@ -124,6 +125,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   contracts: "/contracts",
   capacity: "/capacity",
   backup: "/backup",
+  firewall: "/firewall",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -812,6 +814,7 @@ export function Shell() {
         ...(flagEnabled("module_drift") ? [{ id: "config-drift" as View, label: t("nav.config_drift"), icon: GitCompare, description: "Desvio de configuração" }] : []),
         { id: "capacity" as View, label: t("nav.capacity", "Capacidade"), icon: Gauge, description: "Utilização, thresholds e forecast" },
         ...(has("monitoring:operate") ? [{ id: "backup" as View, label: t("nav.backup", "Backup"), icon: HardDrive, description: "Jobs de backup e snapshots" }] : []),
+        ...(has("monitoring:operate") ? [{ id: "firewall" as View, label: t("nav.firewall", "Firewall"), icon: ShieldCheck, description: "Regras, deploy SSH e versionamento" }] : []),
         { id: "status_page" as View, label: t("nav.status_page"), icon: Globe, description: "Status público do tenant" },
       ],
     },
@@ -1293,6 +1296,7 @@ export function Shell() {
           {view === "contracts" && <ContractsPage tenantId={s.tenant_id!} />}
           {view === "capacity" && <CapacityPage tenantId={s.tenant_id!} />}
           {view === "backup" && <BackupPage tenantId={s.tenant_id!} />}
+          {view === "firewall" && <FirewallPage tenantId={s.tenant_id!} />}
           {view === "client-portal" && <ClientPortalPage />}
           </div>
           </div>

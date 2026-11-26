@@ -43,6 +43,7 @@
     "contracts": "Contracts",
     "capacity": "Capacity",
     "backup": "Backup",
+    "firewall": "Firewall",
     "client_portal": "Client Portal",
     "feature_flags": "Feature Flags",
     "tenant_settings": "Tenant Settings",

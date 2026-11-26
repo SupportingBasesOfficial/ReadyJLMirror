@@ -42,6 +42,7 @@
     "contracts": "Contratos",
     "capacity": "Capacidade",
     "backup": "Backup",
+    "firewall": "Firewall",
     "client_portal": "Portal do Cliente",
     "kb": "Base de Conhecimento",
     "groups": {
