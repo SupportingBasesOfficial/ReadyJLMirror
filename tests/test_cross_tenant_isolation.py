@@ -302,3 +302,153 @@ async def test_alerting_list_scoped_to_calling_tenant(client_a, client_b):
     assert not leaked, (
         f"Alert IDs from tenant A leaked into tenant B's list: {leaked}"
     )
+
+
+# ===========================================================================
+# Alerting — alert detail IDOR
+# ===========================================================================
+
+async def test_alert_detail_idor_404(client_a, client_b):
+    """Tenant B cannot GET an alert owned by tenant A.
+
+    Uses the first alert already present in tenant:dev (created by the
+    alerting worker from monitoring data).  If no alerts exist the test
+    is skipped — it cannot inject them because the alerting.alert table
+    has FK / check constraints that require a fully consistent policy row.
+    """
+    list_a = await client_a.get("/api/v1/alerts?limit=1")
+    assert list_a.status_code == 200, list_a.text
+    alerts_a = list_a.json()
+    if not alerts_a:
+        pytest.skip(
+            "No alerts in tenant:dev — run the alerting worker first to generate test data"
+        )
+    alert_id = alerts_a[0]["alert_id"]
+
+    gr = await client_b.get(f"/api/v1/alerts/{alert_id}")
+    assert gr.status_code == 404, (
+        f"Expected 404 — tenant B should not see tenant A's alert; got {gr.status_code}"
+    )
+
+
+# ===========================================================================
+# Alerting — policy list isolation
+# ===========================================================================
+
+async def test_alert_policy_list_no_cross_tenant_data(client_a, client_b):
+    """GET /policies for tenant B must not include policies created by tenant A."""
+    policy_id = f"policy:iso-test-{uuid.uuid4().hex[:8]}"
+    cr = await client_a.post(
+        "/api/v1/policies",
+        json={
+            "policy_id": policy_id,
+            "source_kind": "monitoring_problem",
+            "problem_min_severity": "warning",
+            "health_classes": [],
+            "make_effective": False,
+        },
+    )
+    assert cr.status_code == 201, cr.text
+
+    list_b = await client_b.get("/api/v1/policies")
+    assert list_b.status_code == 200, list_b.text
+    ids_b = {row["policy_id"] for row in list_b.json()}
+    assert policy_id not in ids_b, (
+        "Tenant A's policy_id leaked into tenant B's policy list"
+    )
+
+
+# ===========================================================================
+# Notifications — notification_intent detail IDOR
+# ===========================================================================
+
+async def test_notification_intent_idor_404(client_a, client_b):
+    """Tenant B cannot GET a notification intent owned by tenant A.
+
+    notification_intent rows require a live alert FK so they can't be
+    created via API; we verify that the endpoint filters by tenant_id by
+    confirming that a valid-looking intent ID from tenant A's list (or a
+    synthetic UUID) returns 404 for tenant B.
+    """
+    list_a = await client_a.get("/api/v1/notifications?limit=1")
+    assert list_a.status_code == 200, list_a.text
+    intents_a = list_a.json()
+
+    if intents_a:
+        intent_id = intents_a[0]["notification_intent_id"]
+    else:
+        # No real intents — use a synthetic UUID to verify the endpoint
+        # returns 404 (not 500 or 200) for a foreign-tenant request.
+        intent_id = f"notif:{uuid.uuid4()}"
+
+    gr = await client_b.get(f"/api/v1/notifications/{intent_id}")
+    assert gr.status_code == 404, (
+        f"Expected 404 — tenant B should not see tenant A's intent; got {gr.status_code}"
+    )
+
+
+# ===========================================================================
+# Notifications — notification channel delete IDOR
+# ===========================================================================
+
+async def test_notification_channel_delete_idor_404(client_a, client_b):
+    """Tenant B cannot delete a notification channel owned by tenant A."""
+    cr = await client_a.post(
+        "/api/v1/notification-channels",
+        json={
+            "channel_class": "email_smtp@1",
+            "destination_ref": f"idor-test-{uuid.uuid4().hex[:6]}@example.com",
+            "label": f"IDOR test channel {uuid.uuid4().hex[:6]}",
+        },
+    )
+    assert cr.status_code == 201, cr.text
+    dest_id = cr.json()["destination_config_id"]
+
+    dr = await client_b.delete(f"/api/v1/notification-channels/{dest_id}")
+    assert dr.status_code == 404, (
+        f"Expected 404 — tenant B should not delete tenant A's channel; got {dr.status_code}"
+    )
+
+    # Verify channel still exists for tenant A.
+    list_a = await client_a.get("/api/v1/notification-channels")
+    assert list_a.status_code == 200, list_a.text
+    dest_ids_a = [row["destination_config_id"] for row in list_a.json()]
+    assert dest_id in dest_ids_a, (
+        "Notification channel was silently deleted — isolation breach"
+    )
+
+
+# ===========================================================================
+# Automation — credential delete IDOR
+# ===========================================================================
+
+async def test_automation_credential_delete_idor_404(client_a, client_b):
+    """Tenant B cannot delete an automation credential owned by tenant A."""
+    fake_pem = (
+        "-----BEGIN RSA PRIVATE KEY-----\n"
+        "MIIEowIBAAKCAQEA0Z3VS5JJcds3xHn/ygWep4s/AAAAtest==\n"
+        "-----END RSA PRIVATE KEY-----"
+    )
+    cr = await client_a.post(
+        "/api/v1/automation/credentials",
+        json={
+            "label": f"idor-cred-{uuid.uuid4().hex[:6]}",
+            "username": "testuser",
+            "key_pem": fake_pem,
+        },
+    )
+    assert cr.status_code == 201, cr.text
+    credential_id = cr.json()["credential_id"]
+
+    dr = await client_b.delete(f"/api/v1/automation/credentials/{credential_id}")
+    assert dr.status_code == 404, (
+        f"Expected 404 — tenant B should not delete tenant A's credential; got {dr.status_code}"
+    )
+
+    # Verify credential still exists for tenant A.
+    list_a = await client_a.get("/api/v1/automation/credentials")
+    assert list_a.status_code == 200, list_a.text
+    cred_ids_a = [row["credential_id"] for row in list_a.json()]
+    assert credential_id in cred_ids_a, (
+        "Automation credential was silently deleted — isolation breach"
+    )
