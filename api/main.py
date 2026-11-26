@@ -81,6 +81,7 @@ from api.routers import (
     webhooks,
     contracts,
     capacity,
+    backup,
 )
 
 logger = logging.getLogger(__name__)
@@ -595,6 +596,7 @@ app.include_router(logs.router)
 app.include_router(webhooks.router)
 app.include_router(contracts.router)
 app.include_router(capacity.router)
+app.include_router(backup.router)
 
 
 @app.get("/metrics", tags=["health"])
