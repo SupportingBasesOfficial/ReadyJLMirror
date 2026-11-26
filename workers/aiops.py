@@ -9,9 +9,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import psycopg
 import time
 import uuid
 from datetime import datetime, timezone
+
+from workers.base import ResilientWorker
 
 logger = logging.getLogger("workers.aiops")
 
@@ -715,3 +718,17 @@ def _store_run(conn, tenant_id: str, evidence: dict, findings: list[dict]) -> in
 
     conn.commit()
     return count
+
+
+class AiopsWorker(ResilientWorker):
+    name = "aiops"
+    default_poll_interval = 60
+
+    def process_pending(self, conn: psycopg.Connection) -> int:
+        return _process_pending(conn)
+
+
+def run_aiops_worker(poll_interval: int = 60, once: bool = False) -> None:
+    """Run the AIOps analysis worker loop (blocking)."""
+    logger.info("Starting AIOps worker (poll=%ss)", poll_interval)
+    AiopsWorker().run(poll_interval=poll_interval, once=once)

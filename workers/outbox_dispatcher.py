@@ -31,6 +31,7 @@ from api.routers.async_ops import _outbox
 from jlmirror_async.outbox import BrokerPublicationReceipt
 from shared import telemetry
 from shared.config import settings
+from workers.base import ResilientWorker
 
 logger = logging.getLogger(__name__)
 
@@ -254,28 +255,27 @@ def _dispatch_inmemory(processed: int, batch_size: int) -> int:
     return processed
 
 
+class OutboxDispatcherWorker(ResilientWorker):
+    name = "outbox_dispatcher"
+    default_poll_interval = 5
+
+    def __init__(self, batch_size: int = 10) -> None:
+        self._batch_size = batch_size
+
+    def process_pending(self, conn: psycopg.Connection) -> int:
+        n = _publish_durable(conn)
+        n += _dispatch_inmemory(0, self._batch_size)
+        return n
+
+
 def run_outbox_dispatcher(
     poll_interval: int = 5, batch_size: int = 10, once: bool = False
 ) -> None:
     """Run the outbox dispatcher loop (blocking) — or one pass if once."""
     logger.info("Starting outbox dispatcher (poll=%ss, batch=%s)",
                 poll_interval, batch_size)
-    while True:
-        processed = 0
-        try:
-            with psycopg.connect(settings.db_dsn, autocommit=False,
-                             connect_timeout=10) as conn:
-                processed += _publish_durable(conn)
-        except Exception:
-            logger.debug("durable outbox sweep skipped (DB unavailable)")
-        processed = _dispatch_inmemory(processed, batch_size)
-        if once:
-            logger.info("Outbox dispatcher finished (processed %s)", processed)
-            return
-        if processed == 0:
-            logger.debug("No pending outbox messages; sleeping %ss",
-                         poll_interval)
-        time.sleep(poll_interval)
+    OutboxDispatcherWorker(batch_size=batch_size).run(
+        poll_interval=poll_interval, once=once)
 
 
 if __name__ == "__main__":

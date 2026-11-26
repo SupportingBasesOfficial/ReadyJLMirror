@@ -18,8 +18,6 @@ durable `reconciliation_required` per the accepted semantics.
 from __future__ import annotations
 
 import logging
-import time
-
 import psycopg
 
 from jlmirror_monitoring.validation_worker import InitialValidationWorker
@@ -32,6 +30,7 @@ from shared.monitoring_repo import (
     PgValidationRepository,
     list_all_pending_validations,
 )
+from workers.base import ResilientWorker
 
 logger = logging.getLogger(__name__)
 
@@ -70,20 +69,18 @@ def _process_pending(conn: psycopg.Connection) -> int:
     return processed
 
 
+class ValidationWorker(ResilientWorker):
+    name = "validation"
+    default_poll_interval = 10
+
+    def process_pending(self, conn: psycopg.Connection) -> int:
+        return _process_pending(conn)
+
+
 def run_validation_worker(poll_interval: int = 10, once: bool = False) -> None:
     """Run the validation worker loop (blocking)."""
-    dsn = settings.db_dsn
     logger.info("Starting validation worker (poll=%ss)", poll_interval)
-    with psycopg.connect(dsn, autocommit=False) as conn:
-        while True:
-            try:
-                n = _process_pending(conn)
-                if once:
-                    logger.info("Processed %s pending validations", n)
-                    return
-            except Exception:
-                logger.exception("validation worker tick failed")
-            time.sleep(poll_interval)
+    ValidationWorker().run(poll_interval=poll_interval, once=once)
 
 
 if __name__ == "__main__":

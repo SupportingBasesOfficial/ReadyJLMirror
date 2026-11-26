@@ -12,8 +12,6 @@ Claims durable `current_state_poll` operations and runs the canonical
 from __future__ import annotations
 
 import logging
-import time
-
 import psycopg
 
 from jlmirror_monitoring.metric_current_state import MetricCurrentStateWorker
@@ -26,6 +24,7 @@ from shared.monitoring_repo import (
     PgMetricCurrentStateRepository,
     list_all_pending_current_polls,
 )
+from workers.base import ResilientWorker
 
 logger = logging.getLogger(__name__)
 
@@ -62,24 +61,18 @@ def _process_pending(conn: psycopg.Connection) -> int:
     return processed
 
 
-def run_current_state_worker(poll_interval: int = 10, once: bool = False) -> None:
-    """Run the metric current-state worker loop (blocking).
+class CurrentStateWorker(ResilientWorker):
+    name = "current_state"
+    default_poll_interval = 10
 
-    A fresh connection is opened every tick so a DB restart does not
-    permanently kill the worker — psycopg3 does not auto-reconnect.
-    """
-    dsn = settings.db_dsn
+    def process_pending(self, conn: psycopg.Connection) -> int:
+        return _process_pending(conn)
+
+
+def run_current_state_worker(poll_interval: int = 10, once: bool = False) -> None:
+    """Run the metric current-state worker loop (blocking)."""
     logger.info("Starting metric current-state worker (poll=%ss)", poll_interval)
-    while True:
-        try:
-            with psycopg.connect(dsn, autocommit=False, connect_timeout=10) as conn:
-                n = _process_pending(conn)
-                if once:
-                    logger.info("Processed %s pending current-state polls", n)
-                    return
-        except Exception:
-            logger.exception("current-state worker tick failed")
-        time.sleep(poll_interval)
+    CurrentStateWorker().run(poll_interval=poll_interval, once=once)
 
 
 if __name__ == "__main__":

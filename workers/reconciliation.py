@@ -30,12 +30,11 @@ from __future__ import annotations
 
 import logging
 import os
-import time
-
 import psycopg
 
 from shared import telemetry
 from shared.config import settings
+from workers.base import ResilientWorker
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +192,14 @@ def _process_pending(conn: psycopg.Connection) -> int:
     return n
 
 
+class ReconciliationWorker(ResilientWorker):
+    name = "reconciliation"
+    default_poll_interval = 15
+
+    def process_pending(self, conn: psycopg.Connection) -> int:
+        return _process_pending(conn)
+
+
 def run_reconciliation_worker(
     poll_interval: int = 15, once: bool = False
 ) -> None:
@@ -201,19 +208,7 @@ def run_reconciliation_worker(
         "reconciliation worker starting (poll=%ss, lease=%ss, "
         "backoff=%ss, max_recovery=%s)",
         poll_interval, _LEASE_SECONDS, _BACKOFF_SECONDS, _RECOVERY_MAX)
-    while True:
-        try:
-            with psycopg.connect(
-                    settings.db_dsn, autocommit=False,
-                    connect_timeout=10) as conn:
-                n = _process_pending(conn)
-                if n:
-                    logger.info("reconciliation pass recovered %s ops", n)
-        except psycopg.OperationalError:
-            logger.exception("db connection lost; reconnecting")
-        if once:
-            return
-        time.sleep(poll_interval)
+    ReconciliationWorker().run(poll_interval=poll_interval, once=once)
 
 
 if __name__ == "__main__":

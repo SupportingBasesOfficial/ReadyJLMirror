@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 import secrets
-import time
 from dataclasses import replace
 from typing import Sequence
 
@@ -44,6 +43,7 @@ from shared.monitoring_repo import (
     PgProblemStateRepository,
     list_all_pending_problem_syncs,
 )
+from workers.base import ResilientWorker
 
 logger = logging.getLogger(__name__)
 
@@ -184,20 +184,18 @@ def _process_pending(conn: psycopg.Connection) -> int:
     return processed
 
 
+class ProblemStateWorker(ResilientWorker):
+    name = "problem_state"
+    default_poll_interval = 15
+
+    def process_pending(self, conn: psycopg.Connection) -> int:
+        return _process_pending(conn)
+
+
 def run_problem_state_worker(poll_interval: int = 15, once: bool = False) -> None:
     """Run the problem state worker loop (blocking)."""
-    dsn = settings.db_dsn
     logger.info("Starting problem state worker (poll=%ss)", poll_interval)
-    with psycopg.connect(dsn, autocommit=False) as conn:
-        while True:
-            try:
-                n = _process_pending(conn)
-                if once:
-                    logger.info("Processed %s pending problem syncs", n)
-                    return
-            except Exception:
-                logger.exception("problem state worker tick failed")
-            time.sleep(poll_interval)
+    ProblemStateWorker().run(poll_interval=poll_interval, once=once)
 
 
 if __name__ == "__main__":
