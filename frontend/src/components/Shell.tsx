@@ -12,7 +12,7 @@ import {
   MessageSquare, PhoneCall, Users, UserPlus, KeyRound,
   ScrollText, BookOpen, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Building2, ShieldCheck, Network, Radio, CalendarClock,
-  LayoutGrid, Globe, Bug, TrendingUp, GitCompare, ToggleLeft, Gauge, ShieldAlert,
+  LayoutGrid, Globe, Bug, TrendingUp, GitCompare, ToggleLeft, Gauge, ShieldAlert, FileText,
 } from "lucide-react";
 import { api, logout } from "@/api/client";
 import { AlertsPage } from "@/pages/AlertsPage";
@@ -58,6 +58,7 @@ import { FeatureFlagsPage } from "@/pages/FeatureFlagsPage";
 import { TenantSettingsPage } from "@/pages/TenantSettingsPage";
 import { APMPage } from "@/pages/APMPage";
 import { SecurityAuditPage } from "@/pages/SecurityAuditPage";
+import { LogsPage } from "@/pages/LogsPage";
 import { ClientPortalPage } from "@/pages/ClientPortalPage";
 import { HelpDeskPage } from "@/pages/HelpDeskPage";
 import { BillingPage } from "@/pages/BillingPage";
@@ -114,6 +115,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   "client-portal": "/portal",
   helpdesk: "/helpdesk",
   billing: "/billing",
+  logs: "/logs",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -776,6 +778,7 @@ export function Shell() {
         ...(flagEnabled("module_aiops") ? [{ id: "aiops" as View, label: t("nav.aiops"), icon: Brain, description: "Correlação por IA" }] : []),
         ...(flagEnabled("module_finops") ? [{ id: "finops" as View, label: t("nav.finops"), icon: DollarSign, description: "Custos de infra" }] : []),
         { id: "apm" as View, label: t("nav.apm"), icon: Gauge, description: "Latência e erros de API" },
+        { id: "logs" as View, label: t("nav.logs", "Logs"), icon: FileText, description: "Ingestão e busca de logs" },
         { id: "security-audit" as View, label: t("nav.security_audit", "Auditoria de Segurança"), icon: ShieldAlert, description: "Regras e findings de segurança" },
       ],
     },
@@ -1273,6 +1276,7 @@ export function Shell() {
           {view === "tenant-settings" && <TenantSettingsPage tenantId={s.tenant_id!} />}
           {view === "apm" && <APMPage tenantId={s.tenant_id!} />}
           {view === "security-audit" && <SecurityAuditPage tenantId={s.tenant_id!} />}
+          {view === "logs" && <LogsPage tenantId={s.tenant_id!} />}
           {view === "client-portal" && <ClientPortalPage />}
           </div>
           </div>
