@@ -48,12 +48,17 @@ async def check_quota(
     cur = await conn.execute(
         """
         SELECT pq.quota_value
-          FROM g1.contracts c
+          FROM g1.tenants t
+          JOIN g1.commercial_accounts ca
+            ON ca.organization_id = t.organization_id
+          JOIN g1.contracts c
+            ON c.account_id = ca.account_id
+           AND c.state = 'active'
           JOIN g1.plan_quotas pq
             ON pq.plan_id = c.plan_ref
            AND pq.quota_key = %s
-         WHERE c.tenant_id = %s
-           AND c.state = 'active'
+         WHERE t.tenant_id = %s
+         ORDER BY pq.quota_value DESC
          LIMIT 1
         """,
         (quota_key, tenant_id),

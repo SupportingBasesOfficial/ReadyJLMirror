@@ -21,5 +21,6 @@ CREATE INDEX IF NOT EXISTS idx_quota_events_tenant_ts
     ON g1.quota_events (tenant_id, created_at DESC);
 
 GRANT SELECT, INSERT, UPDATE ON g1.quota_events TO jlmirror_owner;
+GRANT SELECT, INSERT, UPDATE ON g1.quota_events TO jlmirror_app;
 
 COMMIT;

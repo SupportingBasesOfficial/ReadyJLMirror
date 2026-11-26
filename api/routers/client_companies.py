@@ -11,6 +11,8 @@ import secrets
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
+import shared.quota as quota_enforcement
+
 from shared.audit import record_audit_event
 from shared.config import settings
 from shared.db import db_tenant_connection
@@ -100,6 +102,15 @@ async def create_company(body: CompanyCreateRequest, request: Request) -> dict:
         raise HTTPException(status_code=422, detail="slug required")
     company_id = f"co-{secrets.token_urlsafe(12)}"
     async with db_tenant_connection(tenant) as conn:
+        cur_count = await conn.execute(
+            "SELECT COUNT(*) FROM g1.client_companies "
+            "WHERE tenant_id = %s AND status = 'active'",
+            (tenant,),
+        )
+        company_count = (await cur_count.fetchone())[0]
+        await quota_enforcement.check_quota(
+            conn, tenant, "max_client_tenants", company_count
+        )
         try:
             cur = await conn.execute(
                 """
