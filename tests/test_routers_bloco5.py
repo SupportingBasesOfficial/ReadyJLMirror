@@ -502,7 +502,7 @@ async def test_branding_put_and_verify(api_client):
         "brand_name": "Test Brand",
         "brand_color": "#1a2b3c",
     })
-    assert r.status_code in (200, 201)
+    assert r.status_code == 200
 
 
 async def test_branding_invalid_color(api_client):
@@ -596,12 +596,12 @@ async def test_maintenance_window_create_and_cancel(api_client):
         "starts_at": "2026-12-01T02:00:00Z",
         "ends_at": "2026-12-01T04:00:00Z",
     })
-    assert r.status_code in (201, 200)
+    assert r.status_code == 201
     data = r.json()
     mw_id = data.get("window_id") or data.get("maintenance_window_id")
     if mw_id:
         r2 = await api_client.delete(f"/api/v1/maintenance/windows/{mw_id}")
-        assert r2.status_code in (204, 200)
+        assert r2.status_code == 200
 
 
 # ── Status page (admin config) ─────────────────────────────────────────────────
@@ -619,7 +619,7 @@ async def test_status_page_config_update(api_client):
         "status_slug": f"test-{uuid.uuid4().hex[:8]}",
         "enabled": False,
     })
-    assert r.status_code in (200, 201, 204)
+    assert r.status_code == 200
 
 
 # ── Changes / RFC ──────────────────────────────────────────────────────────────
@@ -671,4 +671,4 @@ async def test_escalation_policy_create_and_delete(api_client):
     r2 = await api_client.delete(
         f"/api/v1/alerting/escalation-policies/{policy_id}"
     )
-    assert r2.status_code in (204, 200)
+    assert r2.status_code == 200

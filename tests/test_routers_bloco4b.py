@@ -139,7 +139,7 @@ async def test_oncall_schedule_create_and_delete(api_client):
     sched_id = r.json()["schedule_id"]
 
     dr = await api_client.delete(f"/api/v1/oncall/schedules/{sched_id}")
-    assert dr.status_code in (200, 204)
+    assert dr.status_code == 200
 
 
 async def test_oncall_current(api_client):
@@ -225,7 +225,7 @@ async def test_synthetic_check_delete(api_client):
     check_id = cr.json()["check_id"]
 
     dr = await api_client.delete(f"/api/v1/synthetic/checks/{check_id}")
-    assert dr.status_code in (200, 204)
+    assert dr.status_code == 200
 
 
 # ===========================================================================
