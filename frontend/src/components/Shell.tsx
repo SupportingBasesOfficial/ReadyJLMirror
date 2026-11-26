@@ -60,6 +60,7 @@ import { APMPage } from "@/pages/APMPage";
 import { SecurityAuditPage } from "@/pages/SecurityAuditPage";
 import { LogsPage } from "@/pages/LogsPage";
 import { WebhooksPage } from "@/pages/WebhooksPage";
+import { ContractsPage } from "@/pages/ContractsPage";
 import { ClientPortalPage } from "@/pages/ClientPortalPage";
 import { HelpDeskPage } from "@/pages/HelpDeskPage";
 import { BillingPage } from "@/pages/BillingPage";
@@ -118,6 +119,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   billing: "/billing",
   logs: "/logs",
   webhooks: "/webhooks",
+  contracts: "/contracts",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -833,6 +835,7 @@ export function Shell() {
       items: [
         { id: "companies" as View, label: t("nav.companies"), icon: Building2, description: "Empresas e carteira de clientes" },
         ...(hasMSPClients ? [{ id: "msp" as View, label: t("nav.msp"), icon: Building2, description: "Clientes MSP" }] : []),
+        ...(has("monitoring:operate") ? [{ id: "contracts" as View, label: t("nav.contracts", "Contratos"), icon: FileText, description: "Contratos, banco de horas e fechamento" }] : []),
         ...(flagEnabled("module_client_portal") ? [{ id: "client-portal" as View, label: t("nav.client_portal", "Portal do Cliente"), icon: Globe, description: "Visão simplificada para clientes finais" }] : []),
       ],
     }] : []),
@@ -1281,6 +1284,7 @@ export function Shell() {
           {view === "security-audit" && <SecurityAuditPage tenantId={s.tenant_id!} />}
           {view === "logs" && <LogsPage tenantId={s.tenant_id!} />}
           {view === "webhooks" && <WebhooksPage tenantId={s.tenant_id!} />}
+          {view === "contracts" && <ContractsPage tenantId={s.tenant_id!} />}
           {view === "client-portal" && <ClientPortalPage />}
           </div>
           </div>

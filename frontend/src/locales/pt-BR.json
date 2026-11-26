@@ -39,6 +39,7 @@
     "apm": "APM",
     "logs": "Logs",
     "webhooks": "Webhooks",
+    "contracts": "Contratos",
     "client_portal": "Portal do Cliente",
     "kb": "Base de Conhecimento",
     "groups": {
