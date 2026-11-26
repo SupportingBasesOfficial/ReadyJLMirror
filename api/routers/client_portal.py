@@ -11,7 +11,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 
 from api.routers.itsm import _INVOKER_ROLE
-from shared.db import db_connection
+from shared.db import db_tenant_connection
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ async def _fetchall(conn, query: str, params: tuple = ()) -> list[dict]:
 @router.get("/overview")
 async def get_overview(request: Request) -> dict:
     tenant_id = _require_tenant(request)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant_id) as conn:
         tenant_row = await _fetchrow(
             conn,
             "SELECT display_name FROM g1.tenants WHERE tenant_id = %s",
@@ -119,7 +119,7 @@ async def get_overview(request: Request) -> dict:
 @router.get("/alerts")
 async def list_alerts(request: Request, state: str = "active") -> list:
     tenant_id = _require_tenant(request)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant_id) as conn:
         rows = await _fetchall(
             conn,
             """
@@ -155,7 +155,7 @@ async def list_alerts(request: Request, state: str = "active") -> list:
 async def list_incidents(request: Request, state: str = "open") -> list:
     tenant_id = _require_tenant(request)
     rows: list[dict] = []
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant_id) as conn:
         try:
             async with conn.transaction():
                 await conn.execute(f"SET LOCAL ROLE {_INVOKER_ROLE}")
@@ -197,7 +197,7 @@ async def list_incidents(request: Request, state: str = "open") -> list:
 async def list_sla(request: Request) -> list:
     tenant_id = _require_tenant(request)
     rows: list[dict] = []
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant_id) as conn:
         try:
             rows = await _fetchall(
                 conn,
@@ -245,7 +245,7 @@ async def list_sla(request: Request) -> list:
 @router.get("/status")
 async def get_status(request: Request) -> dict:
     tenant_id = _require_tenant(request)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant_id) as conn:
         critical_row = await _fetchrow(
             conn,
             """

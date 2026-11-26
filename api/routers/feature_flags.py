@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from shared.db import db_connection, db_tenant_connection
+from shared.db import db_tenant_connection
 from api.routers.api_keys import _tenant_ctx, _require_admin
 
 router = APIRouter(prefix="/api/v1/feature-flags", tags=["feature-flags"])
@@ -13,7 +13,7 @@ class FlagUpdate(BaseModel):
 @router.get("")
 async def list_flags(request: Request):
     tenant_id, _ = _tenant_ctx(request)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant_id) as conn:
         cur = await conn.execute(
             """
             SELECT flag_id, flag_key, enabled, description, updated_at, updated_by
@@ -31,7 +31,7 @@ async def list_flags(request: Request):
 @router.get("/check/{flag_key}")
 async def check_flag(flag_key: str, request: Request):
     tenant_id, _ = _tenant_ctx(request)
-    async with db_connection() as conn:
+    async with db_tenant_connection(tenant_id) as conn:
         cur = await conn.execute(
             "SELECT enabled FROM g1.feature_flag WHERE tenant_id = %s AND flag_key = %s",
             (tenant_id, flag_key),

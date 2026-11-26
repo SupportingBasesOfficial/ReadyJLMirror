@@ -471,10 +471,10 @@ async def acknowledge_alert(
     tenant = _authoritative_tenant(request, tenant_id)
     actor = _snooze_actor(request, x_principal_id)
     async with db_tenant_connection(tenant) as conn:
-        # Verify the alert exists in this tenant (RLS enforces isolation).
+        # Verify the alert exists in this tenant.
         cur = await conn.execute(
-            "SELECT 1 FROM alerting.alert WHERE alert_id = %s",
-            (alert_id,))
+            "SELECT 1 FROM alerting.alert WHERE alert_id = %s AND tenant_id = %s",
+            (alert_id, tenant))
         if await cur.fetchone() is None:
             raise HTTPException(status_code=404, detail="alert not found")
 
@@ -492,14 +492,14 @@ async def acknowledge_alert(
                        'acknowledge_reason', %s::text
                    ),
                    updated_at = transaction_timestamp()
-             WHERE alert_id = %s
+             WHERE alert_id = %s AND tenant_id = %s
              RETURNING alert_id, policy_id, policy_version, source_kind,
                        source_subject_id, monitoring_source_id,
                        monitoring_resource_id, lifecycle_state,
                        source_occurrence_revision, current_source_revision,
                        source_evidence_summary, opened_at, resolved_at
             """,
-            (actor, body.reason, alert_id))
+            (actor, body.reason, alert_id, tenant))
         row = await cur2.fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="alert not found")

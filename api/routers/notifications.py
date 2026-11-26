@@ -184,8 +184,9 @@ async def notification_detail(intent_id: str, request: Request,
                    provider_message_ref, failure_class, started_at,
                    completed_at
               FROM notification.notification_attempt
-             WHERE notification_intent_id=%s ORDER BY attempt_number
-            """, (intent_id,))
+             WHERE notification_intent_id=%s AND tenant_id=%s
+             ORDER BY attempt_number
+            """, (intent_id, tenant))
         cols = [d.name for d in cur.description]
         attempts = [dict(zip(cols, r)) for r in await cur.fetchall()]
         for a in attempts:
@@ -198,8 +199,9 @@ async def notification_detail(intent_id: str, request: Request,
             SELECT notification_evidence_id, normalized_state,
                    provider_callback_id, observed_at
               FROM notification.notification_provider_evidence
-             WHERE notification_intent_id=%s ORDER BY observed_at
-            """, (intent_id,))
+             WHERE notification_intent_id=%s AND tenant_id=%s
+             ORDER BY observed_at
+            """, (intent_id, tenant))
         cols = [d.name for d in cur.description]
         evidence = [dict(zip(cols, r)) for r in await cur.fetchall()]
         for e in evidence:
@@ -211,8 +213,8 @@ async def notification_detail(intent_id: str, request: Request,
                    external_read_observed_at, retry_required,
                    fallback_action_required, projection_revision
               FROM notification.notification_projection
-             WHERE notification_intent_id=%s
-            """, (intent_id,))
+             WHERE notification_intent_id=%s AND tenant_id=%s
+            """, (intent_id, tenant))
         prow = await cur.fetchone()
         projection = None
         if prow:
@@ -232,9 +234,9 @@ async def notification_detail(intent_id: str, request: Request,
             """
             SELECT next_attempt_at
               FROM notification.notification_dispatch_outbox
-             WHERE notification_intent_id=%s AND state='pending'
+             WHERE notification_intent_id=%s AND tenant_id=%s AND state='pending'
              ORDER BY next_attempt_at LIMIT 1
-            """, (intent_id,))
+            """, (intent_id, tenant))
         nrow = await cur.fetchone()
         retry_policy = {
             "adapter_version": notif.ADAPTER_VERSION,
