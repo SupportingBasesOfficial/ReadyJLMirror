@@ -238,6 +238,16 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
     onError: () => { setConfirmDeleteScheduleId(null); toast("Erro ao excluir agendamento.", "error"); },
   });
 
+  const cancelRunMut = useMutation({
+    mutationFn: (run_id: string) =>
+      api.post(`/api/v1/automation/runs/${run_id}/cancel`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["automation-runs", tenantId] });
+      toast("Run cancelado.", "success");
+    },
+    onError: () => { toast("Não foi possível cancelar — run já em execução ou concluído.", "error"); },
+  });
+
   const tabs = [
     { id: "scripts" as const, label: t("automation.tabScripts") },
     { id: "schedules" as const, label: t("automation.tabSchedules") },
@@ -410,6 +420,7 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
                   <th className="px-4 py-2.5 font-medium">{t("automation.colHTTP")}</th>
                   <th className="px-4 py-2.5 font-medium">{t("automation.colStarted")}</th>
                   <th className="px-4 py-2.5 font-medium">{t("automation.colErrorLog")}</th>
+                  <th className="px-4 py-2.5 font-medium"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
@@ -440,10 +451,20 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
                           {expandedRunId === r.run_id ? t("automation.hideLog") : t("automation.showLog")}
                         </button>
                       </td>
+                      <td className="px-4 py-2.5">
+                        {r.outcome === "pending" && canOperate && (
+                          <button
+                            onClick={() => cancelRunMut.mutate(r.run_id)}
+                            disabled={cancelRunMut.isPending}
+                            className="text-[10px] text-[var(--red)] underline whitespace-nowrap disabled:opacity-50">
+                            Cancelar
+                          </button>
+                        )}
+                      </td>
                     </tr>
                     {expandedRunId === r.run_id && (
                       <tr>
-                        <td colSpan={5} className="px-4 py-3 bg-[var(--surface-2)]">
+                        <td colSpan={6} className="px-4 py-3 bg-[var(--surface-2)]">
                           <pre style={{ fontSize: "0.7rem", overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0, color: "var(--text-muted)", maxHeight: 240 }}>
                             {r.output ?? r.log ?? JSON.stringify(r, null, 2)}
                           </pre>

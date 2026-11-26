@@ -220,6 +220,32 @@ async def trigger_script(request: Request, script_id: str) -> dict:
     return {"run_id": run_id, "queued": True}
 
 
+@router.post("/runs/{run_id}/cancel", status_code=200)
+async def cancel_run(request: Request, run_id: str) -> dict:
+    """Cancel a pending run before the worker picks it up.
+
+    Only runs with outcome='pending' can be cancelled; a run already
+    executing cannot be interrupted (SSH is synchronous in the worker).
+    Returns 409 when the run is not in a cancellable state.
+    """
+    tenant_id = await _require_operator(request)
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(
+            "UPDATE g1.automation_run SET outcome='cancelled', finished_at=now() "
+            "WHERE run_id=%s AND tenant_id=%s AND outcome='pending' "
+            "RETURNING run_id",
+            (run_id, tenant_id),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            raise HTTPException(
+                status_code=409,
+                detail="run not found or already past pending state",
+            )
+        await conn.commit()
+    return {"run_id": run_id, "cancelled": True}
+
+
 # ── Schedules ─────────────────────────────────────────────────────────────────
 
 @router.get("/schedules")
