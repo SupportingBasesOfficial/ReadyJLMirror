@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS monitoring.config_baseline (
     baseline_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id       UUID NOT NULL,
+    tenant_id       TEXT NOT NULL,
     source_id       UUID NOT NULL,
     resource_ref    TEXT NOT NULL,
     config_key      TEXT NOT NULL,
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS monitoring.config_baseline (
 CREATE TABLE IF NOT EXISTS monitoring.config_drift_event (
     drift_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     baseline_id     UUID REFERENCES monitoring.config_baseline(baseline_id) ON DELETE SET NULL,
-    tenant_id       UUID NOT NULL,
+    tenant_id       TEXT NOT NULL,
     source_id       UUID NOT NULL,
     resource_ref    TEXT NOT NULL,
     config_key      TEXT NOT NULL,
