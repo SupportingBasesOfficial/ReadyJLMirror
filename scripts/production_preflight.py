@@ -47,6 +47,16 @@ def main() -> None:
                           dev_bypass not in ("true", "1", "yes"),
                           dev_bypass or "unset"))
 
+    egress_allow_all = os.environ.get("EGRESS_ALLOW_ALL_HOSTS", "false").lower()
+    results.append(_check("EGRESS_ALLOW_ALL_HOSTS is false",
+                          egress_allow_all not in ("true", "1", "yes"),
+                          egress_allow_all or "unset"))
+
+    egress_hosts = os.environ.get("EGRESS_ALLOW_HOSTS", "").strip()
+    results.append(_check("EGRESS_ALLOW_HOSTS configured",
+                          bool(egress_hosts),
+                          egress_hosts or "empty — no Zabbix connections will be admitted"))
+
     bff_secret = os.environ.get("BFF_INTERNAL_SECRET", "")
     results.append(_check("BFF_INTERNAL_SECRET overridden",
                           bool(bff_secret)

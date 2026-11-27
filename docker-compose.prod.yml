@@ -57,12 +57,19 @@ services:
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
       VAPID_CLAIMS_EMAIL: ${VAPID_CLAIMS_EMAIL}
+      EGRESS_ALLOW_ALL_HOSTS: "false"
+      EGRESS_ALLOW_HOSTS: ${EGRESS_ALLOW_HOSTS}
+      EGRESS_ALLOW_PRIVATE_IPS: ${EGRESS_ALLOW_PRIVATE_IPS:-false}
 
   # ── Worker: sem volumes de dev ────────────────────────────────────────────────
   worker:
     volumes:
       - ./secrets:/run/secrets:ro
       - ./secrets-tokens:/run/secret-bindings:ro
+    environment:
+      EGRESS_ALLOW_ALL_HOSTS: "false"
+      EGRESS_ALLOW_HOSTS: ${EGRESS_ALLOW_HOSTS}
+      EGRESS_ALLOW_PRIVATE_IPS: ${EGRESS_ALLOW_PRIVATE_IPS:-false}
 
   # ── Keycloak: modo produção com proxy reverso ─────────────────────────────────
   keycloak:
