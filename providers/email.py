@@ -61,6 +61,12 @@ _TEMPLATES: dict[str, tuple[str, str]] = {
         "A maintenance window has been scheduled for your monitored infrastructure.\n\n"
         "Notifications for affected sources will be suppressed during this window.\n",
     ),
+    "quota_exceeded": (
+        "[Argos] Limite do plano atingido",
+        "O tenant atingiu o limite do plano contratado.\n\n"
+        "Por favor, acesse o painel administrativo do Argos para revisar o uso e "
+        "considerar a atualização do plano.\n",
+    ),
 }
 
 _DEFAULT_SUBJECT = "[JLMirror] Notification"

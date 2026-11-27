@@ -28,6 +28,27 @@ from shared.db import db_connection
 logger = logging.getLogger(__name__)
 
 
+async def _send_quota_email(email: str, event_id: str) -> None:
+    """Send quota_exceeded email — best-effort, never raises."""
+    from providers.email import EmailError, send_message
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(
+            None,
+            lambda: send_message(
+                destination_ref=email,
+                template_name="quota_exceeded",
+                correlation_id=event_id,
+            ),
+        )
+        logger.info("quota_notification_sent event_id=%s to=%s", event_id, email)
+    except (EmailError, RuntimeError, Exception):
+        logger.warning(
+            "quota_notification_send_failed event_id=%s to=%s",
+            event_id, email, exc_info=True,
+        )
+
+
 async def check_quota(
     conn,
     tenant_id: str,
@@ -189,16 +210,24 @@ async def _record_and_notify(
             )
             await conn.commit()
 
-        # Structured notification log — real delivery hooks into the
-        # G9 notification adapter in Phase 3b (email_smtp / whatsapp).
-        logger.warning(
+        # Deduplicate by email address across all recipient groups
+        seen: set[str] = set()
+        recipients: list[str] = []
+        for email, _ in [*jl_admins, *tenant_admins, *msp_admins]:
+            if email and email not in seen:
+                seen.add(email)
+                recipients.append(email)
+
+        logger.info(
             "quota_exceeded_notification_dispatched "
-            "event_id=%s tenant=%s quota_key=%s current=%d limit=%d "
-            "jl_admins=%r tenant_admins=%r msp_admins=%r",
-            event_id, tenant_id, quota_key, current_count, limit,
-            [r[0] for r in jl_admins],
-            [r[0] for r in tenant_admins],
-            [r[0] for r in msp_admins],
+            "event_id=%s tenant=%s quota_key=%s current=%d limit=%d recipients=%d",
+            event_id, tenant_id, quota_key, current_count, limit, len(recipients),
+        )
+
+        # Send email to each unique recipient — best-effort, errors are logged
+        await asyncio.gather(
+            *(_send_quota_email(email, event_id) for email in recipients),
+            return_exceptions=True,
         )
 
     except Exception:  # noqa: BLE001
