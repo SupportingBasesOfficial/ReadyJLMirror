@@ -12,7 +12,7 @@ import {
   MessageSquare, PhoneCall, Users, UserPlus, KeyRound,
   ScrollText, BookOpen, ChevronLeft, ChevronRight,
   ChevronDown, LogOut, Building2, ShieldCheck, Network, Radio, CalendarClock,
-  LayoutGrid, Globe, Bug, TrendingUp, GitCompare, ToggleLeft, Gauge, ShieldAlert, FileText, HardDrive, ArrowLeftRight, Terminal, Hash, PackageCheck, Package,
+  LayoutGrid, Globe, Bug, TrendingUp, GitCompare, GitBranch, ToggleLeft, Gauge, ShieldAlert, FileText, HardDrive, ArrowLeftRight, Terminal, Hash, PackageCheck, Package,
 } from "lucide-react";
 import { api, logout } from "@/api/client";
 import { AlertsPage } from "@/pages/AlertsPage";
@@ -72,6 +72,7 @@ import { SqlConsolePage } from "@/pages/SqlConsolePage";
 import { ChatOpsPage } from "@/pages/ChatOpsPage";
 import { PatchesPage } from "@/pages/PatchesPage";
 import { AssetsPage } from "@/pages/AssetsPage";
+import { WorkflowsPage } from "@/pages/WorkflowsPage";
 import { ClientPortalPage } from "@/pages/ClientPortalPage";
 import { HelpDeskPage } from "@/pages/HelpDeskPage";
 import { BillingPage } from "@/pages/BillingPage";
@@ -142,6 +143,7 @@ const VIEW_TO_PATH: Record<string, string> = {
   chatops: "/chatops",
   patches: "/patches",
   assets: "/assets",
+  workflows: "/workflows",
 };
 
 const PATH_TO_VIEW = Object.fromEntries(
@@ -837,6 +839,7 @@ export function Shell() {
         { id: "data_transfer" as View, label: t("nav.data_transfer", "Transferência de Dados"), icon: ArrowLeftRight, description: "Export, import e templates CSV/XLSX/JSON" },
         { id: "patches" as View, label: t("nav.patches", "Patches"), icon: PackageCheck, description: "Gestão de patches: scan, aprovação, instalação" },
         { id: "assets" as View, label: t("nav.assets", "Ativos"), icon: Package, description: "Inventário de hardware, software e licenças" },
+        { id: "workflows" as View, label: t("nav.workflows", "Workflows"), icon: GitBranch, description: "Fluxos sequenciais com aprovação por etapa" },
         { id: "status_page" as View, label: t("nav.status_page"), icon: Globe, description: "Status público do tenant" },
       ],
     },
@@ -1329,6 +1332,7 @@ export function Shell() {
           {view === "chatops" && <ChatOpsPage tenantId={s.tenant_id!} />}
           {view === "patches" && <PatchesPage tenantId={s.tenant_id!} />}
           {view === "assets" && <AssetsPage tenantId={s.tenant_id!} />}
+          {view === "workflows" && <WorkflowsPage tenantId={s.tenant_id!} />}
           {view === "client-portal" && <ClientPortalPage />}
           </div>
           </div>
