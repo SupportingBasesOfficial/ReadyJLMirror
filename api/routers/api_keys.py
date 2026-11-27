@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
 from shared import access
+from shared import quota as quota_enforcement
 from shared.db import db_connection, db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/api-keys", tags=["api-keys"])
@@ -95,6 +96,14 @@ async def create_api_key(request: Request, body: ApiKeyCreate) -> dict:
     digest = _digest(raw)
 
     async with db_tenant_connection(tenant) as conn:
+        cur_count = await conn.execute(
+            "SELECT COUNT(*) FROM g1.api_keys WHERE tenant_id = %s AND state = 'active'",
+            (tenant,),
+        )
+        key_count = (await cur_count.fetchone())[0]
+        await quota_enforcement.check_quota(
+            conn, tenant, "max_api_keys", key_count
+        )
         await conn.execute(f"SET LOCAL ROLE {_APP_ROLE}")
         try:
             cur = await conn.execute(

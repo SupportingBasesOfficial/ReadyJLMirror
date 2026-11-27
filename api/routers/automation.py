@@ -13,6 +13,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from shared import access
+from shared import quota as quota_enforcement
 from shared.db import db_connection, db_tenant_connection
 from shared.ssh_crypto import encrypt_key
 from shared.ssrf import validate_outbound_url
@@ -148,6 +149,14 @@ async def create_script(request: Request, body: CreateScript) -> dict:
     principal_id = (getattr(request.state, "jlmirror_context", None) or {}).get("principal_id")
     script_id = f"auto:{uuid.uuid4()}"
     async with db_tenant_connection(tenant_id) as conn:
+        cur_count = await conn.execute(
+            "SELECT COUNT(*) FROM g1.automation_script WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        script_count = (await cur_count.fetchone())[0]
+        await quota_enforcement.check_quota(
+            conn, tenant_id, "max_automation_rules", script_count
+        )
         await conn.execute(
             """
             INSERT INTO g1.automation_script

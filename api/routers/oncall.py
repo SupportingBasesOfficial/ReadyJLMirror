@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
 from api.routers.monitoring import _authoritative_tenant
+from shared import quota as quota_enforcement
 from shared.db import db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/oncall", tags=["oncall"])
@@ -90,6 +91,14 @@ async def create_schedule(request: Request, body: ScheduleCreate,
         raise HTTPException(status_code=422, detail="name required")
     schedule_id = f"oncall_{secrets.token_urlsafe(10)}"
     async with db_tenant_connection(tenant) as conn:
+        cur_count = await conn.execute(
+            "SELECT COUNT(*) FROM g1.oncall_schedule WHERE tenant_id = %s",
+            (tenant,),
+        )
+        schedule_count = (await cur_count.fetchone())[0]
+        await quota_enforcement.check_quota(
+            conn, tenant, "max_oncall_schedules", schedule_count
+        )
         try:
             cur = await conn.execute(
                 """

@@ -12,6 +12,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from shared import access
+from shared import quota as quota_enforcement
 from shared.db import db_connection, db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
@@ -90,6 +91,14 @@ async def create_template(request: Request, body: CreateTemplate) -> dict:
 
     template_id = f"rpt:{uuid.uuid4()}"
     async with db_tenant_connection(tenant_id) as conn:
+        cur_count = await conn.execute(
+            "SELECT COUNT(*) FROM g1.report_template WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        template_count = (await cur_count.fetchone())[0]
+        await quota_enforcement.check_quota(
+            conn, tenant_id, "max_reports", template_count
+        )
         await conn.execute(
             """
             INSERT INTO g1.report_template
