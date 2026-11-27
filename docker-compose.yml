@@ -74,6 +74,7 @@ services:
       KC_HOSTNAME_STRICT: "false"
     volumes:
       - ./docker/keycloak:/opt/keycloak/data/import:ro
+      - ./keycloak-theme/argos:/opt/keycloak/themes/argos:ro
     ports:
       - "8180:8080"
     healthcheck:

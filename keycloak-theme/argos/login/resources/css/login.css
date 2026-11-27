@@ -1,0 +1,307 @@
+/* ── Argos / JL Informática — Keycloak Login Theme ─────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300..700&display=swap');
+
+:root {
+  --bg:        #07100E;
+  --surface:   #0F1C19;
+  --surface-2: #162621;
+  --border:    #1E302C;
+  --border-2:  #263D38;
+  --text:      #E8EDEB;
+  --text-muted:#7A9490;
+  --text-dim:  #4D6660;
+  --brand:     #1BA898;
+  --brand-h:   #17937F;
+  --danger:    #F87171;
+  --danger-bg: #250E0E;
+  --radius:    10px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Page layout ─────────────────────────────────────────────────────────── */
+.kc-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Grid */
+.kc-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  opacity: 0.025;
+  background-image:
+    linear-gradient(#1BA898 1px, transparent 1px),
+    linear-gradient(90deg, #1BA898 1px, transparent 1px);
+  background-size: 44px 44px;
+  pointer-events: none;
+}
+
+/* Glow */
+.kc-page::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse 60% 70% at 50% 40%, rgba(27,168,152,0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* ── Card ────────────────────────────────────────────────────────────────── */
+.kc-card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 40px 36px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
+
+/* ── Logo ────────────────────────────────────────────────────────────────── */
+#kc-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 36px;
+  justify-content: center;
+}
+
+#kc-logo-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+}
+
+.kc-logo-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+.kc-logo-text span:first-child {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--brand);
+  letter-spacing: -0.3px;
+}
+.kc-logo-text span:last-child {
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.12em;
+  margin-top: 3px;
+  text-transform: uppercase;
+}
+
+/* ── Title ───────────────────────────────────────────────────────────────── */
+#kc-page-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+/* ── Alerts ──────────────────────────────────────────────────────────────── */
+.alert {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.alert-error  { background: var(--danger-bg); border: 1px solid #3D1414; color: var(--danger); }
+.alert-warning { background: #261C0A; border: 1px solid #3D2D0E; color: #FBBF24; }
+.alert-success { background: #0C2518; border: 1px solid #163A22; color: #4ADE80; }
+.alert-info    { background: #0D1A2E; border: 1px solid #162540; color: #60A5FA; }
+
+/* ── Form ────────────────────────────────────────────────────────────────── */
+.form-group { margin-bottom: 16px; }
+
+label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"] {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  -webkit-appearance: none;
+  appearance: none;
+}
+input[type="text"]::placeholder,
+input[type="email"]::placeholder,
+input[type="password"]::placeholder { color: var(--text-dim); }
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(27,168,152,0.15);
+}
+
+/* Password toggle */
+.pf-v5-c-input-group {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+.pf-v5-c-input-group input { flex: 1; border-radius: var(--radius) 0 0 var(--radius); }
+.pf-v5-c-input-group .pf-v5-c-button {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 0 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+.pf-v5-c-input-group .pf-v5-c-button:hover { color: var(--text-muted); }
+
+/* Remember me */
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.checkbox label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  cursor: pointer;
+}
+input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+/* Forgot password */
+a#kc-forgot-password {
+  font-size: 12px;
+  color: var(--brand);
+  text-decoration: none;
+}
+a#kc-forgot-password:hover { text-decoration: underline; }
+
+/* ── Submit ──────────────────────────────────────────────────────────────── */
+#kc-login {
+  width: 100%;
+  background: var(--brand);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  padding: 11px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+  letter-spacing: -0.01em;
+  margin-top: 4px;
+}
+#kc-login:hover { background: var(--brand-h); }
+#kc-login:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* ── Social providers ───────────────────────────────────────────────────── */
+#social-providers-section h5 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 24px 0 16px;
+}
+#social-providers-section h5::before,
+#social-providers-section h5::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.social-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 13px;
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+  margin-bottom: 8px;
+}
+.social-link:hover {
+  border-color: var(--border-2);
+  background: #1A2E29;
+  color: var(--text);
+}
+
+/* ── Register ────────────────────────────────────────────────────────────── */
+#kc-registration {
+  text-align: center;
+  margin-top: 24px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+#kc-registration a { color: var(--brand); text-decoration: none; }
+#kc-registration a:hover { text-decoration: underline; }
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 99px; }
+
+@media (max-width: 460px) {
+  .kc-card { padding: 28px 20px; }
+}

@@ -4,6 +4,7 @@
   "displayNameHtml": "<span style='color:#1BA898;font-weight:700;'>Argos</span>",
   "enabled": true,
   "sslRequired": "external",
+  "loginTheme": "argos",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "clients": [
