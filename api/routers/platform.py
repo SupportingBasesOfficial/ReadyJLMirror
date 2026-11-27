@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import re as _re
 import secrets
+from datetime import datetime
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -1625,3 +1627,186 @@ async def remove_plan_quota(request: Request, plan_id: str,
             detail={"quota_key": quota_key})
         await conn.commit()
     return {"plan_id": plan_id, "quota_key": quota_key, "removed": True}
+
+
+# ── Cross-tenant audit log ────────────────────────────────────────────────────
+
+@router.get("/audit")
+async def platform_audit(
+    request: Request,
+    limit: int = 50,
+    tenant_id: str | None = None,
+    action: str | None = None,
+    actor_id: str | None = None,
+    since: str | None = None,
+) -> list[dict]:
+    await _require_platform_admin(request)
+    since_dt: datetime | None = None
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="since inválido (ISO 8601)")
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            "SELECT * FROM audit.list_all_events(%s, %s, %s, %s, %s)",
+            (min(limit, 500), tenant_id, action, actor_id, since_dt),
+        )
+        rows = await cur.fetchall()
+        cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, row)) for row in rows]
+
+
+# ── Quota health (per-tenant usage vs limits) ─────────────────────────────────
+
+@router.get("/quota-health")
+async def platform_quota_health(request: Request) -> list[dict]:
+    await _require_platform_admin(request)
+
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            """
+            SELECT
+                t.tenant_id,
+                t.display_name,
+                t.state,
+                c.plan_ref,
+                COALESCE(
+                    json_agg(
+                        json_build_object('key', pq.quota_key, 'limit', pq.quota_value)
+                    ) FILTER (WHERE pq.quota_key IS NOT NULL),
+                    '[]'::json
+                ) AS quotas
+            FROM g1.tenants t
+            LEFT JOIN g1.commercial_accounts ca
+                   ON ca.organization_id = t.organization_id
+            LEFT JOIN g1.contracts c
+                   ON c.account_id = ca.account_id
+                  AND c.state = 'active'
+            LEFT JOIN g1.plan_quotas pq
+                   ON pq.plan_id = c.plan_ref
+            WHERE t.state = 'active'
+            GROUP BY t.tenant_id, t.display_name, t.state, c.plan_ref
+            """,
+        )
+        rows = await cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        tenant_data = [dict(zip(cols, row)) for row in rows]
+
+        cur2 = await conn.execute(
+            """
+            SELECT tenant_id, COUNT(*) AS member_count
+              FROM g1.tenant_memberships
+             WHERE state = 'active'
+             GROUP BY tenant_id
+            """,
+        )
+        member_map = {r[0]: r[1] for r in await cur2.fetchall()}
+
+    async def _count_sources(tid: str) -> int:
+        try:
+            async with db_tenant_connection(tid) as tconn:
+                cur = await tconn.execute(
+                    "SELECT COUNT(*) FROM monitoring.monitoring_source WHERE tenant_id = %s",
+                    (tid,),
+                )
+                row = await cur.fetchone()
+                return int(row[0]) if row else 0
+        except Exception:  # noqa: BLE001
+            return 0
+
+    source_counts = await asyncio.gather(
+        *[_count_sources(t["tenant_id"]) for t in tenant_data]
+    )
+
+    return [
+        {
+            "tenant_id": td["tenant_id"],
+            "display_name": td["display_name"],
+            "state": td["state"],
+            "plan_ref": td["plan_ref"],
+            "quotas": td["quotas"] or [],
+            "member_count": member_map.get(td["tenant_id"], 0),
+            "source_count": source_counts[i],
+        }
+        for i, td in enumerate(tenant_data)
+    ]
+
+
+# ── Tenant suspend / restore ──────────────────────────────────────────────────
+
+class _TenantStateBody(BaseModel):
+    state: Literal["active", "suspended"]
+
+
+@router.patch("/tenants/{tenant_id}/state")
+async def set_tenant_state(
+    request: Request, tenant_id: str, body: _TenantStateBody
+) -> dict:
+    actor = await _require_platform_admin(request)
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            "UPDATE g1.tenants SET state = %s WHERE tenant_id = %s "
+            "RETURNING tenant_id, state",
+            (body.state, tenant_id),
+        )
+        row = await cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="tenant não encontrado")
+        await record_audit_event(
+            conn, "platform",
+            action="platform.tenant.state_changed",
+            actor_kind="platform_admin", actor_id=actor,
+            subject_type="tenant", subject_id=tenant_id,
+            detail={"new_state": body.state},
+        )
+        await conn.commit()
+    return {"tenant_id": row[0], "state": row[1]}
+
+
+# ── Billing overview (cross-tenant contracts) ─────────────────────────────────
+
+@router.get("/billing-overview")
+async def platform_billing_overview(request: Request) -> dict:
+    await _require_platform_admin(request)
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            """
+            SELECT
+                c.contract_id,
+                c.account_id,
+                c.plan_ref,
+                c.state,
+                c.effective_from,
+                c.effective_until,
+                o.display_name AS org_name,
+                CASE
+                    WHEN c.effective_until IS NULL THEN NULL
+                    ELSE EXTRACT(DAY FROM c.effective_until - now())::INTEGER
+                END AS days_remaining
+            FROM g1.contracts c
+            JOIN g1.commercial_accounts ca ON ca.account_id = c.account_id
+            JOIN g1.organizations o ON o.organization_id = ca.organization_id
+            ORDER BY c.effective_until ASC NULLS LAST
+            """,
+        )
+        rows = await cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        contracts = [dict(zip(cols, row)) for row in rows]
+
+    active = [c for c in contracts if c["state"] == "active"]
+    expiring_soon = [
+        c for c in active
+        if c["days_remaining"] is not None and 0 <= c["days_remaining"] <= 30
+    ]
+    expired_or_ended = [
+        c for c in contracts
+        if c["state"] in ("ended", "suspended")
+        or (c["days_remaining"] is not None and c["days_remaining"] < 0)
+    ]
+    return {
+        "total_active": len(active),
+        "expiring_soon": len(expiring_soon),
+        "expired_or_ended": len(expired_or_ended),
+        "contracts": contracts,
+    }

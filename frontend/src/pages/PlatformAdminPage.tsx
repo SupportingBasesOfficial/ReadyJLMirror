@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
-import { X, Plus, Building2, Server, FileText, Activity, Tv2, Network, Copy, Trash2, Users, GitMerge, KeyRound, ShieldOff, ShieldCheck, Search, Package, Eye, EyeOff, Archive, RotateCcw, Tag, Gauge } from "lucide-react";
+import { X, Plus, Building2, Server, FileText, Activity, Tv2, Network, Copy, Trash2, Users, GitMerge, KeyRound, ShieldOff, ShieldCheck, Search, Package, Eye, EyeOff, Archive, RotateCcw, Tag, Gauge, ClipboardList, BarChart3, CreditCard, PauseCircle, PlayCircle } from "lucide-react";
 import { InfoIcon } from "@/components/ui/tooltip";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -676,8 +676,11 @@ function CreateTenantModal({
 
 function TenantsTab() {
   const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { toast } = useToast();
   const [showCreate, setShowCreate] = useState(false);
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<{ tenantId: string; newState: "active" | "suspended" } | null>(null);
 
   const tenantsQ = useQuery({
     queryKey: ["platform-tenants"],
@@ -698,6 +701,20 @@ function TenantsTab() {
         `/api/v1/platform/principals?tenant_id=${selectedTenantId}`
       ),
     enabled: !!selectedTenantId,
+  });
+
+  const stateMutation = useMutation({
+    mutationFn: ({ tenantId, newState }: { tenantId: string; newState: "active" | "suspended" }) =>
+      api.patch(`/api/v1/platform/tenants/${tenantId}/state`, { state: newState }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["platform-tenants"] });
+      toast({ title: vars.newState === "suspended" ? "Tenant suspenso" : "Tenant reativado", variant: "success" });
+      setConfirmState(null);
+    },
+    onError: () => {
+      toast({ title: "Erro ao alterar estado do tenant", variant: "error" });
+      setConfirmState(null);
+    },
   });
 
   const tenants = tenantsQ.data ?? [];
@@ -781,18 +798,38 @@ function TenantsTab() {
       {selectedTenant && (
         <div className="border border-[var(--border)] rounded-xl p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold">{selectedTenant.display_name}</span>
-              <span className="ml-2 text-xs font-mono text-[var(--text-muted)]">
+              <span className="text-xs font-mono text-[var(--text-muted)]">
                 {selectedTenant.tenant_id}
               </span>
+              <Badge variant={stateVariant(selectedTenant.state)}>{selectedTenant.state}</Badge>
             </div>
-            <button
-              onClick={() => setSelectedTenantId(null)}
-              className="text-[var(--text-muted)] hover:text-[var(--text)]"
-            >
-              <X size={14} />
-            </button>
+            <div className="flex items-center gap-2">
+              {selectedTenant.state === "active" ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setConfirmState({ tenantId: selectedTenant.tenant_id, newState: "suspended" })}
+                >
+                  <PauseCircle size={12} /> Suspender
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setConfirmState({ tenantId: selectedTenant.tenant_id, newState: "active" })}
+                >
+                  <PlayCircle size={12} /> Reativar
+                </Button>
+              )}
+              <button
+                onClick={() => setSelectedTenantId(null)}
+                className="text-[var(--text-muted)] hover:text-[var(--text)]"
+              >
+                <X size={14} />
+              </button>
+            </div>
           </div>
           {tenantUsersQ.isLoading ? (
             <Spinner className="w-4 h-4" />
@@ -844,6 +881,21 @@ function TenantsTab() {
             {t("platformAdmin.tenants.noOrgWarning")}
           </p>
         </Modal>
+      )}
+
+      {confirmState && (
+        <ConfirmModal
+          title={confirmState.newState === "suspended" ? "Suspender tenant?" : "Reativar tenant?"}
+          description={
+            confirmState.newState === "suspended"
+              ? "O tenant ficará inacessível para seus usuários até ser reativado."
+              : "O tenant voltará a funcionar normalmente."
+          }
+          confirmLabel={confirmState.newState === "suspended" ? "Suspender" : "Reativar"}
+          onConfirm={() => stateMutation.mutate(confirmState)}
+          onCancel={() => setConfirmState(null)}
+          isPending={stateMutation.isPending}
+        />
       )}
     </Card>
   );
@@ -3111,9 +3163,340 @@ function TeiaTab() {
   );
 }
 
+// ── Audit Log Tab ─────────────────────────────────────────────────────────────
+
+interface AuditEvent {
+  audit_event_id: string;
+  tenant_id: string;
+  action: string;
+  actor_kind: string;
+  actor_id: string;
+  subject_type: string | null;
+  subject_id: string | null;
+  detail: Record<string, unknown> | null;
+  occurred_at: string;
+}
+
+function actorBadge(kind: string): "success" | "warning" | "danger" | "muted" {
+  if (kind === "platform_admin") return "warning";
+  if (kind === "principal") return "success";
+  if (kind === "system" || kind === "worker") return "muted";
+  return "muted";
+}
+
+function AuditTab() {
+  const { t } = useTranslation();
+  const [filterTenant, setFilterTenant] = useState("");
+  const [filterAction, setFilterAction] = useState("");
+  const [limit, setLimit] = useState(50);
+
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (filterTenant) params.set("tenant_id", filterTenant);
+  if (filterAction) params.set("action", filterAction);
+
+  const q = useQuery<AuditEvent[]>({
+    queryKey: ["platform-audit", filterTenant, filterAction, limit],
+    queryFn: () => api.get(`/api/v1/platform/audit?${params}`),
+    refetchInterval: 15_000,
+    retry: 1,
+  });
+
+  const events = q.data ?? [];
+
+  return (
+    <Card className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <CardHeader>
+          <span className="text-sm font-semibold">Audit Log</span>
+          <span className="text-xs text-[var(--text-muted)]">cross-tenant · atualiza a cada 15s</span>
+        </CardHeader>
+        {q.isFetching && <Spinner className="w-3 h-3" />}
+      </div>
+
+      <div className="flex gap-2 flex-wrap">
+        <input
+          className="border border-[var(--border)] rounded-lg px-2 py-1 text-xs bg-[var(--surface)] w-48"
+          placeholder="tenant_id"
+          value={filterTenant}
+          onChange={(e) => setFilterTenant(e.target.value.trim())}
+        />
+        <input
+          className="border border-[var(--border)] rounded-lg px-2 py-1 text-xs bg-[var(--surface)] w-48"
+          placeholder="action (ex: quota.exceeded)"
+          value={filterAction}
+          onChange={(e) => setFilterAction(e.target.value.trim())}
+        />
+        <select
+          className="border border-[var(--border)] rounded-lg px-2 py-1 text-xs bg-[var(--surface)]"
+          value={limit}
+          onChange={(e) => setLimit(Number(e.target.value))}
+        >
+          {[25, 50, 100, 200].map((n) => (
+            <option key={n} value={n}>{n} eventos</option>
+          ))}
+        </select>
+      </div>
+
+      {q.isLoading ? (
+        <div className="flex justify-center py-6"><Spinner /></div>
+      ) : q.isError ? (
+        <p className="text-xs text-[var(--red)]">Erro ao carregar audit log</p>
+      ) : events.length === 0 ? (
+        <p className="text-xs text-[var(--text-muted)]">Nenhum evento encontrado.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs min-w-[700px]">
+            <thead>
+              <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
+                <th className="text-left px-2 py-1.5 font-medium">Quando</th>
+                <th className="text-left px-2 py-1.5 font-medium">Tenant</th>
+                <th className="text-left px-2 py-1.5 font-medium">Ação</th>
+                <th className="text-left px-2 py-1.5 font-medium">Actor</th>
+                <th className="text-left px-2 py-1.5 font-medium">Sujeito</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((ev) => (
+                <tr key={ev.audit_event_id} className="border-b border-[var(--border)] hover:bg-[var(--surface-2)]">
+                  <td className="px-2 py-1.5 text-[var(--text-muted)] whitespace-nowrap">
+                    {new Date(ev.occurred_at).toLocaleString(i18n.language)}
+                  </td>
+                  <td className="px-2 py-1.5 font-mono text-[var(--text-muted)]" title={ev.tenant_id}>
+                    {truncate(ev.tenant_id, 10)}
+                  </td>
+                  <td className="px-2 py-1.5 font-mono" style={{ color: "var(--text)" }}>{ev.action}</td>
+                  <td className="px-2 py-1.5">
+                    <Badge variant={actorBadge(ev.actor_kind)}>{ev.actor_kind}</Badge>
+                    <span className="ml-1 text-[var(--text-muted)] font-mono">{truncate(ev.actor_id, 10)}</span>
+                  </td>
+                  <td className="px-2 py-1.5 text-[var(--text-muted)]">
+                    {ev.subject_type ? `${ev.subject_type}:${truncate(ev.subject_id ?? "", 8)}` : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ── Quota Health Tab ──────────────────────────────────────────────────────────
+
+interface QuotaItem { key: string; limit: number }
+interface TenantHealth {
+  tenant_id: string;
+  display_name: string | null;
+  state: string;
+  plan_ref: string | null;
+  quotas: QuotaItem[];
+  member_count: number;
+  source_count: number;
+}
+
+function quotaUsage(key: string, health: TenantHealth): number {
+  if (key === "max_members") return health.member_count;
+  if (key === "max_monitoring_sources") return health.source_count;
+  return 0;
+}
+
+function QuotaHealthTab() {
+  const q = useQuery<TenantHealth[]>({
+    queryKey: ["platform-quota-health"],
+    queryFn: () => api.get("/api/v1/platform/quota-health"),
+    refetchInterval: 30_000,
+    retry: 1,
+  });
+
+  const tenants = q.data ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold">Quota Health</span>
+        <span className="text-xs text-[var(--text-muted)]">por tenant · atualiza a cada 30s</span>
+        {q.isFetching && <Spinner className="w-3 h-3" />}
+      </div>
+
+      {q.isLoading ? (
+        <div className="flex justify-center py-6"><Spinner /></div>
+      ) : q.isError ? (
+        <p className="text-xs text-[var(--red)]">Erro ao carregar quota health</p>
+      ) : tenants.length === 0 ? (
+        <p className="text-xs text-[var(--text-muted)]">Nenhum tenant ativo.</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {tenants.map((th) => (
+            <Card key={th.tenant_id} className="flex flex-col gap-3 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <span className="text-xs font-semibold">{th.display_name || th.tenant_id}</span>
+                  <div className="text-[10px] text-[var(--text-muted)] font-mono">{truncate(th.tenant_id, 12)}</div>
+                </div>
+                <Badge variant={stateVariant(th.state)}>{th.state}</Badge>
+              </div>
+
+              {th.plan_ref && (
+                <div className="flex items-center gap-1">
+                  <Tag size={10} style={{ color: "var(--text-muted)" }} />
+                  <span className="text-[10px] text-[var(--text-muted)]">{th.plan_ref}</span>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <QuotaBar label="Membros" used={th.member_count} limit={
+                  th.quotas.find(q => q.key === "max_members")?.limit ?? -1
+                } />
+                <QuotaBar label="Sources" used={th.source_count} limit={
+                  th.quotas.find(q => q.key === "max_monitoring_sources")?.limit ?? -1
+                } />
+                {th.quotas
+                  .filter(q => q.key !== "max_members" && q.key !== "max_monitoring_sources")
+                  .map((q) => (
+                    <QuotaBar key={q.key} label={q.key} used={quotaUsage(q.key, th)} limit={q.limit} />
+                  ))}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuotaBar({ label, used, limit }: { label: string; used: number; limit: number }) {
+  const unlimited = limit === -1;
+  const pct = unlimited ? 0 : Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));
+  const color = pct >= 90 ? "var(--red)" : pct >= 70 ? "var(--amber)" : "var(--brand)";
+
+  return (
+    <div className="space-y-0.5">
+      <div className="flex justify-between text-[10px]">
+        <span className="text-[var(--text-muted)]">{label}</span>
+        <span style={{ color: unlimited ? "var(--text-muted)" : color }}>
+          {used}{unlimited ? " / ∞" : ` / ${limit}`}
+        </span>
+      </div>
+      {!unlimited && (
+        <div className="h-1.5 bg-[var(--surface-2)] rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all"
+            style={{ width: `${pct}%`, background: color }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Billing Overview Tab ──────────────────────────────────────────────────────
+
+interface BillingContract {
+  contract_id: string;
+  account_id: string;
+  plan_ref: string | null;
+  state: string;
+  effective_from: string | null;
+  effective_until: string | null;
+  org_name: string | null;
+  days_remaining: number | null;
+}
+
+interface BillingOverview {
+  total_active: number;
+  expiring_soon: number;
+  expired_or_ended: number;
+  contracts: BillingContract[];
+}
+
+function daysBadge(days: number | null, state: string): "success" | "warning" | "danger" | "muted" {
+  if (state === "ended" || state === "suspended") return "danger";
+  if (days === null) return "muted";
+  if (days <= 7) return "danger";
+  if (days <= 30) return "warning";
+  return "success";
+}
+
+function BillingTab() {
+  const q = useQuery<BillingOverview>({
+    queryKey: ["platform-billing"],
+    queryFn: () => api.get("/api/v1/platform/billing-overview"),
+    retry: 1,
+  });
+
+  const data = q.data;
+  const contracts = data?.contracts ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold">Billing Overview</span>
+        {q.isFetching && <Spinner className="w-3 h-3" />}
+      </div>
+
+      {q.isLoading ? (
+        <div className="flex justify-center py-6"><Spinner /></div>
+      ) : q.isError ? (
+        <p className="text-xs text-[var(--red)]">Erro ao carregar billing</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: "Ativos", value: data?.total_active ?? 0, variant: "success" as const },
+              { label: "Expiram em 30 dias", value: data?.expiring_soon ?? 0, variant: "warning" as const },
+              { label: "Encerrados", value: data?.expired_or_ended ?? 0, variant: "danger" as const },
+            ].map((stat) => (
+              <Card key={stat.label} className="p-3 text-center">
+                <div className="text-2xl font-bold" style={{ color: `var(--${stat.variant === "success" ? "green" : stat.variant === "warning" ? "amber" : "red"})` }}>
+                  {stat.value}
+                </div>
+                <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{stat.label}</div>
+              </Card>
+            ))}
+          </div>
+
+          <Card className="overflow-x-auto">
+            <table className="w-full text-xs min-w-[640px]">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
+                  <th className="text-left px-3 py-2 font-medium">Organização</th>
+                  <th className="text-left px-3 py-2 font-medium">Plano</th>
+                  <th className="text-left px-3 py-2 font-medium">Estado</th>
+                  <th className="text-left px-3 py-2 font-medium">Vigência</th>
+                  <th className="text-left px-3 py-2 font-medium">Dias restantes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {contracts.map((c) => (
+                  <tr key={c.contract_id} className="border-b border-[var(--border)] hover:bg-[var(--surface-2)]">
+                    <td className="px-3 py-2 font-medium">{c.org_name || "—"}</td>
+                    <td className="px-3 py-2 font-mono text-[var(--text-muted)]">{c.plan_ref || "—"}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant={stateVariant(c.state)}>{c.state}</Badge>
+                    </td>
+                    <td className="px-3 py-2 text-[var(--text-muted)]">
+                      {fmt(c.effective_from)} → {c.effective_until ? fmt(c.effective_until) : "∞"}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Badge variant={daysBadge(c.days_remaining, c.state)}>
+                        {c.days_remaining === null ? "sem limite" : c.days_remaining < 0 ? "expirado" : `${c.days_remaining}d`}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────────
 
-type Tab = "orgs" | "tenants" | "plans" | "contracts" | "health" | "tv" | "teia" | "relationships" | "users";
+type Tab = "orgs" | "tenants" | "plans" | "contracts" | "health" | "tv" | "teia" | "relationships" | "users" | "audit" | "quota-health" | "billing";
 
 export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
   const { t } = useTranslation();
@@ -3130,6 +3513,9 @@ export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string })
     { id: "health", label: t("platformAdmin.tabs.health"), icon: <Activity size={14} /> },
     { id: "tv", label: t("platformAdmin.tabs.tv"), icon: <Tv2 size={14} /> },
     { id: "teia", label: t("platformAdmin.tabs.teia"), icon: <Network size={14} /> },
+    { id: "audit", label: "Audit Log", icon: <ClipboardList size={14} /> },
+    { id: "quota-health", label: "Quota Health", icon: <BarChart3 size={14} /> },
+    { id: "billing", label: "Billing", icon: <CreditCard size={14} /> },
   ];
 
   return (
@@ -3174,6 +3560,9 @@ export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string })
       {activeTab === "teia" && <TeiaTab />}
       {activeTab === "relationships" && <RelationshipsTab />}
       {activeTab === "users" && <UsersTab />}
+      {activeTab === "audit" && <AuditTab />}
+      {activeTab === "quota-health" && <QuotaHealthTab />}
+      {activeTab === "billing" && <BillingTab />}
 
       {showMSPWizard && <MSPOnboardingWizard onClose={() => setShowMSPWizard(false)} />}
     </div>
