@@ -16,6 +16,8 @@ interface Script {
   description: string;
   script_type: string;
   enabled: boolean;
+  approval_required: boolean;
+  approval_status: string;
   created_at: string;
 }
 
@@ -47,6 +49,20 @@ const OUTCOME_VARIANTS: Record<string, "muted" | "success" | "danger" | "warning
   success: "success",
   failed: "danger",
   skipped: "muted",
+};
+
+const APPROVAL_VARIANTS: Record<string, "muted" | "success" | "danger" | "warning"> = {
+  draft: "muted",
+  pending_approval: "warning",
+  approved: "success",
+  rejected: "danger",
+};
+
+const APPROVAL_LABELS: Record<string, string> = {
+  draft: "Rascunho",
+  pending_approval: "Aguardando",
+  approved: "Aprovado",
+  rejected: "Rejeitado",
 };
 
 function fmtTs(iso?: string) {
@@ -189,6 +205,8 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
   const [confirmDeleteScriptId, setConfirmDeleteScriptId] = useState<string | null>(null);
   const [confirmDeleteScheduleId, setConfirmDeleteScheduleId] = useState<string | null>(null);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [confirmRejectId, setConfirmRejectId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   const scripts = useQuery({
     queryKey: ["automation-scripts", tenantId],
@@ -246,6 +264,38 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
       toast("Run cancelado.", "success");
     },
     onError: () => { toast("Não foi possível cancelar — run já em execução ou concluído.", "error"); },
+  });
+
+  const submitMut = useMutation({
+    mutationFn: (script_id: string) =>
+      api.post(`/api/v1/automation/scripts/${script_id}/submit`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["automation-scripts", tenantId] });
+      toast("Script submetido para aprovação.", "success");
+    },
+    onError: () => toast("Erro ao submeter.", "error"),
+  });
+
+  const approveMut = useMutation({
+    mutationFn: (script_id: string) =>
+      api.post(`/api/v1/automation/scripts/${script_id}/approve`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["automation-scripts", tenantId] });
+      toast("Script aprovado.", "success");
+    },
+    onError: () => toast("Erro ao aprovar — requer tenant:admin.", "error"),
+  });
+
+  const rejectMut = useMutation({
+    mutationFn: ({ script_id, reason }: { script_id: string; reason: string }) =>
+      api.post(`/api/v1/automation/scripts/${script_id}/reject`, { reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["automation-scripts", tenantId] });
+      setConfirmRejectId(null);
+      setRejectReason("");
+      toast("Script rejeitado.", "success");
+    },
+    onError: () => toast("Erro ao rejeitar — requer tenant:admin.", "error"),
   });
 
   const tabs = [
@@ -312,6 +362,7 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
                   <th className="px-4 py-2.5 font-medium">{t("automation.colName")}</th>
                   <th className="px-4 py-2.5 font-medium">{t("automation.colType")}</th>
                   <th className="px-4 py-2.5 font-medium">{t("automation.colStatus")}</th>
+                  <th className="px-4 py-2.5 font-medium">Aprovação</th>
                   <th className="px-4 py-2.5 font-medium"></th>
                 </tr>
               </thead>
@@ -335,13 +386,45 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
                       </Badge>
                     </td>
                     <td className="px-4 py-2.5">
+                      {s.approval_required ? (
+                        <Badge variant={APPROVAL_VARIANTS[s.approval_status] ?? "muted"}>
+                          {APPROVAL_LABELS[s.approval_status] ?? s.approval_status}
+                        </Badge>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2">
-                        {canOperate && s.enabled && (
+                        {canOperate && s.enabled && (!s.approval_required || s.approval_status === "approved") && (
                           <Button size="sm" variant="secondary"
                             onClick={() => triggerMut.mutate(s.script_id)}
                             disabled={triggerMut.isPending}>
                             {t("automation.runNow")}
                           </Button>
+                        )}
+                        {s.approval_required && canOperate && (s.approval_status === "draft" || s.approval_status === "rejected") && (
+                          <button
+                            onClick={() => submitMut.mutate(s.script_id)}
+                            disabled={submitMut.isPending}
+                            className="text-[10px] text-[var(--brand)] hover:underline disabled:opacity-50">
+                            Submeter
+                          </button>
+                        )}
+                        {s.approval_required && canOperate && s.approval_status === "pending_approval" && (
+                          <>
+                            <button
+                              onClick={() => approveMut.mutate(s.script_id)}
+                              disabled={approveMut.isPending}
+                              className="text-[10px] text-[var(--green)] hover:underline disabled:opacity-50">
+                              Aprovar
+                            </button>
+                            <button
+                              onClick={() => { setConfirmRejectId(s.script_id); setRejectReason(""); }}
+                              className="text-[10px] text-[var(--red)] hover:underline">
+                              Rejeitar
+                            </button>
+                          </>
                         )}
                         {canOperate && (
                           <button
@@ -504,6 +587,20 @@ export function AutomationPage({ tenantId }: { tenantId: string }) {
           isPending={deleteScheduleMut.isPending}
           onConfirm={() => deleteScheduleMut.mutate(confirmDeleteScheduleId)}
           onCancel={() => setConfirmDeleteScheduleId(null)}
+        />
+      )}
+
+      {/* Reject script confirmation */}
+      {confirmRejectId && (
+        <ConfirmModal
+          title="Rejeitar script"
+          description="Confirmar rejeição do script? O status voltará para Rejeitado e o operador precisará resubmeter."
+          confirmLabel="Rejeitar"
+          cancelLabel="Cancelar"
+          destructive={true}
+          isPending={rejectMut.isPending}
+          onConfirm={() => rejectMut.mutate({ script_id: confirmRejectId, reason: rejectReason })}
+          onCancel={() => { setConfirmRejectId(null); setRejectReason(""); }}
         />
       )}
     </div>

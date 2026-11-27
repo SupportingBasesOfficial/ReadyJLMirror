@@ -55,6 +55,12 @@ class UpdateScript(BaseModel):
     script_type: Optional[str] = None
     config: Optional[dict] = None
     enabled: Optional[bool] = None
+    approval_required: Optional[bool] = None
+    change_note: Optional[str] = None
+
+
+class RejectBody(BaseModel):
+    reason: str = ""
 
 
 class CreateSchedule(BaseModel):
@@ -85,6 +91,20 @@ async def _require_operator(request: Request) -> str:
     return tenant_id
 
 
+async def _require_admin(request: Request) -> str:
+    """Require tenant:admin — approve/reject operations."""
+    ctx = getattr(request.state, "jlmirror_context", None) or {}
+    tenant_id = ctx.get("tenant_id")
+    principal_id = ctx.get("principal_id")
+    if not tenant_id or not principal_id:
+        raise HTTPException(status_code=403, detail="tenant context required")
+    async with db_connection() as conn:
+        perms = await access.effective_permissions(conn, principal_id, tenant_id)
+    if "tenant:admin" not in perms:
+        raise HTTPException(status_code=403, detail="tenant:admin permission required")
+    return tenant_id
+
+
 # ── Scripts ───────────────────────────────────────────────────────────────────
 
 @router.get("/scripts")
@@ -94,6 +114,7 @@ async def list_scripts(request: Request) -> list:
         rows = await conn.execute(
             """
             SELECT script_id, name, description, script_type, enabled,
+                   approval_required, approval_status,
                    created_at, updated_at
               FROM g1.automation_script
              WHERE tenant_id = %s
@@ -124,6 +145,7 @@ async def create_script(request: Request, body: CreateScript) -> dict:
     elif body.script_type == "ssh_command":
         _validate_ssh_config(body.config)
 
+    principal_id = (getattr(request.state, "jlmirror_context", None) or {}).get("principal_id")
     script_id = f"auto:{uuid.uuid4()}"
     async with db_tenant_connection(tenant_id) as conn:
         await conn.execute(
@@ -135,6 +157,16 @@ async def create_script(request: Request, body: CreateScript) -> dict:
             (script_id, tenant_id, name, body.description,
              body.script_type, json.dumps(body.config)),
         )
+        await conn.execute(
+            """
+            INSERT INTO g1.automation_script_version
+                (script_id, tenant_id, version_number, name, script_type,
+                 config, description, created_by)
+            VALUES (%s, %s, 1, %s, %s, %s, %s, %s)
+            """,
+            (script_id, tenant_id, name, body.script_type,
+             json.dumps(body.config), body.description, principal_id),
+        )
         await conn.commit()
     return {"script_id": script_id, "name": name, "script_type": body.script_type}
 
@@ -143,6 +175,8 @@ async def create_script(request: Request, body: CreateScript) -> dict:
 async def update_script(request: Request, script_id: str,
                         body: UpdateScript) -> dict:
     tenant_id = await _require_operator(request)
+    principal_id = (getattr(request.state, "jlmirror_context", None) or {}).get("principal_id")
+
     if body.script_type and body.script_type not in _VALID_TYPES:
         raise HTTPException(status_code=422,
                             detail=f"script_type must be one of {sorted(_VALID_TYPES)}")
@@ -157,16 +191,50 @@ async def update_script(request: Request, script_id: str,
         elif effective_type == "ssh_command":
             _validate_ssh_config(body.config)
 
+    content_changing = any(
+        getattr(body, f) is not None
+        for f in ("name", "description", "script_type", "config")
+    )
+
     async with db_tenant_connection(tenant_id) as conn:
-        row = await conn.execute(
-            "SELECT script_id FROM g1.automation_script "
-            "WHERE tenant_id=%s AND script_id=%s",
+        cur = await conn.execute(
+            """
+            SELECT name, description, script_type, config,
+                   approval_required, approval_status
+              FROM g1.automation_script
+             WHERE tenant_id=%s AND script_id=%s
+            """,
             (tenant_id, script_id),
         )
-        if await row.fetchone() is None:
+        existing = await cur.fetchone()
+        if existing is None:
             raise HTTPException(status_code=404, detail="script not found")
 
         sets, vals = [], []
+
+        if content_changing:
+            ver_cur = await conn.execute(
+                "SELECT COALESCE(MAX(version_number), 0) "
+                "FROM g1.automation_script_version WHERE script_id=%s",
+                (script_id,),
+            )
+            ver_row = await ver_cur.fetchone()
+            await conn.execute(
+                """
+                INSERT INTO g1.automation_script_version
+                    (script_id, tenant_id, version_number, name, script_type,
+                     config, description, change_note, created_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (script_id, tenant_id, ver_row[0] + 1,
+                 existing[0], existing[2], json.dumps(existing[3]),
+                 existing[1] or "", body.change_note, principal_id),
+            )
+            approval_req = body.approval_required if body.approval_required is not None else existing[4]
+            if approval_req:
+                sets += ["approval_status = 'draft'", "approved_by = NULL",
+                         "approved_at = NULL", "rejection_reason = NULL"]
+
         for field in ("name", "description", "script_type", "enabled"):
             v = getattr(body, field)
             if v is not None:
@@ -175,6 +243,10 @@ async def update_script(request: Request, script_id: str,
         if body.config is not None:
             sets.append("config = %s")
             vals.append(json.dumps(body.config))
+        if body.approval_required is not None:
+            sets.append("approval_required = %s")
+            vals.append(body.approval_required)
+
         if not sets:
             return {"script_id": script_id, "updated": False}
         sets.append("updated_at = now()")
@@ -196,7 +268,8 @@ async def trigger_script(request: Request, script_id: str) -> dict:
     tenant_id = await _require_operator(request)
     async with db_tenant_connection(tenant_id) as conn:
         row = await conn.execute(
-            "SELECT script_id, enabled FROM g1.automation_script "
+            "SELECT script_id, enabled, approval_required, approval_status "
+            "FROM g1.automation_script "
             "WHERE tenant_id=%s AND script_id=%s",
             (tenant_id, script_id),
         )
@@ -205,6 +278,9 @@ async def trigger_script(request: Request, script_id: str) -> dict:
             raise HTTPException(status_code=404, detail="script not found")
         if not r[1]:
             raise HTTPException(status_code=409, detail="script is disabled")
+        if r[2] and r[3] != "approved":
+            raise HTTPException(status_code=409,
+                                detail="script requires approval before execution")
 
         run_id = f"arun:{secrets.token_urlsafe(16)}"
         now = datetime.now(timezone.utc)
@@ -244,6 +320,97 @@ async def cancel_run(request: Request, run_id: str) -> dict:
             )
         await conn.commit()
     return {"run_id": run_id, "cancelled": True}
+
+
+# ── Approval flow ─────────────────────────────────────────────────────────────
+
+@router.post("/scripts/{script_id}/submit", status_code=200)
+async def submit_script(request: Request, script_id: str) -> dict:
+    """Submit for approval (draft/rejected → pending_approval)."""
+    tenant_id = await _require_operator(request)
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(
+            "UPDATE g1.automation_script "
+            "SET approval_status='pending_approval', updated_at=now() "
+            "WHERE tenant_id=%s AND script_id=%s "
+            "  AND approval_required=true "
+            "  AND approval_status IN ('draft', 'rejected') "
+            "RETURNING script_id",
+            (tenant_id, script_id),
+        )
+        if await cur.fetchone() is None:
+            raise HTTPException(status_code=409,
+                                detail="script not found, approval not required, or not in draft/rejected state")
+        await conn.commit()
+    return {"script_id": script_id, "approval_status": "pending_approval"}
+
+
+@router.post("/scripts/{script_id}/approve", status_code=200)
+async def approve_script(request: Request, script_id: str) -> dict:
+    """Approve a pending script. Requires tenant:admin."""
+    tenant_id = await _require_admin(request)
+    principal_id = (getattr(request.state, "jlmirror_context", None) or {}).get("principal_id")
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(
+            "UPDATE g1.automation_script "
+            "SET approval_status='approved', approved_by=%s, approved_at=now(), "
+            "    rejection_reason=NULL, updated_at=now() "
+            "WHERE tenant_id=%s AND script_id=%s "
+            "  AND approval_required=true AND approval_status='pending_approval' "
+            "RETURNING script_id",
+            (principal_id, tenant_id, script_id),
+        )
+        if await cur.fetchone() is None:
+            raise HTTPException(status_code=409,
+                                detail="script not found, approval not required, or not pending")
+        await conn.commit()
+    return {"script_id": script_id, "approval_status": "approved"}
+
+
+@router.post("/scripts/{script_id}/reject", status_code=200)
+async def reject_script(request: Request, script_id: str, body: RejectBody) -> dict:
+    """Reject a pending script. Requires tenant:admin."""
+    tenant_id = await _require_admin(request)
+    async with db_tenant_connection(tenant_id) as conn:
+        cur = await conn.execute(
+            "UPDATE g1.automation_script "
+            "SET approval_status='rejected', rejection_reason=%s, "
+            "    approved_by=NULL, approved_at=NULL, updated_at=now() "
+            "WHERE tenant_id=%s AND script_id=%s "
+            "  AND approval_required=true AND approval_status='pending_approval' "
+            "RETURNING script_id",
+            (body.reason or None, tenant_id, script_id),
+        )
+        if await cur.fetchone() is None:
+            raise HTTPException(status_code=409,
+                                detail="script not found, approval not required, or not pending")
+        await conn.commit()
+    return {"script_id": script_id, "approval_status": "rejected"}
+
+
+@router.get("/scripts/{script_id}/versions")
+async def list_versions(request: Request, script_id: str) -> list:
+    tenant_id = _require_tenant(request)
+    async with db_tenant_connection(tenant_id) as conn:
+        chk = await conn.execute(
+            "SELECT script_id FROM g1.automation_script "
+            "WHERE tenant_id=%s AND script_id=%s",
+            (tenant_id, script_id),
+        )
+        if await chk.fetchone() is None:
+            raise HTTPException(status_code=404, detail="script not found")
+        rows = await conn.execute(
+            """
+            SELECT id, version_number, name, script_type, description,
+                   change_note, created_by, created_at
+              FROM g1.automation_script_version
+             WHERE script_id = %s
+             ORDER BY version_number DESC
+            """,
+            (script_id,),
+        )
+        cols = [d[0] for d in rows.description]
+        return [dict(zip(cols, r)) for r in await rows.fetchall()]
 
 
 # ── Schedules ─────────────────────────────────────────────────────────────────
