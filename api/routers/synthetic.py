@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
 from api.routers.monitoring import _authoritative_tenant
+from shared import quota as quota_enforcement
 from shared.db import db_tenant_connection
 
 router = APIRouter(prefix="/api/v1/synthetic", tags=["synthetic"])
@@ -234,6 +235,14 @@ async def create_check(request: Request, body: CheckCreate,
 
     check_id = f"synchk_{secrets.token_urlsafe(10)}"
     async with db_tenant_connection(tenant) as conn:
+        cur_count = await conn.execute(
+            "SELECT COUNT(*) FROM monitoring.synthetic_check WHERE tenant_id = %s",
+            (tenant,),
+        )
+        check_count = (await cur_count.fetchone())[0]
+        await quota_enforcement.check_quota(
+            conn, tenant, "max_monitors", check_count
+        )
         try:
             cur = await conn.execute(
                 """
