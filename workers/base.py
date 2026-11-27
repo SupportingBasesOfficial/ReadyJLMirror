@@ -29,6 +29,27 @@ class ResilientWorker(ABC):
     def process_pending(self, conn: psycopg.Connection) -> int:
         """Process one batch. Return count of items handled."""
 
+    def _write_heartbeat(self, conn: psycopg.Connection, items: int) -> None:
+        try:
+            conn.execute(
+                """
+                INSERT INTO g1.worker_heartbeat
+                    (worker_name, last_seen_at, last_tick_items, started_at)
+                VALUES (%s, now(), %s, now())
+                ON CONFLICT (worker_name) DO UPDATE
+                    SET last_seen_at    = now(),
+                        last_tick_items = EXCLUDED.last_tick_items
+                """,
+                (self.name, items),
+            )
+            conn.commit()
+        except Exception:
+            logger.warning("%s: heartbeat write failed", self.name, exc_info=True)
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
     def run(self, poll_interval: int | None = None, once: bool = False) -> None:
         interval = poll_interval if poll_interval is not None else self.default_poll_interval
         backoff = interval
@@ -52,6 +73,7 @@ class ResilientWorker(ABC):
                     else:
                         if n:
                             logger.info("%s processed %s item(s)", self.name, n)
+                    self._write_heartbeat(conn, n)
                 backoff = interval  # connected ok; reset backoff
             except psycopg.OperationalError:
                 logger.exception(

@@ -802,7 +802,12 @@ async def list_usage(request: Request,
 
 @router.get("/health")
 async def platform_health(request: Request) -> dict:
-    """Lightweight liveness check for the platform admin dashboard."""
+    """Liveness check for the platform admin dashboard.
+
+    Returns DB counts plus worker heartbeats. A worker is considered
+    alive when last_seen_at is within 2× its expected poll interval
+    (hard-coded at 60s — conservative upper bound across all workers).
+    """
     await _require_platform_admin(request)
     async with db_connection() as conn:
         cur = await conn.execute(
@@ -817,11 +822,42 @@ async def platform_health(request: Request) -> dict:
             """
         )
         row = await cur.fetchone()
+
+        cur = await conn.execute(
+            """
+            SELECT
+                worker_name,
+                last_seen_at,
+                last_tick_items,
+                started_at,
+                extract(epoch FROM (now() - last_seen_at))::int AS seconds_ago,
+                (now() - last_seen_at) < interval '60 seconds'   AS alive
+            FROM g1.worker_heartbeat
+            ORDER BY worker_name
+            """
+        )
+        worker_rows = await cur.fetchall()
+
+    workers = [
+        {
+            "name": r[0],
+            "last_seen_at": r[1].isoformat(),
+            "last_tick_items": r[2],
+            "started_at": r[3].isoformat(),
+            "seconds_ago": r[4],
+            "alive": r[5],
+        }
+        for r in worker_rows
+    ]
+
+    all_alive = all(w["alive"] for w in workers) if workers else False
     return {
-        "status": "ok",
+        "status": "ok" if all_alive else "degraded",
         "active_tenants": int(row[0]),
         "active_organizations": int(row[1]),
         "active_principals": int(row[2]),
+        "workers": workers,
+        "workers_alive": all_alive,
     }
 
 
