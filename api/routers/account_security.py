@@ -414,6 +414,81 @@ async def get_recovery_codes_status(request: Request) -> dict:
     return {"remaining": row[0] if row else 0}
 
 
+# ── Avatar ────────────────────────────────────────────────────────────────────
+
+@router.get("/avatar")
+async def get_avatar(request: Request) -> dict:
+    from shared.db import db_connection  # noqa: PLC0415
+
+    ctx = _ctx(request)
+    principal_id = ctx["principal_id"]
+
+    async with db_connection() as conn:
+        cur = await conn.execute(
+            "SELECT avatar_data, avatar_content_type FROM g1.principals WHERE id = %s",
+            (principal_id,),
+        )
+        row = await cur.fetchone()
+
+    if not row or not row[0]:
+        return {"data_url": None}
+
+    return {"data_url": f"data:{row[1]};base64,{row[0]}"}
+
+
+class AvatarBody(BaseModel):
+    data: str          # base64-encoded image bytes
+    content_type: str  # e.g. "image/jpeg" or "image/png"
+
+
+@router.post("/avatar")
+async def set_avatar(body: AvatarBody, request: Request) -> dict:
+    from shared.db import db_connection  # noqa: PLC0415
+
+    ctx = _ctx(request)
+    principal_id = ctx["principal_id"]
+
+    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    if body.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Unsupported image type")
+
+    # ~150 KB base64 limit (150 * 1024 * 4/3 ≈ 204800 base64 chars)
+    if len(body.data) > 204_800:
+        raise HTTPException(status_code=400, detail="Image too large (max 150 KB)")
+
+    # Validate it's actually base64
+    try:
+        base64.b64decode(body.data, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 data")
+
+    async with db_connection() as conn:
+        await conn.execute(
+            "UPDATE g1.principals SET avatar_data = %s, avatar_content_type = %s WHERE id = %s",
+            (body.data, body.content_type, principal_id),
+        )
+        await conn.commit()
+
+    return {"ok": True}
+
+
+@router.delete("/avatar")
+async def delete_avatar(request: Request) -> dict:
+    from shared.db import db_connection  # noqa: PLC0415
+
+    ctx = _ctx(request)
+    principal_id = ctx["principal_id"]
+
+    async with db_connection() as conn:
+        await conn.execute(
+            "UPDATE g1.principals SET avatar_data = NULL, avatar_content_type = NULL WHERE id = %s",
+            (principal_id,),
+        )
+        await conn.commit()
+
+    return {"ok": True}
+
+
 # Public router — no authentication middleware, registered separately in main.py
 _public_mfa_router = APIRouter(tags=["mfa-public"])
 

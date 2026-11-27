@@ -216,6 +216,14 @@ export function Shell() {
   });
   const hasMSPClients = (mspData?.clients?.length ?? 0) > 0;
 
+  const { data: avatarData } = useQuery<{ data_url: string | null }>({
+    queryKey: ["my-avatar"],
+    queryFn: () => api.get<{ data_url: string | null }>("/api/v1/account/avatar"),
+    enabled: session?.state === "ready",
+    staleTime: 300_000,
+  });
+  const avatarUrl = avatarData?.data_url ?? null;
+
   const { data: activeAlertCount } = useQuery({
     queryKey: ["nav-badge-alerts", session?.tenant_id],
     queryFn: () => api.get<unknown[]>("/api/v1/alerting/alerts?lifecycle_state=active"),
@@ -1118,11 +1126,14 @@ export function Shell() {
             collapsed ? "justify-center" : "",
           ].join(" ")}>
             <div
-              className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold relative"
+              className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold relative overflow-hidden"
               style={{ background: "color-mix(in srgb, var(--brand) 20%, var(--surface-2))", color: "var(--brand)" }}
               title={s.is_platform_admin ? "Platform Admin" : undefined}
             >
-              {initials || "?"}
+              {avatarUrl
+                ? <img src={avatarUrl} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : (initials || "?")
+              }
               {s.is_platform_admin && (
                 <span style={{
                   position: "absolute", bottom: -2, right: -2,

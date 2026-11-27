@@ -14,6 +14,7 @@ import {
   Download,
   AlertTriangle,
   Bell,
+  UserCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +27,7 @@ interface Props {
   tenantId: string;
 }
 
-type Tab = "sessions" | "mfa" | "privacy" | "push";
+type Tab = "sessions" | "mfa" | "privacy" | "push" | "avatar";
 
 // ── API helpers ──────────────────────────────────────────────────────────────
 
@@ -614,6 +615,171 @@ function PushTab() {
   );
 }
 
+// ── Avatar ────────────────────────────────────────────────────────────────────
+
+function AvatarTab() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const { data: avatarData, isLoading } = useQuery<{ data_url: string | null }>({
+    queryKey: ["my-avatar"],
+    queryFn: () => apiFetch("/api/v1/account/avatar"),
+  });
+
+  const currentUrl = avatarData?.data_url ?? null;
+
+  const resizeToCanvas = (file: File): Promise<{ data: string; contentType: string }> =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const canvas = canvasRef.current!;
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext("2d")!;
+        ctx.clearRect(0, 0, 128, 128);
+        // cover crop
+        const ar = img.width / img.height;
+        let sx = 0, sy = 0, sw = img.width, sh = img.height;
+        if (ar > 1) { sx = (img.width - img.height) / 2; sw = img.height; }
+        else if (ar < 1) { sy = (img.height - img.width) / 2; sh = img.width; }
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, 128, 128);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+        const base64 = dataUrl.split(",")[1];
+        resolve({ data: base64, contentType: "image/jpeg" });
+      };
+      img.onerror = reject;
+      img.src = url;
+    });
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const { data, contentType } = await resizeToCanvas(file);
+      setPreview(`data:${contentType};base64,${data}`);
+    } catch {
+      toast({ title: t("accountSecurity.avatar.resizeError"), variant: "destructive" });
+    }
+    e.target.value = "";
+  };
+
+  const handleUpload = async () => {
+    if (!preview) return;
+    setUploading(true);
+    try {
+      const base64 = preview.split(",")[1];
+      await apiFetch("/api/v1/account/avatar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: base64, content_type: "image/jpeg" }),
+      });
+      qc.invalidateQueries({ queryKey: ["my-avatar"] });
+      setPreview(null);
+      toast({ title: t("accountSecurity.avatar.saved") });
+    } catch {
+      toast({ title: t("accountSecurity.avatar.saveError"), variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setUploading(true);
+    try {
+      await apiFetch("/api/v1/account/avatar", { method: "DELETE" });
+      qc.invalidateQueries({ queryKey: ["my-avatar"] });
+      toast({ title: t("accountSecurity.avatar.deleted") });
+    } catch {
+      toast({ title: t("accountSecurity.avatar.deleteError"), variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const displayUrl = preview ?? currentUrl;
+
+  return (
+    <div className="space-y-4">
+      <canvas ref={canvasRef} style={{ display: "none" }} />
+      <div className="flex flex-col items-center gap-4">
+        <div
+          className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0"
+          style={{ background: "color-mix(in srgb, var(--brand) 15%, var(--surface-2))" }}
+        >
+          {isLoading ? (
+            <Spinner className="w-6 h-6" />
+          ) : displayUrl ? (
+            <img src={displayUrl} alt="avatar" className="w-full h-full object-cover" />
+          ) : (
+            <UserCircle size={48} style={{ color: "var(--text-muted)" }} />
+          )}
+        </div>
+        <div className="flex gap-2 flex-wrap justify-center">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+          />
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+            className="px-3 py-1.5 text-sm rounded-md border"
+            style={{ borderColor: "var(--border)", color: "var(--text)" }}
+          >
+            {t("accountSecurity.avatar.choose")}
+          </button>
+          {preview && (
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={handleUpload}
+              className="px-3 py-1.5 text-sm rounded-md text-white"
+              style={{ background: "var(--brand)" }}
+            >
+              {uploading ? <Spinner className="w-4 h-4" /> : t("accountSecurity.avatar.save")}
+            </button>
+          )}
+          {preview && (
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={() => setPreview(null)}
+              className="px-3 py-1.5 text-sm rounded-md border"
+              style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
+            >
+              {t("accountSecurity.avatar.cancel")}
+            </button>
+          )}
+          {!preview && currentUrl && (
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={handleDelete}
+              className="px-3 py-1.5 text-sm rounded-md text-red-600 border border-red-300"
+            >
+              <Trash2 size={14} className="inline mr-1" />
+              {t("accountSecurity.avatar.remove")}
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-center" style={{ color: "var(--text-muted)" }}>
+          {t("accountSecurity.avatar.hint")}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 const TABS: { id: Tab; labelKey: string }[] = [
@@ -621,6 +787,7 @@ const TABS: { id: Tab; labelKey: string }[] = [
   { id: "mfa", labelKey: "accountSecurity.tabs.mfa" },
   { id: "privacy", labelKey: "accountSecurity.tabs.privacy" },
   { id: "push", labelKey: "accountSecurity.tabs.push" },
+  { id: "avatar", labelKey: "accountSecurity.tabs.avatar" },
 ];
 
 export function AccountSecurityPage({ tenantId: _tenantId }: Props) {
@@ -660,6 +827,7 @@ export function AccountSecurityPage({ tenantId: _tenantId }: Props) {
       {tab === "mfa" && <MFATab />}
       {tab === "privacy" && <PrivacyTab />}
       {tab === "push" && <PushTab />}
+      {tab === "avatar" && <AvatarTab />}
     </div>
   );
 }
