@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
-import { X, Plus, Building2, Server, FileText, Activity, Tv2, Network, Copy, Trash2, Users, GitMerge, KeyRound, ShieldOff, ShieldCheck, Search, Package, Eye, EyeOff, Archive, RotateCcw, Tag, Gauge, ClipboardList, BarChart3, CreditCard, PauseCircle, PlayCircle } from "lucide-react";
+import { X, Plus, Building2, Server, FileText, Activity, Tv2, Network, Copy, Trash2, Users, GitMerge, KeyRound, ShieldOff, ShieldCheck, Search, Package, Eye, EyeOff, Archive, RotateCcw, Tag, Gauge, ClipboardList, BarChart3, CreditCard, PauseCircle, PlayCircle, ShoppingBag, ToggleLeft, ToggleRight, Edit2 } from "lucide-react";
 import { InfoIcon } from "@/components/ui/tooltip";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -3494,9 +3494,238 @@ function BillingTab() {
   );
 }
 
+// ── Marketplace Catalog Tab ───────────────────────────────────────────────────
+
+interface CatalogIntegration {
+  integration_id: string;
+  name: string;
+  description: string;
+  category: string;
+  icon_emoji: string;
+  vendor: string;
+  website_url: string | null;
+  config_schema: Record<string, unknown>;
+  is_enabled: boolean;
+  created_at: string;
+}
+
+const MKT_CATEGORIES = ["monitoring", "alerting", "itsm", "chatops", "security", "automation", "storage", "other"];
+const MKT_CATEGORY_LABELS: Record<string, string> = {
+  monitoring: "Monitoramento", alerting: "Alertas", itsm: "ITSM",
+  chatops: "ChatOps", security: "Segurança", automation: "Automação",
+  storage: "Armazenamento", other: "Outros",
+};
+
+function MarketplaceCatalogTab() {
+  const qc = useQueryClient();
+  const { showToast } = useToast();
+  const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState<CatalogIntegration | null>(null);
+  const [form, setForm] = useState({
+    integration_id: "", name: "", description: "", category: "other",
+    icon_emoji: "🔌", vendor: "", website_url: "",
+  });
+
+  const { data: catalog = [], isLoading } = useQuery<CatalogIntegration[]>({
+    queryKey: ["admin-marketplace-catalog"],
+    queryFn: () => api.get<CatalogIntegration[]>("/api/v1/marketplace"),
+  });
+
+  const mutCreate = useMutation({
+    mutationFn: (body: typeof form) =>
+      api.post<CatalogIntegration>("/api/v1/marketplace/catalog", body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-marketplace-catalog"] });
+      setShowCreate(false);
+      setForm({ integration_id: "", name: "", description: "", category: "other", icon_emoji: "🔌", vendor: "", website_url: "" });
+      showToast("Integração criada", "success");
+    },
+    onError: (e: Error) => showToast(e.message ?? "Erro ao criar", "error"),
+  });
+
+  const mutPatch = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Partial<CatalogIntegration> }) =>
+      api.patch<CatalogIntegration>(`/api/v1/marketplace/catalog/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-marketplace-catalog"] });
+      setEditing(null);
+      showToast("Integração atualizada", "success");
+    },
+    onError: (e: Error) => showToast(e.message ?? "Erro ao atualizar", "error"),
+  });
+
+  const toggleEnabled = (item: CatalogIntegration) =>
+    mutPatch.mutate({ id: item.integration_id, body: { is_enabled: !item.is_enabled } });
+
+  const openEdit = (item: CatalogIntegration) => {
+    setEditing(item);
+    setForm({
+      integration_id: item.integration_id,
+      name: item.name,
+      description: item.description,
+      category: item.category,
+      icon_emoji: item.icon_emoji,
+      vendor: item.vendor,
+      website_url: item.website_url ?? "",
+    });
+  };
+
+  const handleSubmitCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    mutCreate.mutate(form);
+  };
+
+  const handleSubmitEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editing) return;
+    const { integration_id: _, ...rest } = form;
+    mutPatch.mutate({ id: editing.integration_id, body: rest });
+  };
+
+  const FormFields = () => (
+    <div className="grid gap-3">
+      {!editing && (
+        <div>
+          <label className="text-xs text-[var(--text-muted)] block mb-1">ID (imutável)</label>
+          <input value={form.integration_id} onChange={(e) => setForm((f) => ({ ...f, integration_id: e.target.value }))}
+            placeholder="int:slack" className="w-full text-xs rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5" required />
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-xs text-[var(--text-muted)] block mb-1">Nome</label>
+          <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            placeholder="Slack" className="w-full text-xs rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5" required />
+        </div>
+        <div>
+          <label className="text-xs text-[var(--text-muted)] block mb-1">Vendor</label>
+          <input value={form.vendor} onChange={(e) => setForm((f) => ({ ...f, vendor: e.target.value }))}
+            placeholder="Slack Inc." className="w-full text-xs rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5" />
+        </div>
+      </div>
+      <div>
+        <label className="text-xs text-[var(--text-muted)] block mb-1">Descrição</label>
+        <textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+          rows={2} placeholder="Envie alertas e notificações para canais Slack..."
+          className="w-full text-xs rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 resize-none" />
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <label className="text-xs text-[var(--text-muted)] block mb-1">Categoria</label>
+          <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+            className="w-full text-xs rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5">
+            {MKT_CATEGORIES.map((c) => <option key={c} value={c}>{MKT_CATEGORY_LABELS[c]}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-[var(--text-muted)] block mb-1">Emoji</label>
+          <input value={form.icon_emoji} onChange={(e) => setForm((f) => ({ ...f, icon_emoji: e.target.value }))}
+            placeholder="🔌" className="w-full text-xs rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5" />
+        </div>
+        <div>
+          <label className="text-xs text-[var(--text-muted)] block mb-1">Website</label>
+          <input value={form.website_url} onChange={(e) => setForm((f) => ({ ...f, website_url: e.target.value }))}
+            placeholder="https://..." type="url" className="w-full text-xs rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5" />
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-[var(--text-muted)]">
+          Catálogo global de integrações — {catalog.length} integrações, {catalog.filter((i) => i.is_enabled).length} habilitadas
+        </p>
+        <Button size="sm" onClick={() => { setShowCreate(true); setEditing(null); }}>
+          <Plus size={13} /> Nova integração
+        </Button>
+      </div>
+
+      {showCreate && !editing && (
+        <Card className="p-4">
+          <h4 className="text-xs font-semibold mb-3">Nova integração no catálogo</h4>
+          <form onSubmit={handleSubmitCreate} className="space-y-3">
+            <FormFields />
+            <div className="flex gap-2 justify-end">
+              <Button size="sm" variant="ghost" type="button" onClick={() => setShowCreate(false)}>Cancelar</Button>
+              <Button size="sm" type="submit" disabled={mutCreate.isPending}>
+                {mutCreate.isPending ? "Criando…" : "Criar"}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {editing && (
+        <Card className="p-4">
+          <h4 className="text-xs font-semibold mb-3">Editar: {editing.name}</h4>
+          <form onSubmit={handleSubmitEdit} className="space-y-3">
+            <FormFields />
+            <div className="flex gap-2 justify-end">
+              <Button size="sm" variant="ghost" type="button" onClick={() => setEditing(null)}>Cancelar</Button>
+              <Button size="sm" type="submit" disabled={mutPatch.isPending}>
+                {mutPatch.isPending ? "Salvando…" : "Salvar"}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {isLoading ? (
+        <div className="text-xs text-[var(--text-muted)]">Carregando…</div>
+      ) : (
+        <div className="rounded-md border border-[var(--border)] overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-[var(--surface-raised)]">
+              <tr>
+                <th className="text-left px-3 py-2 font-medium text-[var(--text-muted)]">Integração</th>
+                <th className="text-left px-3 py-2 font-medium text-[var(--text-muted)]">Categoria</th>
+                <th className="text-left px-3 py-2 font-medium text-[var(--text-muted)]">Vendor</th>
+                <th className="text-left px-3 py-2 font-medium text-[var(--text-muted)]">ID</th>
+                <th className="text-center px-3 py-2 font-medium text-[var(--text-muted)]">Status</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]">
+              {catalog.map((item) => (
+                <tr key={item.integration_id} className="hover:bg-[var(--surface-hover)]">
+                  <td className="px-3 py-2 flex items-center gap-2">
+                    <span className="text-base">{item.icon_emoji}</span>
+                    <div>
+                      <div className="font-medium text-[var(--text)]">{item.name}</div>
+                      <div className="text-[10px] text-[var(--text-muted)] max-w-[200px] truncate">{item.description}</div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-[var(--text-muted)]">{MKT_CATEGORY_LABELS[item.category] ?? item.category}</td>
+                  <td className="px-3 py-2 text-[var(--text-muted)]">{item.vendor || "—"}</td>
+                  <td className="px-3 py-2 font-mono text-[10px] text-[var(--text-muted)]">{item.integration_id}</td>
+                  <td className="px-3 py-2 text-center">
+                    <button onClick={() => toggleEnabled(item)} title={item.is_enabled ? "Desabilitar" : "Habilitar"}
+                      className="text-[var(--text-muted)] hover:text-[var(--brand)] transition-colors">
+                      {item.is_enabled
+                        ? <ToggleRight size={18} className="text-green-500" />
+                        : <ToggleLeft size={18} className="text-gray-400" />}
+                    </button>
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <button onClick={() => openEdit(item)} className="text-[var(--text-muted)] hover:text-[var(--brand)] transition-colors">
+                      <Edit2 size={13} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────────
 
-type Tab = "orgs" | "tenants" | "plans" | "contracts" | "health" | "tv" | "teia" | "relationships" | "users" | "audit" | "quota-health" | "billing";
+type Tab = "orgs" | "tenants" | "plans" | "contracts" | "health" | "tv" | "teia" | "relationships" | "users" | "audit" | "quota-health" | "billing" | "marketplace";
 
 export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
   const { t } = useTranslation();
@@ -3516,6 +3745,7 @@ export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string })
     { id: "audit", label: "Audit Log", icon: <ClipboardList size={14} /> },
     { id: "quota-health", label: "Quota Health", icon: <BarChart3 size={14} /> },
     { id: "billing", label: "Billing", icon: <CreditCard size={14} /> },
+    { id: "marketplace", label: "Marketplace", icon: <ShoppingBag size={14} /> },
   ];
 
   return (
@@ -3563,6 +3793,7 @@ export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string })
       {activeTab === "audit" && <AuditTab />}
       {activeTab === "quota-health" && <QuotaHealthTab />}
       {activeTab === "billing" && <BillingTab />}
+      {activeTab === "marketplace" && <MarketplaceCatalogTab />}
 
       {showMSPWizard && <MSPOnboardingWizard onClose={() => setShowMSPWizard(false)} />}
     </div>
