@@ -3725,12 +3725,30 @@ function MarketplaceCatalogTab() {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
-type Tab = "orgs" | "tenants" | "plans" | "contracts" | "health" | "tv" | "teia" | "relationships" | "users" | "audit" | "quota-health" | "billing" | "marketplace";
+export type PlatformAdminTab = "orgs" | "tenants" | "plans" | "contracts" | "health" | "tv" | "teia" | "relationships" | "users" | "audit" | "quota-health" | "billing" | "marketplace";
 
-export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string }) {
+type Tab = PlatformAdminTab;
+
+interface PlatformAdminPageProps {
+  tenantId: string;
+  /** Quando fornecido, o componente opera em modo controlado (sem tabs próprias) */
+  activeTab?: Tab;
+  /** Callback para o shell externo pedir abertura do wizard MSP */
+  onOpenMSPWizard?: (open: boolean) => void;
+  /** Controlado externamente: se o wizard MSP está aberto */
+  mspWizardOpen?: boolean;
+}
+
+export function PlatformAdminPage({ tenantId: _tenantId, activeTab: externalTab, onOpenMSPWizard, mspWizardOpen }: PlatformAdminPageProps) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<Tab>("orgs");
-  const [showMSPWizard, setShowMSPWizard] = useState(false);
+  const [internalTab, setInternalTab] = useState<Tab>("orgs");
+  const [internalWizard, setInternalWizard] = useState(false);
+
+  const showMSPWizard = mspWizardOpen !== undefined ? mspWizardOpen : internalWizard;
+  const setShowMSPWizard = onOpenMSPWizard ?? setInternalWizard;
+
+  const controlled = externalTab !== undefined;
+  const activeTab = controlled ? externalTab : internalTab;
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: "orgs", label: t("platformAdmin.tabs.orgs"), icon: <Building2 size={14} /> },
@@ -3748,6 +3766,29 @@ export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string })
     { id: "marketplace", label: "Marketplace", icon: <ShoppingBag size={14} /> },
   ];
 
+  const panels = (
+    <>
+      {activeTab === "orgs" && <OrgsTab />}
+      {activeTab === "tenants" && <TenantsTab />}
+      {activeTab === "plans" && <PlansTab />}
+      {activeTab === "contracts" && <ContractsTab />}
+      {activeTab === "health" && <HealthTab />}
+      {activeTab === "tv" && <TVModeTab />}
+      {activeTab === "teia" && <TeiaTab />}
+      {activeTab === "relationships" && <RelationshipsTab />}
+      {activeTab === "users" && <UsersTab />}
+      {activeTab === "audit" && <AuditTab />}
+      {activeTab === "quota-health" && <QuotaHealthTab />}
+      {activeTab === "billing" && <BillingTab />}
+      {activeTab === "marketplace" && <MarketplaceCatalogTab />}
+      {showMSPWizard && <MSPOnboardingWizard onClose={() => setShowMSPWizard(false)} />}
+    </>
+  );
+
+  // Modo controlado: apenas renderiza o panel (o shell externo gerencia navegação)
+  if (controlled) return <div className="p-6">{panels}</div>;
+
+  // Modo standalone: inclui header + tabs próprias
   return (
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-4">
@@ -3766,7 +3807,7 @@ export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string })
         {TABS.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => setInternalTab(tab.id)}
             className={[
               "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap",
               "border-b-2 -mb-px transition-colors cursor-pointer",
@@ -3781,21 +3822,9 @@ export function PlatformAdminPage({ tenantId: _tenantId }: { tenantId: string })
         ))}
       </div>
 
-      {activeTab === "orgs" && <OrgsTab />}
-      {activeTab === "tenants" && <TenantsTab />}
-      {activeTab === "plans" && <PlansTab />}
-      {activeTab === "contracts" && <ContractsTab />}
-      {activeTab === "health" && <HealthTab />}
-      {activeTab === "tv" && <TVModeTab />}
-      {activeTab === "teia" && <TeiaTab />}
-      {activeTab === "relationships" && <RelationshipsTab />}
-      {activeTab === "users" && <UsersTab />}
-      {activeTab === "audit" && <AuditTab />}
-      {activeTab === "quota-health" && <QuotaHealthTab />}
-      {activeTab === "billing" && <BillingTab />}
-      {activeTab === "marketplace" && <MarketplaceCatalogTab />}
-
-      {showMSPWizard && <MSPOnboardingWizard onClose={() => setShowMSPWizard(false)} />}
+      {panels}
     </div>
   );
 }
+
+export { type Tab as _PlatformAdminTabInternal };
