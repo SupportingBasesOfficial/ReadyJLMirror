@@ -708,11 +708,11 @@ function TenantsTab() {
       api.patch(`/api/v1/platform/tenants/${tenantId}/state`, { state: newState }),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ["platform-tenants"] });
-      toast({ title: vars.newState === "suspended" ? "Tenant suspenso" : "Tenant reativado", variant: "success" });
+      toast(vars.newState === "suspended" ? "Tenant suspenso" : "Tenant reativado", "success");
       setConfirmState(null);
     },
     onError: () => {
-      toast({ title: "Erro ao alterar estado do tenant", variant: "error" });
+      toast("Erro ao alterar estado do tenant", "error");
       setConfirmState(null);
     },
   });
@@ -962,7 +962,7 @@ function PlanModal({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-plans"] });
-      toast({ title: isEdit ? t("plans.updatedToast") : t("plans.createdToast") });
+      toast(isEdit ? t("plans.updatedToast") : t("plans.createdToast"), "success");
       onClose();
     },
     onError: (e: Error) => setError(e.message),
@@ -1091,7 +1091,7 @@ function PlanModal({
             onClick={() => save.mutate()}
             disabled={save.isPending || !displayName.trim() || (!isEdit && !planId.trim())}
           >
-            {save.isPending ? <Spinner size={12} /> : (isEdit ? t("common.save") : t("common.create"))}
+            {save.isPending ? <Spinner className="w-3 h-3" /> : (isEdit ? t("common.save") : t("common.create"))}
           </Button>
         </div>
       </div>
@@ -1124,7 +1124,7 @@ function PlanDetail({
       qc.invalidateQueries({ queryKey: ["platform-plans"] });
       setNewCap("");
       setCapError(null);
-      toast({ title: t("plans.capAdded") });
+      toast(t("plans.capAdded"), "success");
     },
     onError: (e: Error) => setCapError(e.message),
   });
@@ -1134,7 +1134,7 @@ function PlanDetail({
       api.delete(`/api/v1/platform/plans/${plan.plan_id}/capabilities/${encodeURIComponent(cap)}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-plans"] });
-      toast({ title: t("plans.capRemoved") });
+      toast(t("plans.capRemoved"), "success");
     },
   });
 
@@ -1149,7 +1149,7 @@ function PlanDetail({
       setNewQuotaKey("");
       setNewQuotaVal("-1");
       setQuotaError(null);
-      toast({ title: t("plans.quotaSet") });
+      toast(t("plans.quotaSet"), "success");
     },
     onError: (e: Error) => setQuotaError(e.message),
   });
@@ -1159,7 +1159,7 @@ function PlanDetail({
       api.delete(`/api/v1/platform/plans/${plan.plan_id}/quotas/${encodeURIComponent(key)}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-plans"] });
-      toast({ title: t("plans.quotaRemoved") });
+      toast(t("plans.quotaRemoved"), "success");
     },
   });
 
@@ -1323,7 +1323,7 @@ function PlansTab() {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-plans"] });
-      toast({ title: t("plans.visibilityToggled") });
+      toast(t("plans.visibilityToggled"), "success");
     },
   });
 
@@ -1332,7 +1332,7 @@ function PlansTab() {
       api.post(`/api/v1/platform/plans/${plan.plan_id}/archive`),
     onSuccess: (_, plan) => {
       qc.invalidateQueries({ queryKey: ["platform-plans"] });
-      toast({ title: t("plans.archivedToast", { name: plan.display_name }) });
+      toast(t("plans.archivedToast", { name: plan.display_name }), "success");
     },
   });
 
@@ -1341,7 +1341,7 @@ function PlansTab() {
       api.post(`/api/v1/platform/plans/${plan.plan_id}/restore`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform-plans"] });
-      toast({ title: t("plans.restoredToast") });
+      toast(t("plans.restoredToast"), "success");
     },
   });
 
@@ -1370,10 +1370,10 @@ function PlansTab() {
               {plan.display_name}
             </span>
             {plan.state === "archived" && (
-              <Badge variant="secondary">{t("plans.archived")}</Badge>
+              <Badge variant="muted">{t("plans.archived")}</Badge>
             )}
             {plan.state === "active" && !plan.visible && (
-              <Badge variant="secondary">{t("plans.hidden")}</Badge>
+              <Badge variant="muted">{t("plans.hidden")}</Badge>
             )}
             {plan.active_contracts > 0 && (
               <Badge>
@@ -1477,7 +1477,7 @@ function PlansTab() {
         <div className="flex items-center gap-2">
           <Package size={14} />
           <span className="text-sm font-semibold">{t("plans.header")}</span>
-          <Badge variant="secondary">{active.length}</Badge>
+          <Badge variant="muted">{active.length}</Badge>
         </div>
         <Button size="sm" onClick={() => setShowCreate(true)}>
           <Plus size={13} /> {t("plans.createBtn")}
